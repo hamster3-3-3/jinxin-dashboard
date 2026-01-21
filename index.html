@@ -1,0 +1,1545 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>晉欣鮮食廠｜日報儀表板</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;600;700&display=swap" rel="stylesheet">
+
+  <!-- SheetJS -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.19.3/dist/xlsx.full.min.js"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    body { font-family: "Noto Sans TC", system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans"; background: #f8fafc; }
+    .seg-btn { border: 1px solid #e2e8f0; background: #fff; padding: .5rem .75rem; border-radius: 999px; font-weight: 600; color: #334155; }
+    .seg-btn.active { background: #2563eb; color: #fff; border-color: #1d4ed8; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 1rem; padding: 1rem; box-shadow: 0 1px 1px rgba(15,23,42,.04); }
+    .label { color:#64748b; font-weight:600; }
+    .val { color:#0f172a; font-weight:800; letter-spacing:.2px; }
+    .hint { color:#94a3b8; font-size:.85rem; }
+    .mono { font-variant-numeric: tabular-nums; }
+    .chip { display:inline-flex; gap:.4rem; align-items:center; padding:.25rem .6rem; border-radius: 999px; border:1px solid #e2e8f0; background:#fff; font-weight:700; color:#334155; }
+    .chip .dot { width:.55rem; height:.55rem; border-radius: 999px; background:#22c55e; }
+    .chip.warn .dot { background:#f59e0b; }
+    .chip.bad .dot { background:#ef4444; }
+    .table th { background:#f1f5f9; font-weight:700; color:#334155; }
+    .table td, .table th { border-bottom:1px solid #e2e8f0; padding:.55rem .6rem; vertical-align: top; }
+    .table { border:1px solid #e2e8f0; border-radius: 1rem; overflow:hidden; }
+    .select { background:#fff; border:1px solid #e2e8f0; border-radius: .75rem; padding:.55rem .7rem; font-weight:600; color:#0f172a; width:100%; }
+    .btn { border:1px solid #e2e8f0; background:#fff; border-radius:.75rem; padding:.55rem .8rem; font-weight:700; color:#0f172a; }
+    .btn.primary { background:#0ea5e9; border-color:#0284c7; color:#fff; }
+    .btn.danger { background:#fee2e2; border-color:#fecaca; color:#991b1b; }
+    .btn:disabled, .select:disabled { opacity:.55; cursor:not-allowed; }
+    .divider { height:1px; background:#e2e8f0; }
+    canvas { background:#fff; border:1px solid #e2e8f0; border-radius:1rem; }
+    .chartWrap { height: 260px; } /* 控制圖表高度，避免過大 */
+  </style>
+</head>
+
+<body class="min-h-screen">
+  <div class="max-w-7xl mx-auto p-5 md:p-8 space-y-6">
+    <!-- Header -->
+    <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
+      <div>
+        <div class="text-2xl md:text-3xl font-extrabold text-slate-900">晉欣鮮食廠｜日報儀表板</div>
+        <div class="text-slate-600 font-semibold mt-1">內建 2025/07～2025/11 自動載入；年/月/週/日彙總；溫層/線別/品類/品名下鑽</div>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <span id="dataChip" class="chip warn"><span class="dot"></span><span>尚未載入資料</span></span>
+        <button id="clearBtn" class="btn danger" disabled>清除資料</button>
+      </div>
+    </div>
+
+    <!-- Auto preload + optional import -->
+    <div class="card">
+      <div class="font-extrabold text-slate-900">資料來源</div>
+      <div class="hint mt-1">
+        本頁會自動載入下列 Excel（需與本 HTML 在同一路徑可被 fetch 讀取，例如 GitHub Pages）。不需手動匯入。
+        <span id="fileProtoHint" class="block mt-1 text-amber-600 font-bold"></span>
+      </div>
+
+      <ul class="mt-3 list-disc ml-5 text-slate-800 font-semibold" id="preloadList"></ul>
+
+      <details class="mt-4">
+        <summary class="cursor-pointer font-extrabold text-slate-900">進階：手動匯入追加（平常不需要）</summary>
+        <div class="mt-3">
+          <input id="fileInput" type="file" accept=".xlsx,.xls" multiple class="block w-full text-sm text-slate-700
+            file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0
+            file:text-sm file:font-bold file:bg-slate-900 file:text-white
+            hover:file:bg-slate-800">
+          <div class="hint mt-2">若你之後要更新月份資料，再用這裡追加匯入即可（會自動合併）。</div>
+        </div>
+      </details>
+    </div>
+
+    <!-- Controls -->
+    <div class="card">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <div class="label mb-2">範圍</div>
+          <div class="flex flex-wrap gap-2" role="group" aria-label="Range">
+            <button class="seg-btn active" data-range="year">年別</button>
+            <button class="seg-btn" data-range="month">月別</button>
+            <button class="seg-btn" data-range="week">週別</button>
+            <button class="seg-btn" data-range="day">日別</button>
+          </div>
+          <div class="hint mt-2">
+            年別＝12 個月「月平均」；月別＝每週平均；週別＝週一到週日；日別＝單日。
+          </div>
+        </div>
+
+        <div>
+          <div class="label mb-2">溫層</div>
+          <div class="flex flex-wrap gap-2" role="group" aria-label="Temp">
+            <button class="seg-btn active" data-temp="18">18°C</button>
+            <button class="seg-btn" data-temp="4">4°C</button>
+          </div>
+          <div class="hint mt-2">18°C 不顯示產能達成率（依你要求）。</div>
+        </div>
+
+        <div>
+          <div class="label mb-1">年份（目前內建為 2025）</div>
+          <input id="yearInput" type="number" min="2000" max="2100" value="2025" class="select" disabled />
+          <div class="hint mt-2">若未來擴充到其他年度，再開放此欄位。</div>
+        </div>
+      </div>
+
+      <div class="divider my-5"></div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div id="yearPanel">
+          <div class="label mb-1">年別：顯示 12 個月「月平均」</div>
+          <div class="hint">月平均＝該月日報值取「日平均」（生產量/營收/多次生產以日均顯示）。</div>
+        </div>
+
+        <div id="monthPanel" class="hidden">
+          <div class="label mb-1">月別：顯示「每週平均」（週一至週日）</div>
+          <select id="monthSelect" class="select mt-2"></select>
+        </div>
+
+        <div id="weekPanel" class="hidden">
+          <div class="label mb-1">週別：顯示週一至週日</div>
+          <select id="weekSelect" class="select mt-2"></select>
+        </div>
+
+        <div id="dayPanel" class="hidden">
+          <div class="label mb-1">日別：僅顯示單日</div>
+          <input id="daySelect" type="date" class="select mt-2" />
+        </div>
+
+        <div class="md:col-span-2">
+          <div class="label mb-2">目前顯示</div>
+          <div id="activeRangeText" class="font-extrabold text-slate-900 text-lg">—</div>
+          <div id="activeRangeHint" class="hint mt-1">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4">
+      <div class="card">
+        <div class="label">總生產量</div>
+        <div id="kpiQty" class="val text-2xl mono mt-1">—</div>
+        <div id="kpiHint" class="hint mt-1">—</div>
+      </div>
+      <div class="card">
+        <div class="label">營業額</div>
+        <div id="kpiRev" class="val text-2xl mono mt-1">—</div>
+        <div class="hint mt-1" id="kpiHint2">—</div>
+      </div>
+      <div class="card">
+        <div class="label">出勤人數</div>
+        <div id="kpiAtt" class="val text-2xl mono mt-1">—</div>
+        <div class="hint mt-1" id="kpiHint3">—</div>
+      </div>
+      <div class="card">
+        <div class="label">人時性</div>
+        <div id="kpiEff" class="val text-2xl mono mt-1">—</div>
+        <div class="hint mt-1" id="kpiHint4">—</div>
+      </div>
+      <div class="card">
+        <div class="label">平均廠價</div>
+        <div id="kpiPrice" class="val text-2xl mono mt-1">—</div>
+        <div class="hint mt-1" id="kpiHint5">—</div>
+      </div>
+      <div class="card">
+        <div class="label">多次生產數</div>
+        <div id="kpiMulti" class="val text-2xl mono mt-1">—</div>
+        <div class="hint mt-1" id="kpiHint6">—</div>
+      </div>
+    </div>
+
+    <!-- Trends (lazy render) -->
+    <div class="card">
+      <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+        <div>
+          <div class="font-extrabold text-slate-900">KPI 趨勢圖（延後生成，避免卡頓）</div>
+          <div class="hint mt-1">
+            只有在你按下「顯示趨勢圖」後才會建立圖表；更改條件後不會自動重繪，請按「更新趨勢圖」。
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2 items-end">
+          <div class="w-full sm:w-64">
+            <label class="label mb-1 block">圖表指標</label>
+            <select id="chartKpiSelect" class="select">
+              <option value="totalQty">總生產量</option>
+              <option value="revenue">營業額</option>
+              <option value="attendance">出勤人數</option>
+              <option value="efficiency">人時性</option>
+              <option value="avgPrice">平均廠價</option>
+              <option value="multi">多次生產數</option>
+            </select>
+          </div>
+          <button id="showChartBtn" class="btn primary">顯示趨勢圖</button>
+          <button id="updateChartBtn" class="btn" disabled>更新趨勢圖</button>
+        </div>
+      </div>
+
+      <div id="chartDirtyHint" class="hint mt-3 hidden text-amber-600 font-bold">條件已變更，請按「更新趨勢圖」。</div>
+
+      <div id="chartArea" class="mt-5 hidden">
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div>
+            <div class="label mb-2">月趨勢（12 個月｜月平均）</div>
+            <div class="chartWrap">
+              <canvas id="monthChart"></canvas>
+            </div>
+          </div>
+          <div>
+            <div id="weekChartTitle" class="label mb-2">週趨勢</div>
+            <div class="chartWrap">
+              <canvas id="weekChart"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Drilldown -->
+    <div class="card space-y-4">
+      <div class="font-extrabold text-slate-900">線別 / 品類 / 品名下鑽</div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div>
+          <label class="label block mb-2">線別（依日報實際出現）</label>
+          <select id="lineSelect" class="select" disabled></select>
+          <div class="hint mt-2">選擇線別後：顯示人時性達成率平均。4°C 另外顯示產能達成率平均；18°C 不顯示。</div>
+        </div>
+
+        <div class="lg:col-span-2">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="card">
+              <div class="label">人時性達成率平均</div>
+              <div id="lineHumanAvg" class="val text-2xl mono mt-1">—</div>
+              <div id="lineHumanHint" class="hint mt-1">—</div>
+            </div>
+            <div id="capCard" class="card">
+              <div class="label">產能達成率平均（4°C）</div>
+              <div id="lineCapAvg" class="val text-2xl mono mt-1">—</div>
+              <div id="lineCapHint" class="hint mt-1">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div>
+          <label class="label block mb-2">品類</label>
+          <select id="catSelect" class="select" disabled></select>
+        </div>
+        <div>
+          <label class="label block mb-2">品名</label>
+          <select id="prodSelect" class="select" disabled></select>
+        </div>
+        <div class="flex items-end">
+          <button id="resetDrillBtn" class="btn" disabled>清除下鑽選擇</button>
+        </div>
+      </div>
+
+      <div id="prodDetails" class="hidden">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-2">
+          <div class="card">
+            <div class="font-extrabold text-slate-900">營運指標</div>
+            <div class="mt-3 space-y-2 text-slate-800 font-semibold">
+              <div class="flex justify-between"><span>生產量</span><span id="pQty" class="mono">—</span></div>
+              <div class="flex justify-between"><span>營收</span><span id="pRev" class="mono">—</span></div>
+              <div class="flex justify-between"><span>多次生產</span><span id="pMulti" class="mono">—</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="font-extrabold text-slate-900">生產實績</div>
+            <div class="mt-3 space-y-2 text-slate-800 font-semibold">
+              <div class="flex justify-between"><span>人數</span><span id="pPeople" class="mono">—</span></div>
+              <div class="flex justify-between"><span>產能/時</span><span id="pCap" class="mono">—</span></div>
+              <div class="flex justify-between"><span>人時性</span><span id="pEff" class="mono">—</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="font-extrabold text-slate-900">日報登錄</div>
+            <div class="mt-3 space-y-2 text-slate-800 font-semibold">
+              <div class="flex justify-between"><span>生產時間</span><span id="pTime" class="mono">—</span></div>
+              <div class="flex justify-between"><span>換線/分</span><span id="pChange" class="mono">—</span></div>
+              <div class="flex justify-between"><span>稼動時間/分</span><span id="pRun" class="mono">—</span></div>
+              <div class="flex justify-between"><span>休息時間</span><span id="pBreak" class="mono">—</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-4">
+          <div class="font-extrabold text-slate-900 mb-2">日別明細</div>
+          <div class="table">
+            <table class="w-full text-sm">
+              <thead>
+                <tr>
+                  <th class="text-left">日期</th>
+                  <th class="text-left">生產量</th>
+                  <th class="text-left">營收</th>
+                  <th class="text-left">多次生產</th>
+                  <th class="text-left">人數</th>
+                  <th class="text-left">產能/時</th>
+                  <th class="text-left">人時性</th>
+                  <th class="text-left">生產時間</th>
+                  <th class="text-left">換線/分</th>
+                  <th class="text-left">稼動時間/分</th>
+                  <th class="text-left">休息時間</th>
+                </tr>
+              </thead>
+              <tbody id="prodTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="text-slate-500 text-sm">
+      備註：本工具以「日報」欄位直接彙總；線別為日報實際出現動態生成。趨勢圖採手動生成/更新以確保流暢度。
+    </div>
+  </div>
+
+<script>
+/* =========================
+   內建自動載入檔案（2025/07～2025/11）
+   你只要把這些 xlsx 檔與 HTML 放在同一路徑（GitHub Pages）即可
+   ※ 檔名必須「完全一致」且需包含 .xlsx 副檔名
+========================= */
+const PRELOAD_FILES = [
+  "114.07.01-31晉欣廠生產日報表.xlsx",
+  "114.08.01-31晉欣廠生產日報表.xlsx",
+  "114.09.01-13晉欣廠生產日報表.xlsx",
+  "114.10.01-27晉欣廠生產日報表.xlsx",
+  "114.11.01-30晉欣廠生產日報表.xlsx",
+];
+
+const $ = (id) => document.getElementById(id);
+
+function cleanText(v){
+  if(v === null || v === undefined) return "";
+  return String(v).replace(/\u00a0/g," ").replace(/\s+/g," ").trim();
+}
+function cleanKey(v){ return cleanText(v).replace(/\s+/g,""); }
+function toNumber(v){
+  if(typeof v === "number" && Number.isFinite(v)) return v;
+  if(v === null || v === undefined) return NaN;
+  const s = String(v).replace(/,/g,"").trim();
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+}
+function fmtInt(n){ if(!Number.isFinite(n)) return "—"; return Math.round(n).toLocaleString("zh-Hant-TW"); }
+function fmtMoney(n){ if(!Number.isFinite(n)) return "—"; return Math.round(n).toLocaleString("zh-Hant-TW"); }
+function fmtDec(n, d=2){ if(!Number.isFinite(n)) return "—"; return n.toFixed(d); }
+function fmtPct(n){ if(!Number.isFinite(n)) return "—"; return (n*100).toFixed(1) + "%"; }
+
+function fmtTime(v){
+  if(!v) return "—";
+  if(v instanceof Date){
+    const hh = String(v.getHours()).padStart(2,"0");
+    const mm = String(v.getMinutes()).padStart(2,"0");
+    return `${hh}:${mm}`;
+  }
+  const s = cleanText(v);
+  const m = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if(m) return String(m[1]).padStart(2,"0") + ":" + m[2];
+  return s;
+}
+function parseMmdd(name){
+  const m = String(name).match(/^\s*(\d{4})\s*$/);
+  return m ? m[1] : null;
+}
+function mmddToDateObj(year, mmdd){
+  const m = String(mmdd).match(/^(\d{2})(\d{2})$/);
+  if(!m) return null;
+  const month = Number(m[1]), day = Number(m[2]);
+  if(!(month>=1 && month<=12 && day>=1 && day<=31)) return null;
+  return new Date(Date.UTC(Number(year), month-1, day));
+}
+function dateObjToStr(d){
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth()+1).padStart(2,"0");
+  const dd = String(d.getUTCDate()).padStart(2,"0");
+  return `${y}-${m}-${dd}`;
+}
+function getWeekStartUTC(dateObj){
+  const d = new Date(dateObj.getTime());
+  const day = (d.getUTCDay() + 6) % 7; // Mon=0..Sun=6
+  d.setUTCDate(d.getUTCDate() - day);
+  d.setUTCHours(0,0,0,0);
+  return d;
+}
+function addDaysUTC(dateObj, days){
+  const d = new Date(dateObj.getTime());
+  d.setUTCDate(d.getUTCDate()+days);
+  return d;
+}
+function monthKeyFromDate(dateObj){
+  return `${dateObj.getUTCFullYear()}-${String(dateObj.getUTCMonth()+1).padStart(2,"0")}`;
+}
+function monthNumFromMmdd(mmdd){
+  const m = String(mmdd).match(/^(\d{2})\d{2}$/);
+  return m ? Number(m[1]) : null;
+}
+
+/* =========================
+   State
+========================= */
+const state = {
+  rangeMode: "year",
+  temp: "18",
+  year: 2025,
+  month: 7,
+  weekStartStr: "",
+  dayStr: "",
+  chartKpi: "totalQty",
+
+  summaries: new Map(),         // key temp|mmdd
+  records: new Map(),           // key temp|mmdd|line|cat|prod
+  lineHumanDaily: new Map(),    // key temp|mmdd|lineKey
+  lineAvgFromSheets: new Map(), // key temp|mmdd|lineKey
+
+  loadedFiles: [],
+  availableMmdd: new Set(),
+
+  chartsVisible: false,
+  chartsDirty: true,
+};
+
+function setDataChip(status, text){
+  const chip = $("dataChip");
+  chip.classList.remove("warn","bad");
+  if(status === "ok"){
+    chip.innerHTML = '<span class="dot"></span><span>'+text+'</span>';
+  }else if(status === "warn"){
+    chip.classList.add("warn");
+    chip.innerHTML = '<span class="dot"></span><span>'+text+'</span>';
+  }else{
+    chip.classList.add("bad");
+    chip.innerHTML = '<span class="dot"></span><span>'+text+'</span>';
+  }
+}
+function rebuildAvailableMmdd(){
+  state.availableMmdd = new Set();
+  for(const k of state.summaries.keys()){
+    const parts = k.split("|");
+    state.availableMmdd.add(parts[1]);
+  }
+}
+function getAllDatesForTemp(temp){
+  const out = [];
+  for(const mmdd of state.availableMmdd){
+    const d = mmddToDateObj(state.year, mmdd);
+    if(d) out.push({mmdd, dateObj:d, dateStr:dateObjToStr(d)});
+  }
+  out.sort((a,b)=>a.dateObj - b.dateObj);
+  return out;
+}
+
+function sheetToGrid(ws){
+  return XLSX.utils.sheet_to_json(ws, {header: 1, defval: null, raw: true});
+}
+function findCell(grid, predicate, maxR=200, maxC=60){
+  const R = Math.min(grid.length, maxR);
+  for(let r=0;r<R;r++){
+    const row = grid[r] || [];
+    const C = Math.min(row.length, maxC);
+    for(let c=0;c<C;c++){
+      const v = row[c];
+      if(predicate(v, r, c)) return {r, c, v};
+    }
+  }
+  return null;
+}
+function findLabelRightValue(grid, label){
+  const target = cleanText(label);
+  const hit = findCell(grid, (v)=>cleanText(v)===target, 25, 40);
+  if(!hit) return NaN;
+  const row = grid[hit.r] || [];
+  for(let c=hit.c+1; c<row.length && c<hit.c+10; c++){
+    const n = toNumber(row[c]);
+    if(Number.isFinite(n)) return n;
+  }
+  return NaN;
+}
+function findHeaderRowIndex(grid){
+  for(let r=0;r<Math.min(grid.length, 120); r++){
+    const row = grid[r] || [];
+    if(cleanText(row[0]) === "線別"){
+      const hasProd = row.some(v => cleanText(v).includes("品名"));
+      if(hasProd) return r;
+    }
+  }
+  return -1;
+}
+function indexOfHeaderContains(headerRow, token){
+  const t = cleanText(token);
+  for(let i=0;i<headerRow.length;i++){
+    if(cleanText(headerRow[i]).includes(t)) return i;
+  }
+  return -1;
+}
+function indexOfAllHeaderContains(headerRow, token){
+  const t = cleanText(token);
+  const out = [];
+  for(let i=0;i<headerRow.length;i++){
+    if(cleanText(headerRow[i]).includes(t)) out.push(i);
+  }
+  return out;
+}
+function upsert(map, key, value){ map.set(key, value); }
+
+function displayLineName(line){
+  let s = cleanText(line).replace(/\s+/g,"");
+  if(s.startsWith("二配") && !s.startsWith("二配 ")){ s = s.replace(/^二配/, "二配 "); }
+  return s;
+}
+
+/* =========================
+   Parse workbook buffer
+========================= */
+function parseTempSheet(wb, sheetName, temp, mmdd){
+  const ws = wb.Sheets[sheetName];
+  if(!ws) return;
+  const grid = sheetToGrid(ws);
+
+  // Summary
+  const totalQty = findLabelRightValue(grid, "總生產量");
+  const revenue = findLabelRightValue(grid, "營業額");
+  const attendance = findLabelRightValue(grid, "出勤人數");
+  const efficiency = findLabelRightValue(grid, "人時性");
+  const avgPrice = findLabelRightValue(grid, "平均廠價");
+  const multi = findLabelRightValue(grid, "多次生產數");
+  upsert(state.summaries, `${temp}|${mmdd}`, {mmdd,temp,totalQty,revenue,attendance,efficiency,avgPrice,multi});
+
+  const hr = findHeaderRowIndex(grid);
+  if(hr < 0) return;
+  const header = grid[hr] || [];
+
+  const idxLine = 0;
+  const idxCat = indexOfHeaderContains(header, "品類");
+  const idxProd = indexOfHeaderContains(header, "品名");
+  const idxQty = indexOfHeaderContains(header, "生產量");
+  const idxRev = indexOfHeaderContains(header, "營收");
+  const idxMulti = indexOfHeaderContains(header, "多次");
+  const idxPeopleList = indexOfAllHeaderContains(header, "人數");
+  const idxCapList = indexOfAllHeaderContains(header, "產能/時");
+  const idxEffList = indexOfAllHeaderContains(header, "人時性");
+  const idxPeople = (idxPeopleList.length>=2) ? idxPeopleList[1] : (idxPeopleList[0] ?? -1);
+  const idxCap = (idxCapList.length>=2) ? idxCapList[1] : (idxCapList[0] ?? -1);
+  const idxEff = (idxEffList.length>=2) ? idxEffList[1] : (idxEffList[0] ?? -1);
+
+  const idxProdTime = indexOfHeaderContains(header, "生產時間");
+  const idxChange = indexOfHeaderContains(header, "換線/分");
+  const idxRun = indexOfHeaderContains(header, "稼動時間/分");
+  const idxBreak = indexOfHeaderContains(header, "休息時間");
+
+  // 4°C capability achievement exists; 18°C ignore
+  const idxCapAch = (temp === "4") ? (() => {
+    const all = indexOfAllHeaderContains(header, "達成率");
+    return all.length ? all[all.length-1] : -1;
+  })() : -1;
+
+  let currentLine = "";
+  for(let r=hr+1; r<grid.length; r++){
+    const row = grid[r] || [];
+    const lineCell = cleanText(row[idxLine]);
+    if(lineCell) currentLine = displayLineName(lineCell);
+
+    const prod = (idxProd>=0) ? cleanText(row[idxProd]) : "";
+    if(!currentLine || !prod) continue;
+
+    const cat = (idxCat>=0) ? cleanText(row[idxCat]) : "";
+
+    const rec = {
+      mmdd, temp,
+      line: currentLine,
+      category: cat,
+      product: prod,
+      qty: toNumber(row[idxQty]),
+      revenue: toNumber(row[idxRev]),
+      multi: toNumber(row[idxMulti]),
+      people: (idxPeople>=0) ? toNumber(row[idxPeople]) : NaN,
+      cap: (idxCap>=0) ? toNumber(row[idxCap]) : NaN,
+      eff: (idxEff>=0) ? toNumber(row[idxEff]) : NaN,
+      prodStart: (idxProdTime>=0) ? row[idxProdTime] : null,
+      prodEnd: (idxProdTime>=0) ? row[idxProdTime+1] : null,
+      changeMin: (idxChange>=0) ? toNumber(row[idxChange]) : NaN,
+      runMin: (idxRun>=0) ? toNumber(row[idxRun]) : NaN,
+      breakStart: (idxBreak>=0) ? row[idxBreak] : null,
+      breakEnd: (idxBreak>=0) ? row[idxBreak+1] : null,
+      capAch: (idxCapAch>=0) ? toNumber(row[idxCapAch]) : NaN
+    };
+
+    const key = `${temp}|${mmdd}|${cleanKey(currentLine)}|${cleanKey(cat)}|${cleanKey(prod)}`;
+    upsert(state.records, key, rec);
+
+    // 4°C: average rows for line-level achievement averages
+    if(temp === "4" && prod.includes("平均")){
+      const lineName = cleanText(row[2]);
+      if(lineName){
+        const allAvg = indexOfAllHeaderContains(header, "達成率平均");
+        const humanAvgCol = allAvg.length ? allAvg[0] : -1;
+        const capAvgCol = allAvg.length ? allAvg[allAvg.length-1] : -1;
+        const lk = `${temp}|${mmdd}|${cleanKey(displayLineName(lineName))}`;
+        upsert(state.lineAvgFromSheets, lk, {
+          mmdd, temp, line: displayLineName(lineName),
+          humanAvg: (humanAvgCol>=0) ? toNumber(row[humanAvgCol]) : NaN,
+          capAvg: (capAvgCol>=0) ? toNumber(row[capAvgCol]) : NaN,
+        });
+      }
+    }
+  }
+}
+
+function parseDailySummarySheet(wb, sheetName, mmdd){
+  const ws = wb.Sheets[sheetName];
+  if(!ws) return;
+  const grid = sheetToGrid(ws);
+
+  function parseSection(markerText, temp, prefix=""){
+    const marker = findCell(grid, (v)=>cleanText(v)===markerText, 240, 40);
+    if(!marker) return;
+
+    let rGroup = -1;
+    for(let r=marker.r; r<Math.min(grid.length, marker.r+50); r++){
+      const row = grid[r] || [];
+      if(row.some(v => cleanText(v) === "編組")){ rGroup = r; break; }
+    }
+    if(rGroup < 0) return;
+
+    const namesRow = grid[rGroup+1] || [];
+
+    let rRate = -1;
+    for(let r=rGroup; r<Math.min(grid.length, rGroup+30); r++){
+      const row = grid[r] || [];
+      if(row.some(v => cleanText(v) === "達成率")){ rRate = r; break; }
+    }
+    if(rRate < 0) return;
+
+    let cStart = marker.c;
+    while(cStart < namesRow.length && !cleanText(namesRow[cStart])) cStart++;
+
+    for(let c=cStart; c<namesRow.length; c++){
+      const nm = cleanText(namesRow[c]);
+      if(!nm) break;
+      const lineName = prefix + nm.replace(/\s+/g,"");
+      const rate = toNumber((grid[rRate] || [])[c]);
+      const key = `${temp}|${mmdd}|${cleanKey(lineName)}`;
+      upsert(state.lineHumanDaily, key, {mmdd,temp,line: lineName, rate});
+    }
+  }
+
+  parseSection("➁4度C-各編組展開", "4", "");
+  parseSection("➂18度C 一配-各編組展開", "18", "");
+  parseSection("➃18度C 二配-各編組展開", "18", "二配 ");
+}
+
+async function parseWorkbookArrayBuffer(buf, filename){
+  const wb = XLSX.read(buf, {type:"array"});
+  state.loadedFiles.push(filename);
+
+  for(const sname of wb.SheetNames){
+    const mmdd = parseMmdd(sname);
+    if(mmdd){
+      parseDailySummarySheet(wb, sname, mmdd);
+      continue;
+    }
+    const t18 = String(sname).match(/晉欣\s*18度C\s*(\d{4})/);
+    const t4  = String(sname).match(/晉欣\s*4度C\s*(\d{4})/);
+    if(t18) parseTempSheet(wb, sname, "18", t18[1]);
+    if(t4)  parseTempSheet(wb, sname, "4",  t4[1]);
+  }
+}
+
+async function preload(){
+  // show list
+  $("preloadList").innerHTML = PRELOAD_FILES.map(f=>`<li>${f}</li>`).join("");
+
+  if(location.protocol === "file:"){
+    $("fileProtoHint").textContent = "你目前用 file:// 開啟，瀏覽器通常會擋自動載入（fetch）。請改用 GitHub Pages 或 local server。";
+  }
+
+  setDataChip("warn", "自動載入中…");
+
+  let ok = 0, fail = 0;
+  for(const f of PRELOAD_FILES){
+    try{
+      const res = await fetch(f, {cache:"no-store"});
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      const buf = await res.arrayBuffer();
+      await parseWorkbookArrayBuffer(buf, f);
+      ok++;
+    }catch(e){
+      console.warn("preload failed:", f, e);
+      fail++;
+    }
+  }
+
+  rebuildAvailableMmdd();
+  refreshSelectors();
+  refreshAll();
+
+  $("clearBtn").disabled = false;
+
+  if(ok > 0){
+    const days = state.availableMmdd.size;
+    setDataChip("ok", `已載入 ${ok} 份檔案｜共 ${days} 日` + (fail?`（${fail} 份載入失敗）`:""));
+  }else{
+    setDataChip("bad", "自動載入失敗：請確認 HTML 與 Excel 檔案是否在同一路徑可被讀取（建議 GitHub Pages）");
+  }
+}
+
+async function handleFiles(files){
+  if(!files || !files.length) return;
+  setDataChip("warn", "解析中…");
+  for(const file of Array.from(files)){
+    const buf = await file.arrayBuffer();
+    await parseWorkbookArrayBuffer(buf, file.name);
+  }
+  rebuildAvailableMmdd();
+  refreshSelectors();
+  refreshAll();
+  setDataChip("ok", `已合併載入｜檔案數 ${state.loadedFiles.length}｜日數 ${state.availableMmdd.size}`);
+}
+
+/* =========================
+   UI (selectors)
+========================= */
+function setActiveSeg(groupAttr, value){
+  document.querySelectorAll(`[data-${groupAttr}]`).forEach(btn=>{
+    btn.classList.toggle("active", btn.getAttribute(`data-${groupAttr}`) === value);
+  });
+}
+function togglePanels(){
+  $("yearPanel").classList.toggle("hidden", state.rangeMode !== "year");
+  $("monthPanel").classList.toggle("hidden", state.rangeMode !== "month");
+  $("weekPanel").classList.toggle("hidden", state.rangeMode !== "week");
+  $("dayPanel").classList.toggle("hidden", state.rangeMode !== "day");
+}
+function refreshSelectors(){
+  // monthSelect: 01..12
+  const monthSel = $("monthSelect");
+  monthSel.innerHTML = "";
+  const monthsWithData = new Set();
+  for(const mmdd of state.availableMmdd){
+    const m = monthNumFromMmdd(mmdd);
+    if(m) monthsWithData.add(m);
+  }
+  for(let m=1;m<=12;m++){
+    const opt = document.createElement("option");
+    opt.value = String(m);
+    opt.textContent = String(m).padStart(2,"0") + (monthsWithData.has(m) ? "" : "（無資料）");
+    monthSel.appendChild(opt);
+  }
+  if(!state.month) state.month = 7;
+  monthSel.value = String(state.month);
+
+  // weeks list
+  const weekSel = $("weekSelect");
+  weekSel.innerHTML = "";
+  const dates = getAllDatesForTemp(state.temp).map(o=>o.dateObj);
+  const weekMap = new Map();
+  for(const d of dates){
+    const ws = getWeekStartUTC(d);
+    const wsStr = dateObjToStr(ws);
+    if(!weekMap.has(wsStr)) weekMap.set(wsStr, {start: ws, end: addDaysUTC(ws,6)});
+  }
+  const weeks = Array.from(weekMap.values()).sort((a,b)=>a.start-b.start);
+  for(const w of weeks){
+    const opt = document.createElement("option");
+    opt.value = dateObjToStr(w.start);
+    opt.textContent = `${dateObjToStr(w.start)} ～ ${dateObjToStr(w.end)}`;
+    weekSel.appendChild(opt);
+  }
+  if(!state.weekStartStr && weeks.length) state.weekStartStr = dateObjToStr(weeks[0].start);
+  weekSel.value = state.weekStartStr || "";
+
+  // daySelect default earliest
+  const daySel = $("daySelect");
+  if(!state.dayStr && dates.length) state.dayStr = dateObjToStr(dates[0]);
+  daySel.value = state.dayStr || "";
+
+  // dynamic line select
+  const lineSel = $("lineSelect");
+  lineSel.innerHTML = "";
+  const lines = new Map();
+  for(const rec of state.records.values()){
+    if(rec.temp !== state.temp) continue;
+    lines.set(cleanKey(rec.line), rec.line);
+  }
+  for(const v of state.lineHumanDaily.values()){
+    if(v.temp !== state.temp) continue;
+    lines.set(cleanKey(v.line), v.line);
+  }
+  const arr = Array.from(lines.entries()).map(([k,v])=>[k, displayLineName(v)])
+    .sort((a,b)=>a[1].localeCompare(b[1],"zh-Hant"));
+  if(arr.length){
+    const opt0 = document.createElement("option");
+    opt0.value = "";
+    opt0.textContent = "請選擇線別";
+    lineSel.appendChild(opt0);
+    for(const [k, disp] of arr){
+      const opt = document.createElement("option");
+      opt.value = k;
+      opt.textContent = disp;
+      lineSel.appendChild(opt);
+    }
+    lineSel.disabled = false;
+  }else{
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "（無線別資料）";
+    lineSel.appendChild(opt);
+    lineSel.disabled = true;
+  }
+
+  // 18°C hide cap card
+  $("capCard").classList.toggle("hidden", state.temp !== "4");
+}
+
+function getSummaryForDay(temp, mmdd){
+  return state.summaries.get(`${temp}|${mmdd}`) || null;
+}
+function summariesInRange(){
+  const temp = state.temp;
+  const all = getAllDatesForTemp(temp);
+  if(!all.length) return [];
+
+  if(state.rangeMode === "year"){
+    return all.map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
+  }
+  if(state.rangeMode === "month"){
+    const m = state.month;
+    return all.filter(o => o.dateObj.getUTCMonth()+1 === m)
+              .map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
+  }
+  if(state.rangeMode === "week"){
+    if(!state.weekStartStr) return [];
+    const ws = new Date(state.weekStartStr + "T00:00:00Z");
+    const we = addDaysUTC(ws, 6);
+    return all.filter(o => o.dateObj >= ws && o.dateObj <= we)
+              .map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
+  }
+  // day
+  if(state.dayStr){
+    const dSel = new Date(state.dayStr + "T00:00:00Z");
+    const mmdd = String(dSel.getUTCMonth()+1).padStart(2,"0") + String(dSel.getUTCDate()).padStart(2,"0");
+    const s = getSummaryForDay(temp, mmdd);
+    return s ? [{mmdd, dateObj:dSel, dateStr: state.dayStr, summary:s}] : [];
+  }
+  return [];
+}
+
+/* KPI：
+   年：12個月「月平均」再取平均（只算有資料月份）
+   月：週平均（週內日平均）再取平均（只算有資料週）
+   週：週內日平均
+   日：單日
+*/
+function calcKpis(){
+  const list = summariesInRange();
+  const mode = state.rangeMode;
+
+  function kpiFromDays(days){
+    let qty=0, rev=0, multi=0, attSum=0, effSum=0, attCnt=0, effCnt=0;
+    for(const d of days){
+      const s = d.summary;
+      const q = toNumber(s.totalQty); if(Number.isFinite(q)) qty += q;
+      const r = toNumber(s.revenue); if(Number.isFinite(r)) rev += r;
+      const m = toNumber(s.multi); if(Number.isFinite(m)) multi += m;
+      const a = toNumber(s.attendance); if(Number.isFinite(a)){ attSum += a; attCnt++; }
+      const e = toNumber(s.efficiency); if(Number.isFinite(e)){ effSum += e; effCnt++; }
+    }
+    const att = attCnt ? (attSum/attCnt) : NaN;
+    const eff = effCnt ? (effSum/effCnt) : NaN;
+    const avgPrice = (qty>0 && rev>0) ? (rev/qty) : NaN;
+    return {qty, rev, multi, att, eff, avgPrice, days: days.length};
+  }
+
+  if(mode === "day"){
+    const d = list[0];
+    if(!d) return {qty:NaN, rev:NaN, multi:NaN, att:NaN, eff:NaN, avgPrice:NaN, hint:"無資料"};
+    const s = d.summary;
+    const qty = toNumber(s.totalQty), rev = toNumber(s.revenue), multi = toNumber(s.multi);
+    const att = toNumber(s.attendance), eff = toNumber(s.efficiency);
+    const avgPrice = (Number.isFinite(qty)&&qty>0&&Number.isFinite(rev)) ? (rev/qty) : toNumber(s.avgPrice);
+    return {qty, rev, multi, att, eff, avgPrice, hint:`單日（${d.dateStr}）`};
+  }
+
+  if(mode === "week"){
+    const base = kpiFromDays(list);
+    const days = Math.max(base.days, 1);
+    return { qty: base.qty/days, rev: base.rev/days, multi: base.multi/days, att: base.att, eff: base.eff, avgPrice: base.avgPrice,
+      hint:`週內日平均（${$("weekSelect").value || ""}）`
+    };
+  }
+
+  if(mode === "month"){
+    const byWeek = new Map();
+    for(const item of list){
+      const ws = getWeekStartUTC(item.dateObj);
+      const wsStr = dateObjToStr(ws);
+      if(!byWeek.has(wsStr)) byWeek.set(wsStr, []);
+      byWeek.get(wsStr).push(item);
+    }
+    const weeks = Array.from(byWeek.entries()).sort((a,b)=>a[0].localeCompare(b[0]));
+    const wk = weeks.map(([wsStr, items])=>{
+      const k = kpiFromDays(items);
+      const dn = Math.max(k.days, 1);
+      return { wsStr, qty:k.qty/dn, rev:k.rev/dn, multi:k.multi/dn, att:k.att, eff:k.eff, avgPrice:k.avgPrice };
+    });
+    if(!wk.length) return {qty:NaN, rev:NaN, multi:NaN, att:NaN, eff:NaN, avgPrice:NaN, hint:"無資料"};
+    const n = wk.length;
+    const avg = (key)=> wk.reduce((s,x)=> s + (Number.isFinite(x[key]) ? x[key] : 0), 0) / n;
+    return { qty: avg("qty"), rev: avg("rev"), multi: avg("multi"), att: avg("att"), eff: avg("eff"), avgPrice: avg("avgPrice"),
+      hint:`本月每週平均（週內日平均）再取平均（${String(state.month).padStart(2,"0")} 月｜有資料週：${n}）`
+    };
+  }
+
+  // year
+  const byMonth = new Map();
+  for(const item of list){
+    const mk = monthKeyFromDate(item.dateObj);
+    if(!byMonth.has(mk)) byMonth.set(mk, []);
+    byMonth.get(mk).push(item);
+  }
+  const months = [];
+  for(let m=1;m<=12;m++){
+    const mk = `${state.year}-${String(m).padStart(2,"0")}`;
+    const items = byMonth.get(mk) || [];
+    if(!items.length) continue;
+    const k = kpiFromDays(items);
+    const dn = Math.max(k.days, 1);
+    months.push({ m, qty:k.qty/dn, rev:k.rev/dn, multi:k.multi/dn, att:k.att, eff:k.eff, avgPrice:k.avgPrice });
+  }
+  if(!months.length) return {qty:NaN, rev:NaN, multi:NaN, att:NaN, eff:NaN, avgPrice:NaN, hint:"無資料"};
+  const n = months.length;
+  const avg = (key)=> months.reduce((s,x)=> s + (Number.isFinite(x[key]) ? x[key] : 0), 0) / n;
+  return { qty: avg("qty"), rev: avg("rev"), multi: avg("multi"), att: avg("att"), eff: avg("eff"), avgPrice: avg("avgPrice"),
+    hint:`年別：12 個月月平均再取平均（有資料月份：${n}）`
+  };
+}
+
+function refreshActiveRangeText(){
+  const tempLabel = (state.temp === "18") ? "18°C" : "4°C";
+  let title = "", hint = "";
+  if(state.rangeMode === "year"){
+    title = `${state.year} 年｜${tempLabel}`;
+    hint = "顯示：12 個月月平均（各月日平均），再取全年平均";
+  }else if(state.rangeMode === "month"){
+    title = `${state.year}-${String(state.month).padStart(2,"0")}｜${tempLabel}`;
+    hint = "顯示：本月每週平均（週一～週日，週內日平均），再取本月平均";
+  }else if(state.rangeMode === "week"){
+    const ws = state.weekStartStr ? new Date(state.weekStartStr+"T00:00:00Z") : null;
+    const we = ws ? addDaysUTC(ws,6) : null;
+    title = ws ? `${dateObjToStr(ws)} ～ ${dateObjToStr(we)}｜${tempLabel}` : `（未選週）｜${tempLabel}`;
+    hint = "顯示：週內日平均";
+  }else{
+    title = state.dayStr ? `${state.dayStr}｜${tempLabel}` : `（未選日）｜${tempLabel}`;
+    hint = "顯示：單日";
+  }
+  $("activeRangeText").textContent = title;
+  $("activeRangeHint").textContent = hint;
+}
+
+function refreshKpiCards(){
+  const k = calcKpis();
+  $("kpiQty").textContent = Number.isFinite(k.qty) ? fmtInt(k.qty) : "—";
+  $("kpiRev").textContent = Number.isFinite(k.rev) ? fmtMoney(k.rev) : "—";
+  $("kpiAtt").textContent = Number.isFinite(k.att) ? fmtDec(k.att, 2) : "—";
+  $("kpiEff").textContent = Number.isFinite(k.eff) ? fmtDec(k.eff, 2) : "—";
+  $("kpiPrice").textContent = Number.isFinite(k.avgPrice) ? fmtDec(k.avgPrice, 2) : "—";
+  $("kpiMulti").textContent = Number.isFinite(k.multi) ? fmtInt(k.multi) : "—";
+  $("kpiHint").textContent = k.hint || "—";
+  $("kpiHint2").textContent = k.hint || "—";
+  $("kpiHint3").textContent = k.hint || "—";
+  $("kpiHint4").textContent = k.hint || "—";
+  $("kpiHint5").textContent = k.hint || "—";
+  $("kpiHint6").textContent = k.hint || "—";
+}
+
+/* =========================
+   趨勢圖：延後生成 + 手動更新
+========================= */
+let monthChart = null;
+let weekChart = null;
+
+function kpiLabel(k){
+  return {
+    totalQty: "總生產量",
+    revenue: "營業額",
+    attendance: "出勤人數",
+    efficiency: "人時性",
+    avgPrice: "平均廠價",
+    multi: "多次生產數"
+  }[k] || k;
+}
+
+function buildMonthlySeries(){
+  const temp = state.temp;
+  const kpi = state.chartKpi;
+  const days = getAllDatesForTemp(temp).map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
+
+  const byM = new Map();
+  for(let m=1;m<=12;m++) byM.set(m, []);
+  for(const d of days){
+    const m = d.dateObj.getUTCMonth()+1;
+    byM.get(m).push(d);
+  }
+
+  const labels = [];
+  const values = [];
+  for(let m=1;m<=12;m++){
+    labels.push(String(m).padStart(2,"0"));
+    const items = byM.get(m) || [];
+    if(!items.length){ values.push(null); continue; }
+
+    let qty=0, rev=0, multi=0, attSum=0, effSum=0, attCnt=0, effCnt=0, dayCnt=0;
+    for(const it of items){
+      const s = it.summary;
+      const q = toNumber(s.totalQty); if(Number.isFinite(q)) qty += q;
+      const r = toNumber(s.revenue); if(Number.isFinite(r)) rev += r;
+      const mu = toNumber(s.multi); if(Number.isFinite(mu)) multi += mu;
+      const a = toNumber(s.attendance); if(Number.isFinite(a)){ attSum += a; attCnt++; }
+      const e = toNumber(s.efficiency); if(Number.isFinite(e)){ effSum += e; effCnt++; }
+      dayCnt++;
+    }
+    const dn = Math.max(dayCnt, 1);
+    const monthDailyAvg = {
+      totalQty: qty/dn,
+      revenue: rev/dn,
+      multi: multi/dn,
+      attendance: attCnt ? (attSum/attCnt) : null,
+      efficiency: effCnt ? (effSum/effCnt) : null,
+      avgPrice: (qty>0 && rev>0) ? (rev/qty) : null
+    };
+    values.push(monthDailyAvg[kpi] ?? null);
+  }
+  return {labels, values};
+}
+
+function buildWeeklyOrDailySeries(){
+  const temp = state.temp;
+  const kpi = state.chartKpi;
+  const mode = state.rangeMode;
+
+  const all = getAllDatesForTemp(temp).map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
+  if(!all.length) return {title:"週趨勢", labels:[], values:[]};
+
+  let title = "週趨勢";
+  let focus = all;
+
+  if(mode === "month"){
+    focus = all.filter(o => o.dateObj.getUTCMonth()+1 === state.month);
+    title = `週趨勢（${String(state.month).padStart(2,"0")} 月｜每週平均）`;
+  }else if(mode === "week"){
+    const ws = new Date(state.weekStartStr + "T00:00:00Z");
+    const we = addDaysUTC(ws,6);
+    focus = all.filter(o => o.dateObj >= ws && o.dateObj <= we);
+    title = `週內日別（${dateObjToStr(ws)}～${dateObjToStr(we)}）`;
+  }else if(mode === "day"){
+    const dSel = new Date(state.dayStr + "T00:00:00Z");
+    const m = dSel.getUTCMonth()+1;
+    focus = all.filter(o => o.dateObj.getUTCMonth()+1 === m);
+    title = `日別（${String(m).padStart(2,"0")} 月）`;
+  }else{
+    title = "週趨勢（全年｜每週平均）";
+  }
+
+  if(mode === "week"){
+    focus.sort((a,b)=>a.dateObj-b.dateObj);
+    const labels = focus.map(o => o.dateStr.slice(5));
+    const values = focus.map(o => {
+      const s=o.summary;
+      const q=toNumber(s.totalQty), r=toNumber(s.revenue), mu=toNumber(s.multi);
+      const a=toNumber(s.attendance), e=toNumber(s.efficiency);
+      const vMap = {
+        totalQty: q,
+        revenue: r,
+        multi: mu,
+        attendance: a,
+        efficiency: e,
+        avgPrice: (Number.isFinite(q)&&q>0&&Number.isFinite(r)) ? (r/q) : toNumber(s.avgPrice)
+      };
+      return Number.isFinite(vMap[kpi]) ? vMap[kpi] : null;
+    });
+    return {title, labels, values};
+  }
+
+  const byWeek = new Map();
+  for(const it of focus){
+    const ws = getWeekStartUTC(it.dateObj);
+    const wsStr = dateObjToStr(ws);
+    if(!byWeek.has(wsStr)) byWeek.set(wsStr, []);
+    byWeek.get(wsStr).push(it);
+  }
+  const weeks = Array.from(byWeek.entries()).sort((a,b)=>a[0].localeCompare(b[0]));
+  const labels = [];
+  const values = [];
+  for(const [wsStr, items] of weeks){
+    let qty=0, rev=0, multi=0, attSum=0, effSum=0, attCnt=0, effCnt=0, dayCnt=0;
+    for(const it of items){
+      const s = it.summary;
+      const q = toNumber(s.totalQty); if(Number.isFinite(q)) qty += q;
+      const r = toNumber(s.revenue); if(Number.isFinite(r)) rev += r;
+      const mu = toNumber(s.multi); if(Number.isFinite(mu)) multi += mu;
+      const a = toNumber(s.attendance); if(Number.isFinite(a)){ attSum += a; attCnt++; }
+      const e = toNumber(s.efficiency); if(Number.isFinite(e)){ effSum += e; effCnt++; }
+      dayCnt++;
+    }
+    const dn = Math.max(dayCnt, 1);
+    const weekAvg = {
+      totalQty: qty/dn,
+      revenue: rev/dn,
+      multi: multi/dn,
+      attendance: attCnt ? (attSum/attCnt) : null,
+      efficiency: effCnt ? (effSum/effCnt) : null,
+      avgPrice: (qty>0 && rev>0) ? (rev/qty) : null
+    };
+    labels.push(wsStr.slice(5));
+    values.push(weekAvg[kpi] ?? null);
+  }
+  return {title, labels, values};
+}
+
+function destroyCharts(){
+  if(monthChart){ monthChart.destroy(); monthChart = null; }
+  if(weekChart){ weekChart.destroy(); weekChart = null; }
+}
+
+function renderCharts(){
+  const kpi = state.chartKpi;
+
+  const ms = buildMonthlySeries();
+  const ws = buildWeeklyOrDailySeries();
+  $("weekChartTitle").textContent = ws.title;
+
+  const commonOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    plugins: {
+      legend: { display: true, position: "top" },
+      decimation: { enabled: true, algorithm: "min-max" },
+      tooltip: { callbacks: {
+        label: (ctx) => {
+          const v = ctx.parsed.y;
+          if(v === null || v === undefined) return "無資料";
+          if(["attendance","efficiency","avgPrice"].includes(kpi)) return `${ctx.dataset.label}: ${v.toFixed(2)}`;
+          return `${ctx.dataset.label}: ${Math.round(v).toLocaleString("zh-Hant-TW")}`;
+        }
+      }}
+    },
+    scales: { x: { grid:{display:false} } }
+  };
+
+  const mctx = $("monthChart").getContext("2d");
+  destroyCharts();
+
+  monthChart = new Chart(mctx, {
+    type: "line",
+    data: {
+      labels: ms.labels,
+      datasets: [{
+        label: `${kpiLabel(kpi)}（月平均）`,
+        data: ms.values,
+        spanGaps: true,
+        tension: 0.25,
+        pointRadius: 1
+      }]
+    },
+    options: commonOptions
+  });
+
+  const wctx = $("weekChart").getContext("2d");
+  weekChart = new Chart(wctx, {
+    type: "line",
+    data: {
+      labels: ws.labels,
+      datasets: [{
+        label: `${kpiLabel(kpi)}`,
+        data: ws.values,
+        spanGaps: true,
+        tension: 0.25,
+        pointRadius: 1
+      }]
+    },
+    options: commonOptions
+  });
+
+  state.chartsDirty = false;
+  $("chartDirtyHint").classList.add("hidden");
+}
+
+/* =========================
+   Drilldown helpers
+========================= */
+function getDateSetInSelection(){
+  const items = summariesInRange();
+  return new Set(items.map(x=>x.mmdd));
+}
+function calcLineHumanAvg(lineKey){
+  const mmddSet = getDateSetInSelection();
+  const vals = [];
+  for(const mmdd of mmddSet){
+    const key = `${state.temp}|${mmdd}|${lineKey}`;
+    const rec = state.lineHumanDaily.get(key);
+    if(rec && Number.isFinite(toNumber(rec.rate))){
+      vals.push(toNumber(rec.rate));
+      continue;
+    }
+    const rec2 = state.lineAvgFromSheets.get(key);
+    if(rec2 && Number.isFinite(toNumber(rec2.humanAvg))) vals.push(toNumber(rec2.humanAvg));
+  }
+  return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : NaN;
+}
+function calcLineCapAvg(lineKey){
+  if(state.temp !== "4") return NaN;
+  const mmddSet = getDateSetInSelection();
+  const vals = [];
+  for(const mmdd of mmddSet){
+    const key = `4|${mmdd}|${lineKey}`;
+    const rec = state.lineAvgFromSheets.get(key);
+    if(rec && Number.isFinite(toNumber(rec.capAvg))) vals.push(toNumber(rec.capAvg));
+  }
+  return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : NaN;
+}
+
+function refreshLineSection(){
+  const lineKey = $("lineSelect").value || "";
+  $("catSelect").disabled = true;
+  $("prodSelect").disabled = true;
+  $("resetDrillBtn").disabled = true;
+  $("prodDetails").classList.add("hidden");
+
+  $("lineHumanAvg").textContent = "—";
+  $("lineHumanHint").textContent = "—";
+  $("lineCapAvg").textContent = "—";
+  $("lineCapHint").textContent = "—";
+
+  if(!lineKey){
+    $("catSelect").innerHTML = "";
+    $("prodSelect").innerHTML = "";
+    return;
+  }
+
+  const h = calcLineHumanAvg(lineKey);
+  $("lineHumanAvg").textContent = Number.isFinite(h) ? fmtPct(h) : "—";
+  $("lineHumanHint").textContent = Number.isFinite(h) ? "範圍內日報平均" : "此範圍無達成率資料";
+
+  if(state.temp === "4"){
+    const c = calcLineCapAvg(lineKey);
+    $("lineCapAvg").textContent = Number.isFinite(c) ? fmtPct(c) : "—";
+    $("lineCapHint").textContent = Number.isFinite(c) ? "範圍內日報平均（4°C）" : "此範圍無產能達成率資料";
+  }
+
+  const mmddSet = getDateSetInSelection();
+  const cats = new Map();
+  for(const rec of state.records.values()){
+    if(rec.temp !== state.temp) continue;
+    if(!mmddSet.has(rec.mmdd)) continue;
+    if(cleanKey(rec.line) !== lineKey) continue;
+    const ck = cleanKey(rec.category || "");
+    if(!ck) continue;
+    if(!cats.has(ck)) cats.set(ck, cleanText(rec.category));
+  }
+  const catSel = $("catSelect");
+  catSel.innerHTML = "";
+  if(cats.size){
+    catSel.disabled = false;
+    const opt0 = document.createElement("option");
+    opt0.value = "";
+    opt0.textContent = "請選擇品類";
+    catSel.appendChild(opt0);
+    for(const [ck, disp] of Array.from(cats.entries()).sort((a,b)=>a[1].localeCompare(b[1],"zh-Hant"))){
+      const opt = document.createElement("option");
+      opt.value = ck;
+      opt.textContent = disp;
+      catSel.appendChild(opt);
+    }
+    $("resetDrillBtn").disabled = false;
+  }else{
+    catSel.disabled = true;
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "（此線別無明細）";
+    catSel.appendChild(opt);
+  }
+}
+
+function refreshProductSelect(){
+  const lineKey = $("lineSelect").value || "";
+  const catKey = $("catSelect").value || "";
+  const prodSel = $("prodSelect");
+  prodSel.innerHTML = "";
+  $("prodDetails").classList.add("hidden");
+
+  if(!lineKey || !catKey){ prodSel.disabled = true; return; }
+
+  const mmddSet = getDateSetInSelection();
+  const prods = new Map();
+  for(const rec of state.records.values()){
+    if(rec.temp !== state.temp) continue;
+    if(!mmddSet.has(rec.mmdd)) continue;
+    if(cleanKey(rec.line) !== lineKey) continue;
+    if(cleanKey(rec.category || "") !== catKey) continue;
+    const pk = cleanKey(rec.product);
+    if(!prods.has(pk)) prods.set(pk, cleanText(rec.product));
+  }
+  if(prods.size){
+    prodSel.disabled = false;
+    const opt0 = document.createElement("option");
+    opt0.value = "";
+    opt0.textContent = "請選擇品名";
+    prodSel.appendChild(opt0);
+    for(const [pk, disp] of Array.from(prods.entries()).sort((a,b)=>a[1].localeCompare(b[1],"zh-Hant"))){
+      const opt = document.createElement("option");
+      opt.value = pk;
+      opt.textContent = disp;
+      prodSel.appendChild(opt);
+    }
+  }else{
+    prodSel.disabled = true;
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "（無品名）";
+    prodSel.appendChild(opt);
+  }
+}
+
+function refreshProductDetails(){
+  const lineKey = $("lineSelect").value || "";
+  const catKey = $("catSelect").value || "";
+  const prodKey = $("prodSelect").value || "";
+  if(!lineKey || !catKey || !prodKey){ $("prodDetails").classList.add("hidden"); return; }
+
+  const mmddSet = getDateSetInSelection();
+  const rows = [];
+  for(const rec of state.records.values()){
+    if(rec.temp !== state.temp) continue;
+    if(!mmddSet.has(rec.mmdd)) continue;
+    if(cleanKey(rec.line) !== lineKey) continue;
+    if(cleanKey(rec.category || "") !== catKey) continue;
+    if(cleanKey(rec.product) !== prodKey) continue;
+
+    const d = mmddToDateObj(state.year, rec.mmdd);
+    const dateStr = d ? dateObjToStr(d) : rec.mmdd;
+    rows.push({dateStr, rec});
+  }
+  rows.sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
+
+  let qty=0, rev=0, multi=0, peopleSum=0, capSum=0, effSum=0, pcnt=0, ccnt=0, ecnt=0, changeSum=0, runSum=0, changeCnt=0, runCnt=0;
+  for(const {rec} of rows){
+    const q = toNumber(rec.qty); if(Number.isFinite(q)) qty += q;
+    const r = toNumber(rec.revenue); if(Number.isFinite(r)) rev += r;
+    const m = toNumber(rec.multi); if(Number.isFinite(m)) multi += m;
+
+    const p = toNumber(rec.people); if(Number.isFinite(p)){ peopleSum += p; pcnt++; }
+    const c = toNumber(rec.cap); if(Number.isFinite(c)){ capSum += c; ccnt++; }
+    const e = toNumber(rec.eff); if(Number.isFinite(e)){ effSum += e; ecnt++; }
+
+    const ch = toNumber(rec.changeMin); if(Number.isFinite(ch)){ changeSum += ch; changeCnt++; }
+    const ru = toNumber(rec.runMin); if(Number.isFinite(ru)){ runSum += ru; runCnt++; }
+  }
+
+  $("pQty").textContent = fmtInt(qty);
+  $("pRev").textContent = fmtMoney(rev);
+  $("pMulti").textContent = fmtInt(multi);
+
+  $("pPeople").textContent = pcnt ? fmtDec(peopleSum/pcnt, 2) : "—";
+  $("pCap").textContent = ccnt ? fmtDec(capSum/ccnt, 2) : "—";
+  $("pEff").textContent = ecnt ? fmtDec(effSum/ecnt, 2) : "—";
+
+  const first = rows.find(x => x.rec.prodStart || x.rec.prodEnd);
+  const time = first ? `${fmtTime(first.rec.prodStart)}~${fmtTime(first.rec.prodEnd)}` : "—";
+  $("pTime").textContent = (rows.length === 1) ? time : "多日（詳見下表）";
+  $("pChange").textContent = changeCnt ? fmtDec(changeSum/changeCnt, 1) : "—";
+  $("pRun").textContent = runCnt ? fmtDec(runSum/runCnt, 1) : "—";
+  const bFirst = rows.find(x => x.rec.breakStart || x.rec.breakEnd);
+  const btime = bFirst ? `${fmtTime(bFirst.rec.breakStart)}~${fmtTime(bFirst.rec.breakEnd)}` : "—";
+  $("pBreak").textContent = (rows.length === 1) ? btime : "多日（詳見下表）";
+
+  const tb = $("prodTableBody");
+  tb.innerHTML = "";
+  for(const {dateStr, rec} of rows){
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="mono">${dateStr}</td>
+      <td class="mono">${fmtInt(toNumber(rec.qty))}</td>
+      <td class="mono">${fmtMoney(toNumber(rec.revenue))}</td>
+      <td class="mono">${fmtInt(toNumber(rec.multi))}</td>
+      <td class="mono">${Number.isFinite(toNumber(rec.people)) ? fmtDec(toNumber(rec.people),2) : "—"}</td>
+      <td class="mono">${Number.isFinite(toNumber(rec.cap)) ? fmtDec(toNumber(rec.cap),2) : "—"}</td>
+      <td class="mono">${Number.isFinite(toNumber(rec.eff)) ? fmtDec(toNumber(rec.eff),2) : "—"}</td>
+      <td class="mono">${fmtTime(rec.prodStart)}~${fmtTime(rec.prodEnd)}</td>
+      <td class="mono">${Number.isFinite(toNumber(rec.changeMin)) ? fmtDec(toNumber(rec.changeMin),1) : "—"}</td>
+      <td class="mono">${Number.isFinite(toNumber(rec.runMin)) ? fmtDec(toNumber(rec.runMin),1) : "—"}</td>
+      <td class="mono">${fmtTime(rec.breakStart)}~${fmtTime(rec.breakEnd)}</td>
+    `;
+    tb.appendChild(tr);
+  }
+
+  $("prodDetails").classList.remove("hidden");
+}
+
+/* =========================
+   Main refresh (不自動重繪趨勢圖)
+========================= */
+function markChartsDirty(){
+  if(!state.chartsVisible) return;
+  state.chartsDirty = true;
+  $("chartDirtyHint").classList.remove("hidden");
+  $("updateChartBtn").disabled = false;
+}
+function refreshAll(){
+  togglePanels();
+  refreshActiveRangeText();
+  refreshKpiCards();
+  refreshLineSection();
+}
+
+/* =========================
+   Events
+========================= */
+document.querySelectorAll("[data-range]").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    state.rangeMode = btn.getAttribute("data-range");
+    setActiveSeg("range", state.rangeMode);
+    refreshAll();
+    markChartsDirty();
+  });
+});
+document.querySelectorAll("[data-temp]").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    state.temp = btn.getAttribute("data-temp");
+    setActiveSeg("temp", state.temp);
+    refreshSelectors();
+    refreshAll();
+    markChartsDirty();
+  });
+});
+$("monthSelect").addEventListener("change", ()=>{
+  state.month = Number($("monthSelect").value) || state.month;
+  refreshAll();
+  markChartsDirty();
+});
+$("weekSelect").addEventListener("change", ()=>{
+  state.weekStartStr = $("weekSelect").value;
+  refreshAll();
+  markChartsDirty();
+});
+$("daySelect").addEventListener("change", ()=>{
+  state.dayStr = $("daySelect").value;
+  refreshAll();
+  markChartsDirty();
+});
+$("chartKpiSelect").addEventListener("change", ()=>{
+  state.chartKpi = $("chartKpiSelect").value;
+  markChartsDirty();
+});
+
+$("showChartBtn").addEventListener("click", ()=>{
+  state.chartsVisible = true;
+  $("chartArea").classList.remove("hidden");
+  $("updateChartBtn").disabled = false;
+  $("showChartBtn").disabled = true;
+  renderCharts();
+});
+
+$("updateChartBtn").addEventListener("click", ()=>{
+  if(!state.chartsVisible) return;
+  renderCharts();
+});
+
+$("fileInput").addEventListener("change", async (e)=>{
+  const files = e.target.files;
+  if(files && files.length){
+    await handleFiles(files);
+    $("fileInput").value = "";
+    markChartsDirty();
+  }
+});
+
+$("clearBtn").addEventListener("click", ()=>{
+  state.summaries.clear();
+  state.records.clear();
+  state.lineHumanDaily.clear();
+  state.lineAvgFromSheets.clear();
+  state.loadedFiles = [];
+  state.availableMmdd = new Set();
+
+  destroyCharts();
+  state.chartsVisible = false;
+  state.chartsDirty = true;
+  $("chartArea").classList.add("hidden");
+  $("showChartBtn").disabled = false;
+  $("updateChartBtn").disabled = true;
+  $("chartDirtyHint").classList.add("hidden");
+
+  setDataChip("warn", "尚未載入資料");
+  refreshSelectors();
+  refreshAll();
+});
+
+$("lineSelect").addEventListener("change", ()=>{
+  $("catSelect").value = "";
+  $("prodSelect").value = "";
+  refreshLineSection();
+});
+$("catSelect").addEventListener("change", ()=>{
+  $("prodSelect").value = "";
+  refreshProductSelect();
+  refreshProductDetails();
+});
+$("prodSelect").addEventListener("change", ()=> refreshProductDetails());
+$("resetDrillBtn").addEventListener("click", ()=>{
+  $("lineSelect").value = "";
+  $("catSelect").innerHTML = "";
+  $("prodSelect").innerHTML = "";
+  $("catSelect").disabled = true;
+  $("prodSelect").disabled = true;
+  $("resetDrillBtn").disabled = true;
+  $("prodDetails").classList.add("hidden");
+  $("lineHumanAvg").textContent = "—";
+  $("lineHumanHint").textContent = "—";
+  $("lineCapAvg").textContent = "—";
+  $("lineCapHint").textContent = "—";
+});
+
+(function init(){
+  setActiveSeg("range", state.rangeMode);
+  setActiveSeg("temp", state.temp);
+  refreshSelectors();
+  refreshAll();
+  preload(); // 自動載入 2025/07~2025/11
+})();
+</script>
+</body>
+</html>
