@@ -332,6 +332,53 @@
    你只要把這些 xlsx 檔與 HTML 放在同一路徑（GitHub Pages）即可
    ※ 檔名必須「完全一致」且需包含 .xlsx 副檔名
 ========================= */
+async function loadScript(url){
+  return new Promise((resolve, reject)=>{
+    const s = document.createElement("script");
+    s.src = url;
+    s.async = true;
+    s.onload = () => resolve(true);
+    s.onerror = () => reject(new Error("Failed to load: " + url));
+    document.head.appendChild(s);
+  });
+}
+async function ensureXLSX(){
+  if(window.XLSX) return true;
+  const urls = [
+    "https://cdn.jsdelivr.net/npm/xlsx@0.19.3/dist/xlsx.full.min.js",
+    "https://unpkg.com/xlsx@0.19.3/dist/xlsx.full.min.js",
+    "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.19.3/xlsx.full.min.js"
+  ];
+  let lastErr = null;
+  for(const u of urls){
+    try{
+      await loadScript(u);
+      if(window.XLSX) return true;
+    }catch(e){
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("XLSX not available");
+}
+async function ensureChart(){
+  if(window.Chart) return true;
+  const urls = [
+    "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js",
+    "https://unpkg.com/chart.js@4.4.1/dist/chart.umd.min.js",
+    "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"
+  ];
+  let lastErr = null;
+  for(const u of urls){
+    try{
+      await loadScript(u);
+      if(window.Chart) return true;
+    }catch(e){
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("Chart not available");
+}
+
 const PRELOAD_FILES = [
   "114.07.01-31晉欣廠生產日報表.xlsx",
   "114.08.01-31晉欣廠生產日報表.xlsx",
@@ -1154,7 +1201,8 @@ function destroyCharts(){
   if(weekChart){ weekChart.destroy(); weekChart = null; }
 }
 
-function renderCharts(){
+async function renderCharts(){
+  await ensureChart();
   const kpi = state.chartKpi;
 
   const ms = buildMonthlySeries();
@@ -1485,17 +1533,17 @@ $("chartKpiSelect").addEventListener("change", ()=>{
   markChartsDirty();
 });
 
-$("showChartBtn").addEventListener("click", ()=>{
+$("showChartBtn").addEventListener("click", async ()=>{
   state.chartsVisible = true;
   $("chartArea").classList.remove("hidden");
   $("updateChartBtn").disabled = false;
   $("showChartBtn").disabled = true;
-  renderCharts();
+  await renderCharts();
 });
 
-$("updateChartBtn").addEventListener("click", ()=>{
+$("updateChartBtn").addEventListener("click", async ()=>{
   if(!state.chartsVisible) return;
-  renderCharts();
+  await renderCharts();
 });
 
 const _fileInput = $("fileInput");
@@ -1556,12 +1604,19 @@ $("resetDrillBtn").addEventListener("click", ()=>{
   $("lineCapHint").textContent = "—";
 });
 
-(function init(){
-  setActiveSeg("range", state.rangeMode);
+(async function init(){
+  try{
+    await ensureXLSX();
+  }catch(e){
+    console.error(e);
+    setDataChip("bad", "載入解析套件失敗（XLSX）—請檢查網路或 CDN 存取");
+    return;
+  }
+setActiveSeg("range", state.rangeMode);
   setActiveSeg("temp", state.temp);
   refreshSelectors();
   refreshAll();
-  preload(); // 自動載入 2025/07~2025/11
+  await preload(); // 自動載入 2025/07~2025/11
 })();
 </script>
 </body>
