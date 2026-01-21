@@ -7,17 +7,18 @@
 
   <script src="https://cdn.tailwindcss.com"></script>
 
-  <link rel="preconnect" href="https://fonts.googleapis.com">
+  
+
+  <!-- Local vendor scripts (avoid external CDN blocks) -->
+  <script src="./xlsx.full.min.js"></script>
+  <script src="./chart.umd.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;600;700&display=swap" rel="stylesheet">
 
   <!-- SheetJS -->
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.19.3/dist/xlsx.full.min.js"></script>
-
-  <!-- Chart.js -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-
-  <style>
+<!-- Chart.js -->
+<style>
     body { font-family: "Noto Sans TC", system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans"; background: #f8fafc; }
     .seg-btn { border: 1px solid #e2e8f0; background: #fff; padding: .5rem .75rem; border-radius: 999px; font-weight: 600; color: #334155; }
     .seg-btn.active { background: #2563eb; color: #fff; border-color: #1d4ed8; }
@@ -55,6 +56,7 @@
       <div class="flex flex-wrap items-center gap-2">
         <span id="dataChip" class="chip warn"><span class="dot"></span><span>尚未載入資料</span></span>
         <button id="clearBtn" class="btn danger" disabled>清除資料</button>
+            <button id="importBtn" class="px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-sm">匯入更新</button>
       </div>
     </div>
 
@@ -332,53 +334,6 @@
    你只要把這些 xlsx 檔與 HTML 放在同一路徑（GitHub Pages）即可
    ※ 檔名必須「完全一致」且需包含 .xlsx 副檔名
 ========================= */
-async function loadScript(url){
-  return new Promise((resolve, reject)=>{
-    const s = document.createElement("script");
-    s.src = url;
-    s.async = true;
-    s.onload = () => resolve(true);
-    s.onerror = () => reject(new Error("Failed to load: " + url));
-    document.head.appendChild(s);
-  });
-}
-async function ensureXLSX(){
-  if(window.XLSX) return true;
-  const urls = [
-    "https://cdn.jsdelivr.net/npm/xlsx@0.19.3/dist/xlsx.full.min.js",
-    "https://unpkg.com/xlsx@0.19.3/dist/xlsx.full.min.js",
-    "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.19.3/xlsx.full.min.js"
-  ];
-  let lastErr = null;
-  for(const u of urls){
-    try{
-      await loadScript(u);
-      if(window.XLSX) return true;
-    }catch(e){
-      lastErr = e;
-    }
-  }
-  throw lastErr || new Error("XLSX not available");
-}
-async function ensureChart(){
-  if(window.Chart) return true;
-  const urls = [
-    "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js",
-    "https://unpkg.com/chart.js@4.4.1/dist/chart.umd.min.js",
-    "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"
-  ];
-  let lastErr = null;
-  for(const u of urls){
-    try{
-      await loadScript(u);
-      if(window.Chart) return true;
-    }catch(e){
-      lastErr = e;
-    }
-  }
-  throw lastErr || new Error("Chart not available");
-}
-
 const PRELOAD_FILES = [
   "114.07.01-31晉欣廠生產日報表.xlsx",
   "114.08.01-31晉欣廠生產日報表.xlsx",
@@ -1201,8 +1156,7 @@ function destroyCharts(){
   if(weekChart){ weekChart.destroy(); weekChart = null; }
 }
 
-async function renderCharts(){
-  await ensureChart();
+function renderCharts(){
   const kpi = state.chartKpi;
 
   const ms = buildMonthlySeries();
@@ -1533,20 +1487,24 @@ $("chartKpiSelect").addEventListener("change", ()=>{
   markChartsDirty();
 });
 
-$("showChartBtn").addEventListener("click", async ()=>{
+$("showChartBtn").addEventListener("click", ()=>{
   state.chartsVisible = true;
   $("chartArea").classList.remove("hidden");
   $("updateChartBtn").disabled = false;
   $("showChartBtn").disabled = true;
-  await renderCharts();
+  renderCharts();
 });
 
-$("updateChartBtn").addEventListener("click", async ()=>{
+$("updateChartBtn").addEventListener("click", ()=>{
   if(!state.chartsVisible) return;
-  await renderCharts();
+  renderCharts();
 });
 
 const _fileInput = $("fileInput");
+const _importBtn = $("importBtn");
+if(_importBtn && _fileInput){
+  _importBtn.addEventListener("click", ()=> _fileInput.click());
+}
 if(_fileInput){
   _fileInput.addEventListener("change", async (e)=>{
   const files = e.target.files;
@@ -1605,11 +1563,9 @@ $("resetDrillBtn").addEventListener("click", ()=>{
 });
 
 (async function init(){
-  try{
-    await ensureXLSX();
-  }catch(e){
-    console.error(e);
-    setDataChip("bad", "載入解析套件失敗（XLSX）—請檢查網路或 CDN 存取");
+  // XLSX / Chart.js 已改為本地檔（./xlsx.full.min.js, ./chart.umd.min.js）
+  if(!window.XLSX){
+    setDataChip("bad", "缺少 XLSX 本地檔：請在同資料夾放置 xlsx.full.min.js");
     return;
   }
 setActiveSeg("range", state.rangeMode);
