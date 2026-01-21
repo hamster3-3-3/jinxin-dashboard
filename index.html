@@ -59,7 +59,7 @@
     </div>
 
     <!-- Auto preload + optional import -->
-    <div class="card">
+    <div class="card hidden" id="dataSourceCard">
       <div class="font-extrabold text-slate-900">資料來源</div>
       <div class="hint mt-1">
         本頁會自動載入下列 Excel（需與本 HTML 在同一路徑可被 fetch 讀取，例如 GitHub Pages）。不需手動匯入。
@@ -678,22 +678,42 @@ async function parseWorkbookArrayBuffer(buf, filename){
   }
 }
 
+
+async function fetchArrayBufferSmart(fileName){
+  // Resolve against current directory (works for /repo/ and /repo/index.html)
+  const dir = location.href.endsWith("/") ? location.href : location.href.replace(/\/[^\/]*$/, "/");
+  const candidates = [
+    new URL(encodeURI(fileName), dir).toString(),
+    new URL("./" + encodeURI(fileName), dir).toString(),
+  ];
+
+  let lastErr = null;
+  for(const url of Array.from(new Set(candidates))){
+    try{
+      const res = await fetch(url, {cache:"no-store"});
+      if(!res.ok) throw new Error("HTTP " + res.status + " @ " + url);
+      return await res.arrayBuffer();
+    }catch(e){
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error("fetch failed");
+}
+
 async function preload(){
   // show list
-  $("preloadList").innerHTML = PRELOAD_FILES.map(f=>`<li>${f}</li>`).join("");
-
-  if(location.protocol === "file:"){
-    $("fileProtoHint").textContent = "你目前用 file:// 開啟，瀏覽器通常會擋自動載入（fetch）。請改用 GitHub Pages 或 local server。";
+  const _preloadList = $("preloadList");
+  if(_preloadList){ _preloadList.innerHTML = PRELOAD_FILES.map(f=>`<li>${f}</li>`).join(""); }
+if(location.protocol === "file:"){
+    const _h = $("fileProtoHint");
+    if(_h){ _h.textContent = "你目前用 file:// 開啟，瀏覽器通常會擋自動載入（fetch）。請改用 GitHub Pages 或 local server。"; }
   }
-
-  setDataChip("warn", "自動載入中…");
+setDataChip("warn", "自動載入中…");
 
   let ok = 0, fail = 0;
   for(const f of PRELOAD_FILES){
     try{
-      const res = await fetch(f, {cache:"no-store"});
-      if(!res.ok) throw new Error("HTTP "+res.status);
-      const buf = await res.arrayBuffer();
+      const buf = await fetchArrayBufferSmart(f);
       await parseWorkbookArrayBuffer(buf, f);
       ok++;
     }catch(e){
@@ -1478,14 +1498,17 @@ $("updateChartBtn").addEventListener("click", ()=>{
   renderCharts();
 });
 
-$("fileInput").addEventListener("change", async (e)=>{
+const _fileInput = $("fileInput");
+if(_fileInput){
+  _fileInput.addEventListener("change", async (e)=>{
   const files = e.target.files;
   if(files && files.length){
     await handleFiles(files);
     $("fileInput").value = "";
     markChartsDirty();
   }
-});
+  });
+}
 
 $("clearBtn").addEventListener("click", ()=>{
   state.summaries.clear();
