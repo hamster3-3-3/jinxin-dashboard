@@ -11,8 +11,6 @@
   
 
   <!-- Local vendor scripts (avoid external CDN blocks) -->
-  <script src="./xlsx.full.min.js"></script>
-  <script src="./chart.umd.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;600;700&display=swap" rel="stylesheet">
@@ -376,6 +374,58 @@
   </div>
 
 <script>
+/* =========================
+   解析/圖表套件載入（自動 fallback）
+   - 優先使用同資料夾的本地檔（可選）：./xlsx.full.min.js、./chart.umd.min.js
+   - 若不存在，改用 CDN（jsdelivr / unpkg）
+========================= */
+const __loadedScripts = new Set();
+function loadScriptOnce(src){
+  return new Promise((resolve, reject)=>{
+    if(__loadedScripts.has(src)) return resolve(true);
+    const s = document.createElement("script");
+    s.src = src;
+    s.async = true;
+    s.onload = ()=>{ __loadedScripts.add(src); resolve(true); };
+    s.onerror = ()=>reject(new Error("load failed: " + src));
+    document.head.appendChild(s);
+  });
+}
+async function ensureXLSX(){
+  if(window.XLSX) return true;
+  const sources = [
+    "./xlsx.full.min.js",
+    "https://cdn.jsdelivr.net/npm/xlsx@0.19.3/dist/xlsx.full.min.js",
+    "https://unpkg.com/xlsx@0.19.3/dist/xlsx.full.min.js"
+  ];
+  for(const src of sources){
+    try{
+      await loadScriptOnce(src);
+      if(window.XLSX) return true;
+    }catch(e){}
+  }
+  return !!window.XLSX;
+}
+async function ensureChart(){
+  if(window.Chart) return true;
+  const sources = [
+    "./chart.umd.min.js",
+    "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js",
+    "https://unpkg.com/chart.js@4.4.1/dist/chart.umd.min.js"
+  ];
+  for(const src of sources){
+    try{
+      await loadScriptOnce(src);
+      if(window.Chart) return true;
+    }catch(e){}
+  }
+  return !!window.Chart;
+}
+async function ensureLibs(){
+  const [okX, okC] = await Promise.all([ensureXLSX(), ensureChart()]);
+  return okX && okC;
+}
+
 /* =========================
    內建自動載入檔案（2025/07～2025/11）
    你只要把這些 xlsx 檔與 HTML 放在同一路徑（GitHub Pages）即可
@@ -1679,7 +1729,9 @@ function renderCharts(){
 
   state.chartsDirty = false;
   $("chartDirtyHint").classList.add("hidden");
-}==========
+}
+
+/* =========================
    Drilldown helpers
 ========================= */
 function getDateSetInSelection(){
@@ -2167,9 +2219,11 @@ $("lineSelect").value = "";
   $("lineHumanAvg").textContent = "—";  $("lineCapAvg").textContent = "—";});
 
 (async function init(){
-  // XLSX / Chart.js 已改為本地檔（./xlsx.full.min.js, ./chart.umd.min.js）
-  if(!window.XLSX){
-    setDataChip("bad", "缺少 XLSX 本地檔：請在同資料夾放置 xlsx.full.min.js");
+  // 確保解析/圖表套件可用（本地檔或 CDN fallback）
+  setDataChip("warn", "載入解析套件…");
+  const okLibs = await ensureLibs();
+  if(!okLibs){
+    setDataChip("bad", "載入解析套件失敗：請確認網路可存取 CDN，或在同資料夾放置 xlsx.full.min.js / chart.umd.min.js");
     return;
   }
 setActiveSeg("range", state.rangeMode);
