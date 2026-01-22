@@ -50,6 +50,8 @@
   .suggest button { display:flex; flex-direction:column; gap:.15rem; width:100%; text-align:left; padding:.65rem .8rem; }
   .suggest button:hover { background:#f1f5f9; }
   .suggest .sub { color:#64748b; font-weight:700; font-size:.85rem; }
+
+  #activeCatCounts{white-space:normal; line-height:1.35;}
 </style>
 </head>
 
@@ -232,7 +234,15 @@
     </div>
 
     <!-- Drilldown -->
-    <div class="card space-y-4">
+    <!-- 品類種類數（顯示於 KPI 趨勢圖下方、線別/品類/品名 上方） -->
+  <div class="card mt-6">
+    <div class="flex items-center justify-between gap-4">
+      <div class="h2">整體品類種類（當前範圍）</div>
+      <div id="activeCatCounts" class="text-slate-700 font-bold text-sm text-right"></div>
+    </div>
+  </div>
+
+<div class="card space-y-4">
       <div class="font-extrabold text-slate-900">線別 / 品類 / 品名</div>
 
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
