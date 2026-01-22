@@ -207,7 +207,23 @@
               <option value="avgPrice">平均廠價</option>
               <option value="multi">多次生產數</option>
             </select>
-          </div>
+          
+            <label class="label mt-3 mb-1 block">品類（可複選）</label>
+            <div class="relative" id="chartCatWrap">
+              <button id="chartCatBtn" type="button" class="select w-full text-left flex items-center justify-between">
+                <span id="chartCatBtnText">選擇品類（0）</span>
+                <span class="text-slate-400 font-extrabold">▾</span>
+              </button>
+              <div id="chartCatDropdown" class="hidden absolute z-50 mt-2 w-full rounded-2xl border border-slate-200 bg-white shadow-lg p-3">
+                <input id="chartCatSearch" class="input" placeholder="搜尋品類" />
+                <div id="chartCatList" class="mt-3 max-h-56 overflow-auto pr-1 space-y-2"></div>
+                <div class="mt-3 flex gap-2">
+                  <button id="chartCatClearBtn" type="button" class="btn">清除</button>
+                  <button id="chartCatCloseBtn" type="button" class="btn primary flex-1">完成</button>
+                </div>
+              </div>
+            </div>
+</div>
           <button id="showChartBtn" class="btn primary">顯示趨勢圖</button>
           <button id="updateChartBtn" class="btn" disabled>更新趨勢圖</button>
         </div>
@@ -229,6 +245,14 @@
               <canvas id="weekChart"></canvas>
             </div>
           </div>
+        </div>
+
+        <div class="mt-6">
+          <div id="catVarChartTitle" class="label mb-2">品類種類數趨勢</div>
+          <div class="chartWrap">
+            <canvas id="catVarChart"></canvas>
+          </div>
+          <div id="catVarEmptyHint" class="hint mt-2">請於上方「品類（可複選）」選擇一個或多個品類，以顯示「品類種類數」趨勢。</div>
         </div>
       </div>
     </div>
@@ -459,6 +483,9 @@ const state = {
   weekStartStr: "",
   dayStr: "",
   chartKpi: "totalQty",
+  chartCatSelected: new Set(),
+  chartCatOptions: [],
+  chartCatKeyToName: new Map(),
 
   summaries: new Map(),         // key temp|mmdd
   records: new Map(),           // key temp|mmdd|line|cat|prod
@@ -1187,7 +1214,12 @@ function refreshKpiCards(){
 ========================= */
 let monthChart = null;
 let weekChart = null;
+let catVarChart = null;
 let prodChart = null;
+// Safety: older parsing referenced idxBreak (break time column index). We no longer use break columns,
+// but keep this to prevent runtime ReferenceError if any legacy path still touches it.
+let idxBreak = -1;
+
 
 /* =========================
    Chart value labels (data point annotation)
@@ -1396,9 +1428,277 @@ function buildWeeklyOrDailySeries(){
   return {title, labels, values};
 }
 
+/* =========================
+   KPI Trend: Category Multi-select & "Variety Count" Trend
+========================= */
+function refreshChartCatOptions(){
+  // Derive categories from current selection (state.prodIndex built in buildProdIndex()).
+  const map = new Map(); // catKey -> {name, prodSet(Set prodKey)}
+  for(const it of (state.prodIndex || [])){
+    if(!it.catKey || it.catKey === "0") continue;
+    if(!map.has(it.catKey)) map.set(it.catKey, {name: it.cat, prods: new Set()});
+    map.get(it.catKey).prods.add(it.prodKey);
+  }
+  const opts = Array.from(map.entries()).map(([key, v])=>({
+    key,
+    name: v.name || key,
+    count: v.prods.size
+  })).sort((a,b)=>a.name.localeCompare(b.name, "zh-Hant"));
+
+  state.chartCatOptions = opts;
+  state.chartCatKeyToName = new Map(opts.map(o=>[o.key, o.name]));
+
+  if(!state.chartCatSelected) state.chartCatSelected = new Set();
+  const allowed = new Set(opts.map(o=>o.key));
+  for(const k of Array.from(state.chartCatSelected)){
+    if(!allowed.has(k)) state.chartCatSelected.delete(k);
+  }
+  renderChartCatList();
+  updateChartCatBtnText();
+}
+
+function updateChartCatBtnText(){
+  const sel = Array.from(state.chartCatSelected || []);
+  const btnText = $("chartCatBtnText");
+  if(!btnText) return;
+  if(sel.length === 0){ btnText.textContent = "選擇品類（0）"; return; }
+  const names = sel.map(k => state.chartCatKeyToName.get(k) || k);
+  const show = names.slice(0,2).join("、");
+  btnText.textContent = sel.length <= 2 ? `已選：${show}` : `已選：${show}…（${sel.length}）`;
+}
+
+function renderChartCatList(){
+  const list = $("chartCatList");
+  if(!list) return;
+  const q = ( $("chartCatSearch")?.value || "" ).trim();
+  list.innerHTML = "";
+  const opts = state.chartCatOptions || [];
+  const frag = document.createDocumentFragment();
+
+  for(const o of opts){
+    if(q && !(o.name.includes(q))) continue;
+
+    const row = document.createElement("label");
+    row.className = "flex items-center gap-3 p-2 rounded-xl hover:bg-slate-50 cursor-pointer";
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.className = "w-5 h-5";
+    cb.checked = (state.chartCatSelected || new Set()).has(o.key);
+    cb.addEventListener("change", ()=>{
+      if(!state.chartCatSelected) state.chartCatSelected = new Set();
+      if(cb.checked) state.chartCatSelected.add(o.key);
+      else state.chartCatSelected.delete(o.key);
+      updateChartCatBtnText();
+      markChartsDirty();
+    });
+
+    const name = document.createElement("div");
+    name.className = "flex-1 font-bold text-slate-900";
+    name.textContent = o.name;
+
+    const meta = document.createElement("div");
+    meta.className = "text-slate-500 font-bold text-sm";
+    meta.textContent = `${o.count}`;
+
+    row.appendChild(cb);
+    row.appendChild(name);
+    row.appendChild(meta);
+    frag.appendChild(row);
+  }
+  list.appendChild(frag);
+}
+
+function openChartCatDropdown(open){
+  const dd = $("chartCatDropdown");
+  if(!dd) return;
+  if(open) dd.classList.remove("hidden");
+  else dd.classList.add("hidden");
+}
+
+function initChartCatUI(){
+  const btn = $("chartCatBtn");
+  const wrap = $("chartCatWrap");
+  if(!btn || !wrap) return;
+
+  btn.addEventListener("click", (e)=>{
+    e.stopPropagation();
+    const dd = $("chartCatDropdown");
+    const isOpen = dd && !dd.classList.contains("hidden");
+    openChartCatDropdown(!isOpen);
+    if(!isOpen){
+      // fresh render when opening
+      renderChartCatList();
+      $("chartCatSearch")?.focus();
+    }
+  });
+
+  $("chartCatSearch")?.addEventListener("input", ()=> renderChartCatList());
+
+  $("chartCatClearBtn")?.addEventListener("click", ()=>{
+    if(!state.chartCatSelected) state.chartCatSelected = new Set();
+    state.chartCatSelected.clear();
+    renderChartCatList();
+    updateChartCatBtnText();
+    markChartsDirty();
+  });
+
+  $("chartCatCloseBtn")?.addEventListener("click", ()=> openChartCatDropdown(false));
+
+  document.addEventListener("click", (e)=>{
+    const dd = $("chartCatDropdown");
+    if(!dd || dd.classList.contains("hidden")) return;
+    if(wrap.contains(e.target)) return;
+    openChartCatDropdown(false);
+  });
+}
+
+function buildCatVarSeries(){
+  const temp = state.temp;
+  const selected = Array.from(state.chartCatSelected || []);
+  if(!selected.length) return {title:"品類種類數趨勢", labels:[], datasets:[]};
+
+  // Build focus dates aligned with KPI weekChart logic.
+  const all = getAllDatesForTemp(temp)
+    .map(o => ({...o, has: !!getSummaryForDay(temp, o.mmdd)}))
+    .filter(x=>x.has);
+
+  if(!all.length) return {title:"品類種類數趨勢", labels:[], datasets:[]};
+
+  const mode = state.rangeMode;
+  let title = "品類種類數趨勢";
+  let focus = all;
+
+  if(mode === "month"){
+    focus = all.filter(o => (getWeekStartUTC(o.dateObj).getUTCMonth()+1) === state.month);
+    title = `品類種類數趨勢（${String(state.month).padStart(2,"0")} 月｜週二至週一）`;
+  }else if(mode === "week"){
+    const ws = new Date(state.weekStartStr + "T00:00:00Z");
+    const we = addDaysUTC(ws,6);
+    focus = all.filter(o => o.dateObj >= ws && o.dateObj <= we);
+    title = `品類種類數趨勢（日別｜${dateObjToStr(ws)}～${dateObjToStr(we)}）`;
+  }else if(mode === "day"){
+    if(state.dayStr){
+      const dSel = new Date(state.dayStr + "T00:00:00Z");
+      const m = dSel.getUTCMonth()+1;
+      focus = all.filter(o => (getWeekStartUTC(o.dateObj).getUTCMonth()+1) === m);
+      title = `品類種類數趨勢（${String(m).padStart(2,"0")} 月｜週二至週一）`;
+    }
+  }else{
+    title = "品類種類數趨勢（全年｜週二至週一）";
+  }
+
+  if(!focus.length) return {title, labels:[], datasets:[]};
+
+  // Build buckets
+  const labels = [];
+  const buckets = [];
+  const mmddToBucket = new Map();
+  const focusMmddSet = new Set(focus.map(o=>o.mmdd));
+
+  if(mode === "week"){
+    focus.sort((a,b)=>a.dateObj-b.dateObj);
+    for(let i=0;i<focus.length;i++){
+      const o = focus[i];
+      labels.push(o.dateStr.slice(5));
+      buckets.push({mmdds:[o.mmdd]});
+      mmddToBucket.set(o.mmdd, i);
+    }
+  }else{
+    const byWeek = new Map();
+    for(const it of focus){
+      const ws = getWeekStartUTC(it.dateObj);
+      const wsStr = dateObjToStr(ws);
+      if(!byWeek.has(wsStr)) byWeek.set(wsStr, []);
+      byWeek.get(wsStr).push(it.mmdd);
+    }
+    const weeks = Array.from(byWeek.entries()).sort((a,b)=>a[0].localeCompare(b[0]));
+    for(let i=0;i<weeks.length;i++){
+      const [wsStr, mmdds] = weeks[i];
+      labels.push(wsStr.slice(5));
+      buckets.push({mmdds});
+      for(const mmdd of mmdds) mmddToBucket.set(mmdd, i);
+    }
+  }
+
+  const bucketCatSets = buckets.map(()=> new Map(selected.map(k=>[k, new Set()] )));
+
+  for(const rec of state.records.values()){
+    if(rec.temp !== temp) continue;
+    if(!focusMmddSet.has(rec.mmdd)) continue;
+
+    const catKey = cleanKey(rec.category || "");
+    if(!catKey || catKey === "0") continue;
+    if(!selected.includes(catKey)) continue;
+
+    const prodKey = cleanKey(rec.product || "");
+    if(!prodKey) continue;
+
+    const bidx = mmddToBucket.get(rec.mmdd);
+    if(bidx === undefined) continue;
+    bucketCatSets[bidx].get(catKey).add(prodKey);
+  }
+
+  const datasets = selected.map((catKey)=>({
+    label: state.chartCatKeyToName.get(catKey) || catKey,
+    data: bucketCatSets.map(m => (m.get(catKey)?.size ?? 0)),
+    spanGaps: true,
+    tension: 0.25,
+    pointRadius: 3,
+    pointHoverRadius: 5
+  }));
+
+  return {title, labels, datasets};
+}
+
+function renderCatVarChart(){
+  const titleEl = $("catVarChartTitle");
+  const hintEl = $("catVarEmptyHint");
+  const canvas = $("catVarChart");
+  if(!canvas) return;
+
+  const selected = Array.from(state.chartCatSelected || []);
+  if(!selected.length){
+    if(titleEl) titleEl.textContent = "品類種類數趨勢";
+    if(hintEl) hintEl.classList.remove("hidden");
+    if(catVarChart){ catVarChart.destroy(); catVarChart = null; }
+    return;
+  }
+  if(hintEl) hintEl.classList.add("hidden");
+
+  const series = buildCatVarSeries();
+  if(titleEl) titleEl.textContent = series.title;
+
+  const ctx = canvas.getContext("2d");
+  if(catVarChart){ catVarChart.destroy(); catVarChart = null; }
+  catVarChart = new Chart(ctx, {
+    type: "line",
+    data: { labels: series.labels, datasets: series.datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { display: true, position: "top" },
+        decimation: { enabled: true, algorithm: "min-max" },
+        tooltip: { callbacks: {
+          label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y ?? 0}`
+        }},
+        valueLabels: { enabled: false }
+      },
+      scales: {
+        x: { grid:{display:false} },
+        y: { beginAtZero: true, ticks: { precision: 0 } }
+      }
+    }
+  });
+}
+
+
 function destroyCharts(){
   if(monthChart){ monthChart.destroy(); monthChart = null; }
   if(weekChart){ weekChart.destroy(); weekChart = null; }
+  if(catVarChart){ catVarChart.destroy(); catVarChart = null; }
 }
 
 function destroyProdChart(){
@@ -1580,6 +1880,8 @@ function renderCharts(){
     },
     options: commonOptions
   });
+
+  renderCatVarChart();
 
   state.chartsDirty = false;
   $("chartDirtyHint").classList.add("hidden");
@@ -1918,6 +2220,7 @@ function refreshAll(){
   refreshKpiCards();
   refreshLineSection();
   buildProdIndex();
+  refreshChartCatOptions();
 }
 
 /* =========================
@@ -2030,6 +2333,7 @@ $("lineSelect").addEventListener("change", ()=>{
   hideProdSuggest();
   refreshLineSection();
   buildProdIndex();
+  refreshChartCatOptions();
 });
 $("catSelect").addEventListener("change", ()=>{
   $("prodSelect").value = "";
