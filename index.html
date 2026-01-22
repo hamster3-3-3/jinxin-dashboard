@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -650,14 +651,12 @@ function parseTempSheet(wb, sheetName, temp, mmdd){
     const catCell = (idxCat>=0) ? cleanText(row[idxCat]) : "";
     const catCellKey = cleanKey(catCell);
     let cat = "";
-    if(catCellKey === "0"){
-      // 0 代表非品類列（例如平均/空列），不沿用
-      cat = "0";
-    }else if(catCell){
+    // 日報中 B 欄常用 0 填充「合併儲存格」後的空白列；此情況視同空白，向下沿用上一個品類
+    if(catCell && catCellKey !== "0"){
       currentCat = catCell;
       cat = catCell;
     }else{
-      cat = currentCat; // 合併儲存格/僅首筆有值時：向下沿用
+      cat = currentCat; // 合併儲存格/0/空白：向下沿用
     }
 
     const rec = {
@@ -2059,9 +2058,6 @@ function refreshProductDetails(){
   $("pEff").textContent = ecnt ? fmtDec(effSum/ecnt, 2) : "—";
 $("pChange").textContent = changeCnt ? fmtDec(changeSum/changeCnt, 1) : "—";
   $("pRun").textContent = runCnt ? fmtDec(runSum/runCnt, 1) : "—";
-  const bFirst = rows.find(x => x.rec.breakStart || x.rec.breakEnd);
-  const btime = bFirst ? `${fmtTime(bFirst.rec.breakStart)}~${fmtTime(bFirst.rec.breakEnd)}` : "—";
-  $("pBreak").textContent = (rows.length === 1) ? btime : "多日（詳見下表）";
 
   const tb = $("prodTableBody");
   tb.innerHTML = "";
@@ -2077,7 +2073,6 @@ $("pChange").textContent = changeCnt ? fmtDec(changeSum/changeCnt, 1) : "—";
       <td class="mono">${Number.isFinite(toNumber(rec.eff)) ? fmtDec(toNumber(rec.eff),2) : "—"}</td>
             <td class="mono">${Number.isFinite(toNumber(rec.changeMin)) ? fmtDec(toNumber(rec.changeMin),1) : "—"}</td>
       <td class="mono">${Number.isFinite(toNumber(rec.runMin)) ? fmtDec(toNumber(rec.runMin),1) : "—"}</td>
-      <td class="mono">${fmtTime(rec.breakStart)}~${fmtTime(rec.breakEnd)}</td>
     `;
     tb.appendChild(tr);
   }
