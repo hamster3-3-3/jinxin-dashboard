@@ -648,8 +648,6 @@ function parseTempSheet(wb, sheetName, temp, mmdd){
       prodEnd: (idxProdTime>=0) ? row[idxProdTime+1] : null,
       changeMin: (idxChange>=0) ? toNumber(row[idxChange]) : NaN,
       runMin: (idxRun>=0) ? toNumber(row[idxRun]) : NaN,
-      breakStart: (idxBreak>=0) ? row[idxBreak] : null,
-      breakEnd: (idxBreak>=0) ? row[idxBreak+1] : null,
       capAch: (idxCapAch>=0) ? toNumber(row[idxCapAch]) : NaN
     };
 
