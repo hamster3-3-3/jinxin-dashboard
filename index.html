@@ -188,44 +188,14 @@
 
     <!-- Trends (lazy render) -->
     <div class="card">
-      <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
-        <div>
-          <div class="font-extrabold text-slate-900">KPI 趨勢圖（延後生成，避免卡頓）</div>
-          <div class="hint mt-1">
-            只有在你按下「顯示趨勢圖」後才會建立圖表；更改條件後不會自動重繪，請按「更新趨勢圖」。
-          </div>
-        </div>
-        <div class="flex flex-wrap gap-2 items-end">
-          <div class="w-full sm:w-64">
-  <label class="label mb-1 block">圖表指標</label>
-  <select id="chartKpiSelect" class="select">
-    <option value="totalQty">總生產量</option>
-    <option value="revenue">營業額</option>
-    <option value="attendance">出勤人數</option>
-    <option value="efficiency">人時性</option>
-    <option value="avgPrice">平均廠價</option>
-    <option value="multi">多次生產數</option>
-    <option value="itemCount">品項數</option>
-  </select>
+  <div class="flex flex-col gap-1">
+    <div class="text-lg sm:text-xl font-extrabold tracking-wide text-slate-900">KPI 趨勢圖</div>
+    <div class="hint mt-1">
+      只有在你按下「顯示趨勢圖」後才會建立圖表；更改條件後不會自動重繪，請按「更新趨勢圖」。
+    </div>
+  </div>
 
-  <label class="label mt-3 mb-1 block">對比指標（可選）</label>
-  <select id="chartKpiSelect2" class="select">
-    <option value="">不對比</option>
-    <option value="totalQty">總生產量</option>
-    <option value="revenue">營業額</option>
-    <option value="attendance">出勤人數</option>
-    <option value="efficiency">人時性</option>
-    <option value="avgPrice">平均廠價</option>
-    <option value="multi">多次生產數</option>
-    <option value="itemCount">品項數</option>
-  </select>
-</div>
-          <button id="showChartBtn" class="btn primary">顯示趨勢圖</button>
-          <button id="updateChartBtn" class="btn" disabled>更新趨勢圖</button>
-        </div>
-      </div>
-
-      <div id="chartDirtyHint" class="hint mt-3 hidden text-amber-600 font-bold">條件已變更，請按「更新趨勢圖」。</div>
+  <div id="chartDirtyHint" class="hint mt-3 hidden text-amber-600 font-bold">條件已變更，請按「更新趨勢圖」。</div>
 
       <div id="chartArea" class="mt-5 hidden">
         <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -243,6 +213,41 @@
           </div>
         </div>
       </div>
+
+<div class="mt-5 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full lg:w-auto">
+    <div class="w-full sm:w-64">
+      <label class="label mb-1 block">圖表指標</label>
+        <select id="chartKpiSelect" class="select">
+          <option value="totalQty">總生產量</option>
+          <option value="revenue">營業額</option>
+          <option value="attendance">出勤人數</option>
+          <option value="efficiency">人時性</option>
+          <option value="avgPrice">平均廠價</option>
+          <option value="multi">多次生產數</option>
+          <option value="itemCount">品項數</option>
+        </select>
+    </div>
+    <div class="w-full sm:w-64">
+      <label class="label mb-1 block">對比指標</label>
+        <select id="chartKpiSelect2" class="select">
+          <option value="">不對比</option>
+          <option value="totalQty">總生產量</option>
+          <option value="revenue">營業額</option>
+          <option value="attendance">出勤人數</option>
+          <option value="efficiency">人時性</option>
+          <option value="avgPrice">平均廠價</option>
+          <option value="multi">多次生產數</option>
+          <option value="itemCount">品項數</option>
+        </select>
+    </div>
+  </div>
+  <div class="flex gap-2 justify-end">
+    <button id="showChartBtn" class="btn primary">顯示趨勢圖</button>
+    <button id="updateChartBtn" class="btn" disabled>更新趨勢圖</button>
+  </div>
+</div>
+
     </div>
 
     <!-- Drilldown -->
