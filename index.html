@@ -263,6 +263,20 @@
     <div id="activeCatCards" class="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3"></div>
   </div>
 
+  <div class="card mt-6">
+    <div class="flex items-center justify-between gap-4">
+      <div class="h2">品名搜尋</div>
+      <div class="text-slate-500 text-sm font-bold"></div>
+    </div>
+
+    <div class="mt-4">
+      <div class="relative">
+        <input id="prodSearch" class="input" placeholder="輸入品名關鍵字" disabled autocomplete="off" />
+        <div id="prodSuggest" class="suggest hidden"></div>
+      </div>
+    </div>
+  </div>
+
 <div class="card space-y-4">
       <div class="font-extrabold text-slate-900">線別 / 品類 / 品名</div>
 
@@ -296,11 +310,7 @@
         </div>
         <div>
           <label class="label block mb-2">品名</label>
-          <div class="relative">
-            <input id="prodSearch" class="input" placeholder="輸入品名關鍵字" disabled autocomplete="off" />
-            <div id="prodSuggest" class="suggest hidden"></div>
-          </div>
-          <select id="prodSelect" class="select hidden" disabled></select>
+          <select id="prodSelect" class="select" disabled></select>
         </div>
         <div class="flex items-end">
           <button id="resetDrillBtn" class="btn" disabled>清除選項</button>
