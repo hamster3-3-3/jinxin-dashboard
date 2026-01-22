@@ -1095,6 +1095,75 @@ let monthChart = null;
 let weekChart = null;
 let prodChart = null;
 
+/* =========================
+   Chart value labels (data point annotation)
+========================= */
+function fmtNumber(v){
+  if(v === null || v === undefined || !Number.isFinite(v)) return "—";
+  // integers show as comma separated
+  if(Math.abs(v - Math.round(v)) < 1e-9) return Math.round(v).toLocaleString("zh-Hant-TW");
+  return v.toFixed(2);
+}
+function fmtKpiValue(kpi, v){
+  if(v === null || v === undefined || !Number.isFinite(v)) return "—";
+  if(["attendance","efficiency","avgPrice"].includes(kpi)) return v.toFixed(2);
+  return Math.round(v).toLocaleString("zh-Hant-TW");
+}
+function fmtProdValue(metric, v){
+  if(v === null || v === undefined || !Number.isFinite(v)) return "—";
+  if(["revenue","qty","runMin"].includes(metric)) return Math.round(v).toLocaleString("zh-Hant-TW");
+  return v.toFixed(2);
+}
+const valueLabelPlugin = {
+  id: "valueLabels",
+  afterDatasetsDraw(chart, args, opts){
+    if(!opts || opts.enabled === false) return;
+    const ctx = chart.ctx;
+    const area = chart.chartArea;
+    if(!area) return;
+
+    // Avoid extremely dense labels: if too many points, show every Nth (still keeps readability)
+    const total = chart.data?.labels?.length || 0;
+    const step = (opts.step && Number.isFinite(opts.step)) ? opts.step : (total > 45 ? 2 : 1);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(area.left, area.top, area.right - area.left, area.bottom - area.top);
+    ctx.clip();
+
+    ctx.fillStyle = opts.color || "#334155";
+    ctx.font = `700 ${opts.fontSize || 11}px "Noto Sans TC", system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+
+    const formatter = opts.formatter || ((v)=>fmtNumber(v));
+    const offset = (opts.offset ?? 8);
+
+    chart.data.datasets.forEach((ds, di)=>{
+      const meta = chart.getDatasetMeta(di);
+      if(meta.hidden) return;
+      meta.data.forEach((pt, i)=>{
+        if(step > 1 && (i % step) !== 0) return;
+        const v = ds.data[i];
+        if(v === null || v === undefined || !Number.isFinite(v)) return;
+        const txt = formatter(v, chart, ds, i);
+        if(!txt || txt === "—") return;
+        ctx.fillText(String(txt), pt.x, pt.y - offset);
+      });
+    });
+
+    ctx.restore();
+  }
+};
+// Register once
+try{
+  if(window.Chart && !window.__valueLabelsRegistered){
+    window.Chart.register(valueLabelPlugin);
+    window.__valueLabelsRegistered = true;
+  }
+}catch(e){}
+
+
 function kpiLabel(k){
   return {
     totalQty: "總生產量",
@@ -1338,13 +1407,14 @@ function renderProductTrend(rows){
         data: values,
         tension: 0.25,
         pointRadius: 3,
+        pointHoverRadius: 5,
         spanGaps: true
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: true } },
+      plugins: { legend: { display: true }, valueLabels: { enabled:true, fontSize: 11, offset: 10, formatter: (v)=>fmtProdValue(metric, v) } },
       scales: { y: { beginAtZero: false } }
     }
   });
@@ -1372,7 +1442,13 @@ function renderCharts(){
           if(["attendance","efficiency","avgPrice"].includes(kpi)) return `${ctx.dataset.label}: ${v.toFixed(2)}`;
           return `${ctx.dataset.label}: ${Math.round(v).toLocaleString("zh-Hant-TW")}`;
         }
-      }}
+      }},
+      valueLabels: {
+        enabled: true,
+        fontSize: 11,
+        offset: 10,
+        formatter: (v)=>fmtKpiValue(kpi, v)
+      }
     },
     scales: { x: { grid:{display:false} } }
   };
@@ -1390,7 +1466,9 @@ function renderCharts(){
         data: ms.values,
         spanGaps: true,
         tension: 0.25,
-        pointRadius: 1
+        pointRadius: 3,
+        pointHoverRadius: 5,
+        pointHoverRadius: 5
       }]
     },
     options: commonOptions
@@ -1406,7 +1484,9 @@ function renderCharts(){
         data: ws.values,
         spanGaps: true,
         tension: 0.25,
-        pointRadius: 1
+        pointRadius: 3,
+        pointHoverRadius: 5,
+        pointHoverRadius: 5
       }]
     },
     options: commonOptions
