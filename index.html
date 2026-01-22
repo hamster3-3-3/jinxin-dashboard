@@ -102,7 +102,7 @@
             <button class="seg-btn" data-range="day">日別</button>
           </div>
           <div class="hint mt-2">
-            年別＝12 個月「月平均」；月別＝每週平均；週別＝週一到週日；日別＝單日。
+            年別＝12 個月「月平均」；月別＝每週平均；週別＝週二到週一；日別＝單日。
           </div>
         </div>
 
@@ -131,13 +131,16 @@
         </div>
 
         <div id="monthPanel" class="hidden">
-          <div class="label mb-1">月別：顯示「每週平均」（週一至週日）</div>
+          <div class="label mb-1">月別：顯示「每週平均」（週二至週一）</div>
           <select id="monthSelect" class="select mt-2"></select>
         </div>
 
         <div id="weekPanel" class="hidden">
-          <div class="label mb-1">週別：顯示週一至週日</div>
-          <select id="weekSelect" class="select mt-2"></select>
+          <div class="label mb-1">週別：先選月份再選週（週二至週一）</div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+            <select id="weekMonthSelect" class="select"></select>
+            <select id="weekSelect" class="select"></select>
+          </div>
         </div>
 
         <div id="dayPanel" class="hidden">
@@ -416,8 +419,9 @@ function dateObjToStr(d){
 }
 function getWeekStartUTC(dateObj){
   const d = new Date(dateObj.getTime());
-  const day = (d.getUTCDay() + 6) % 7; // Mon=0..Sun=6
-  d.setUTCDate(d.getUTCDate() - day);
+  // 以「週二」為一週起點（週二～週一）
+  const offset = (d.getUTCDay() - 2 + 7) % 7; // Tue=2
+  d.setUTCDate(d.getUTCDate() - offset);
   d.setUTCHours(0,0,0,0);
   return d;
 }
@@ -816,6 +820,45 @@ function togglePanels(){
   $("weekPanel").classList.toggle("hidden", state.rangeMode !== "week");
   $("dayPanel").classList.toggle("hidden", state.rangeMode !== "day");
 }
+function fmtMd(dateObj){
+  const m = String(dateObj.getUTCMonth()+1).padStart(2,"0");
+  const d = String(dateObj.getUTCDate()).padStart(2,"0");
+  return `${m}/${d}`;
+}
+
+function refreshWeekOptions(){
+  const weekSel = $("weekSelect");
+  if(!weekSel) return;
+
+  weekSel.innerHTML = "";
+  const dates = getAllDatesForTemp(state.temp).map(o=>o.dateObj);
+
+  const weekMap = new Map();
+  for(const d of dates){
+    const ws = getWeekStartUTC(d);
+    const wsMonth = ws.getUTCMonth()+1;
+    if(wsMonth !== state.month) continue; // 以週起始日（週二）決定歸屬月份
+    const wsStr = dateObjToStr(ws);
+    if(!weekMap.has(wsStr)) weekMap.set(wsStr, {start: ws, end: addDaysUTC(ws,6)});
+  }
+  const weeks = Array.from(weekMap.values()).sort((a,b)=>a.start-b.start);
+
+  for(const w of weeks){
+    const opt = document.createElement("option");
+    opt.value = dateObjToStr(w.start);
+    opt.textContent = `${fmtMd(w.start)} ～ ${fmtMd(w.end)}`;
+    weekSel.appendChild(opt);
+  }
+
+  // default / keep selection
+  const current = state.weekStartStr || "";
+  const valid = weeks.some(w => dateObjToStr(w.start) === current);
+  if(!valid){
+    state.weekStartStr = weeks.length ? dateObjToStr(weeks[0].start) : "";
+  }
+  weekSel.value = state.weekStartStr || "";
+}
+
 function refreshSelectors(){
   // monthSelect: 01..12
   const monthSel = $("monthSelect");
@@ -834,25 +877,18 @@ function refreshSelectors(){
   if(!state.month) state.month = 7;
   monthSel.value = String(state.month);
 
-  // weeks list
-  const weekSel = $("weekSelect");
-  weekSel.innerHTML = "";
+  // dates for current temp
   const dates = getAllDatesForTemp(state.temp).map(o=>o.dateObj);
-  const weekMap = new Map();
-  for(const d of dates){
-    const ws = getWeekStartUTC(d);
-    const wsStr = dateObjToStr(ws);
-    if(!weekMap.has(wsStr)) weekMap.set(wsStr, {start: ws, end: addDaysUTC(ws,6)});
+
+  // week month select (週別：先選月份)
+  const weekMonthSel = $("weekMonthSelect");
+  if(weekMonthSel){
+    weekMonthSel.innerHTML = monthSel.innerHTML;
+    weekMonthSel.value = String(state.month);
   }
-  const weeks = Array.from(weekMap.values()).sort((a,b)=>a.start-b.start);
-  for(const w of weeks){
-    const opt = document.createElement("option");
-    opt.value = dateObjToStr(w.start);
-    opt.textContent = `${dateObjToStr(w.start)} ～ ${dateObjToStr(w.end)}`;
-    weekSel.appendChild(opt);
-  }
-  if(!state.weekStartStr && weeks.length) state.weekStartStr = dateObjToStr(weeks[0].start);
-  weekSel.value = state.weekStartStr || "";
+
+  // weeks list (依「週二～週一」; 且以週起始日歸屬月份)
+  refreshWeekOptions();
 
   // daySelect default earliest
   const daySel = $("daySelect");
@@ -910,7 +946,8 @@ function summariesInRange(){
   }
   if(state.rangeMode === "month"){
     const m = state.month;
-    return all.filter(o => o.dateObj.getUTCMonth()+1 === m)
+    // 以「週二～週一」為一週；跨月時以週起始日（週二）決定歸屬月份
+    return all.filter(o => (getWeekStartUTC(o.dateObj).getUTCMonth()+1) === m)
               .map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
   }
   if(state.rangeMode === "week"){
@@ -1028,7 +1065,7 @@ function refreshActiveRangeText(){
     hint = "顯示：12 個月月平均（各月日平均），再取全年平均";
   }else if(state.rangeMode === "month"){
     title = `${state.year}-${String(state.month).padStart(2,"0")}｜${tempLabel}`;
-    hint = "顯示：本月每週平均（週一～週日，週內日平均），再取本月平均";
+    hint = "顯示：本月每週平均（週二～週一，週內日平均），再取本月平均";
   }else if(state.rangeMode === "week"){
     const ws = state.weekStartStr ? new Date(state.weekStartStr+"T00:00:00Z") : null;
     const we = ws ? addDaysUTC(ws,6) : null;
@@ -1261,7 +1298,8 @@ function buildProductSeries(rows, metric){
   let focus = items;
 
   if(mode === "month"){
-    focus = items.filter(it => (it.dateObj.getUTCMonth()+1)===state.month);
+    // 以週起始日（週二）歸屬月份
+    focus = items.filter(it => (getWeekStartUTC(it.dateObj).getUTCMonth()+1) === state.month);
     title = `週別（${String(state.month).padStart(2,"0")} 月｜每週平均）`;
   }
 
@@ -1703,6 +1741,8 @@ function markChartsDirty(){
 }
 function refreshAll(){
   togglePanels();
+  // keep month selectors in sync
+  const wms = $("weekMonthSelect"); if(wms) wms.value = String(state.month);
   refreshActiveRangeText();
   refreshKpiCards();
   refreshLineSection();
@@ -1731,9 +1771,21 @@ document.querySelectorAll("[data-temp]").forEach(btn=>{
 });
 $("monthSelect").addEventListener("change", ()=>{
   state.month = Number($("monthSelect").value) || state.month;
+  const wms = $("weekMonthSelect"); if(wms) wms.value = String(state.month);
+  refreshWeekOptions();
   refreshAll();
   markChartsDirty();
 });
+const _weekMonthSel = $("weekMonthSelect");
+if(_weekMonthSel){
+  _weekMonthSel.addEventListener("change", ()=>{
+    state.month = Number($("weekMonthSelect").value) || state.month;
+    $("monthSelect").value = String(state.month);
+    refreshWeekOptions();
+    refreshAll();
+    markChartsDirty();
+  });
+}
 $("weekSelect").addEventListener("change", ()=>{
   state.weekStartStr = $("weekSelect").value;
   refreshAll();
