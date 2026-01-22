@@ -199,31 +199,28 @@
         </div>
         <div class="flex flex-wrap gap-2 items-end">
           <div class="w-full sm:w-64">
-            <label class="label mb-1 block">圖表指標</label>
-            <select id="chartKpiSelect" class="select">
-              <option value="totalQty">總生產量</option>
-              <option value="revenue">營業額</option>
-              <option value="attendance">出勤人數</option>
-              <option value="efficiency">人時性</option>
-              <option value="avgPrice">平均廠價</option>
-              <option value="multi">多次生產數</option>
-            </select>
-          
-            <label class="label mt-3 mb-1 block">品類（可複選）</label>
-            <div class="relative" id="chartCatWrap">
-              <button id="chartCatBtn" type="button" class="select w-full text-left flex items-center justify-between">
-                <span id="chartCatBtnText">選擇品類（0）</span>
-                <span class="text-slate-400 font-extrabold">▾</span>
-              </button>
-              <div id="chartCatDropdown" class="hidden absolute z-50 mt-2 w-full rounded-2xl border border-slate-200 bg-white shadow-lg p-3">
-                <input id="chartCatSearch" class="input" placeholder="搜尋品類" />
-                <div id="chartCatList" class="mt-3 max-h-56 overflow-auto pr-1 space-y-2"></div>
-                <div class="mt-3 flex gap-2">
-                  <button id="chartCatClearBtn" type="button" class="btn">清除</button>
-                  <button id="chartCatCloseBtn" type="button" class="btn primary flex-1">完成</button>
-                </div>
-              </div>
-            </div>
+  <label class="label mb-1 block">圖表指標</label>
+  <select id="chartKpiSelect" class="select">
+    <option value="totalQty">總生產量</option>
+    <option value="revenue">營業額</option>
+    <option value="attendance">出勤人數</option>
+    <option value="efficiency">人時性</option>
+    <option value="avgPrice">平均廠價</option>
+    <option value="multi">多次生產數</option>
+    <option value="itemCount">品項數</option>
+  </select>
+
+  <label class="label mt-3 mb-1 block">對比指標（可選）</label>
+  <select id="chartKpiSelect2" class="select">
+    <option value="">不對比</option>
+    <option value="totalQty">總生產量</option>
+    <option value="revenue">營業額</option>
+    <option value="attendance">出勤人數</option>
+    <option value="efficiency">人時性</option>
+    <option value="avgPrice">平均廠價</option>
+    <option value="multi">多次生產數</option>
+    <option value="itemCount">品項數</option>
+  </select>
 </div>
           <button id="showChartBtn" class="btn primary">顯示趨勢圖</button>
           <button id="updateChartBtn" class="btn" disabled>更新趨勢圖</button>
@@ -246,14 +243,6 @@
               <canvas id="weekChart"></canvas>
             </div>
           </div>
-        </div>
-
-        <div class="mt-6">
-          <div id="catVarChartTitle" class="label mb-2">品類種類數趨勢</div>
-          <div class="chartWrap">
-            <canvas id="catVarChart"></canvas>
-          </div>
-          <div id="catVarEmptyHint" class="hint mt-2">請於上方「品類（可複選）」選擇一個或多個品類，以顯示「品類種類數」趨勢。</div>
         </div>
       </div>
     </div>
@@ -484,12 +473,12 @@ const state = {
   weekStartStr: "",
   dayStr: "",
   chartKpi: "totalQty",
-  chartCatSelected: new Set(),
-  chartCatOptions: [],
-  chartCatKeyToName: new Map(),
+  chartKpi2: "",
+
 
   summaries: new Map(),         // key temp|mmdd
   records: new Map(),           // key temp|mmdd|line|cat|prod
+  itemCountDaily: new Map(),     // key temp|mmdd -> count of product rows (cat!=0)
   lineHumanDaily: new Map(),    // key temp|mmdd|lineKey
   lineAvgFromSheets: new Map(), // key temp|mmdd|lineKey
 
@@ -677,7 +666,14 @@ function parseTempSheet(wb, sheetName, temp, mmdd){
       capAch: (idxCapAch>=0) ? toNumber(row[idxCapAch]) : NaN
     };
 
-    const key = `${temp}|${mmdd}|${cleanKey(currentLine)}|${cleanKey(cat)}|${cleanKey(prod)}`;
+    
+// 品項數：以「列數」計算（同一天同品名重複也算），排除品類為 0/空白，以及彙總列（平均/合計/小計/總計）
+if(cat && cleanKey(cat) !== "0" && prod && !/(平均|合計|小計|總計)/.test(prod)){
+  const dk = `${temp}|${mmdd}`;
+  state.itemCountDaily.set(dk, (state.itemCountDaily.get(dk) || 0) + 1);
+}
+
+const key = `${temp}|${mmdd}|${cleanKey(currentLine)}|${cleanKey(cat)}|${cleanKey(prod)}`;
     upsert(state.records, key, rec);
 
     // 4°C: average rows for line-level achievement averages
@@ -1213,7 +1209,6 @@ function refreshKpiCards(){
 ========================= */
 let monthChart = null;
 let weekChart = null;
-let catVarChart = null;
 let prodChart = null;
 // Safety: older parsing referenced idxBreak (break time column index). We no longer use break columns,
 // but keep this to prevent runtime ReferenceError if any legacy path still touches it.
@@ -1296,13 +1291,13 @@ function kpiLabel(k){
     attendance: "出勤人數",
     efficiency: "人時性",
     avgPrice: "平均廠價",
-    multi: "多次生產數"
+    multi: "多次生產數",
+    itemCount: "品項數"
   }[k] || k;
 }
 
-function buildMonthlySeries(){
+function buildMonthlySeries(kpi = state.chartKpi){
   const temp = state.temp;
-  const kpi = state.chartKpi;
   const days = getAllDatesForTemp(temp).map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
 
   const byM = new Map();
@@ -1319,7 +1314,7 @@ function buildMonthlySeries(){
     const items = byM.get(m) || [];
     if(!items.length){ values.push(null); continue; }
 
-    let qty=0, rev=0, multi=0, attSum=0, effSum=0, attCnt=0, effCnt=0, dayCnt=0;
+    let qty=0, rev=0, multi=0, itemSum=0, attSum=0, effSum=0, attCnt=0, effCnt=0, dayCnt=0;
     for(const it of items){
       const s = it.summary;
       const q = toNumber(s.totalQty); if(Number.isFinite(q)) qty += q;
@@ -1327,6 +1322,10 @@ function buildMonthlySeries(){
       const mu = toNumber(s.multi); if(Number.isFinite(mu)) multi += mu;
       const a = toNumber(s.attendance); if(Number.isFinite(a)){ attSum += a; attCnt++; }
       const e = toNumber(s.efficiency); if(Number.isFinite(e)){ effSum += e; effCnt++; }
+      // 品項數：以列數計算（cat!=0/空白，平均/合計列已在解析時排除）
+      const dk = `${temp}|${it.mmdd}`;
+      const ic = state.itemCountDaily.get(dk);
+      if(Number.isFinite(ic)) itemSum += ic;
       dayCnt++;
     }
     const dn = Math.max(dayCnt, 1);
@@ -1336,16 +1335,16 @@ function buildMonthlySeries(){
       multi: multi/dn,
       attendance: attCnt ? (attSum/attCnt) : null,
       efficiency: effCnt ? (effSum/effCnt) : null,
-      avgPrice: (qty>0 && rev>0) ? (rev/qty) : null
+      avgPrice: (qty>0 && rev>0) ? (rev/qty) : null,
+      itemCount: itemSum/dn
     };
     values.push(monthDailyAvg[kpi] ?? null);
   }
   return {labels, values};
 }
 
-function buildWeeklyOrDailySeries(){
+function buildWeeklyOrDailySeries(kpi = state.chartKpi){
   const temp = state.temp;
-  const kpi = state.chartKpi;
   const mode = state.rangeMode;
 
   const all = getAllDatesForTemp(temp).map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
@@ -1382,6 +1381,7 @@ function buildWeeklyOrDailySeries(){
         totalQty: q,
         revenue: r,
         multi: mu,
+        itemCount: (state.itemCountDaily.get(`${temp}|${o.mmdd}`) || 0),
         attendance: a,
         efficiency: e,
         avgPrice: (Number.isFinite(q)&&q>0&&Number.isFinite(r)) ? (r/q) : toNumber(s.avgPrice)
@@ -1402,7 +1402,7 @@ function buildWeeklyOrDailySeries(){
   const labels = [];
   const values = [];
   for(const [wsStr, items] of weeks){
-    let qty=0, rev=0, multi=0, attSum=0, effSum=0, attCnt=0, effCnt=0, dayCnt=0;
+    let qty=0, rev=0, multi=0, itemSum=0, attSum=0, effSum=0, attCnt=0, effCnt=0, dayCnt=0;
     for(const it of items){
       const s = it.summary;
       const q = toNumber(s.totalQty); if(Number.isFinite(q)) qty += q;
@@ -1410,6 +1410,9 @@ function buildWeeklyOrDailySeries(){
       const mu = toNumber(s.multi); if(Number.isFinite(mu)) multi += mu;
       const a = toNumber(s.attendance); if(Number.isFinite(a)){ attSum += a; attCnt++; }
       const e = toNumber(s.efficiency); if(Number.isFinite(e)){ effSum += e; effCnt++; }
+      const dk = `${temp}|${it.mmdd}`;
+      const ic = state.itemCountDaily.get(dk);
+      if(Number.isFinite(ic)) itemSum += ic;
       dayCnt++;
     }
     const dn = Math.max(dayCnt, 1);
@@ -1419,7 +1422,8 @@ function buildWeeklyOrDailySeries(){
       multi: multi/dn,
       attendance: attCnt ? (attSum/attCnt) : null,
       efficiency: effCnt ? (effSum/effCnt) : null,
-      avgPrice: (qty>0 && rev>0) ? (rev/qty) : null
+      avgPrice: (qty>0 && rev>0) ? (rev/qty) : null,
+      itemCount: itemSum/dn
     };
     labels.push(wsStr.slice(5));
     values.push(weekAvg[kpi] ?? null);
@@ -1430,274 +1434,10 @@ function buildWeeklyOrDailySeries(){
 /* =========================
    KPI Trend: Category Multi-select & "Variety Count" Trend
 ========================= */
-function refreshChartCatOptions(){
-  // Derive categories from current selection (state.prodIndex built in buildProdIndex()).
-  const map = new Map(); // catKey -> {name, prodSet(Set prodKey)}
-  for(const it of (state.prodIndex || [])){
-    if(!it.catKey || it.catKey === "0") continue;
-    if(!map.has(it.catKey)) map.set(it.catKey, {name: it.cat, prods: new Set()});
-    map.get(it.catKey).prods.add(it.prodKey);
-  }
-  const opts = Array.from(map.entries()).map(([key, v])=>({
-    key,
-    name: v.name || key,
-    count: v.prods.size
-  })).sort((a,b)=>a.name.localeCompare(b.name, "zh-Hant"));
-
-  state.chartCatOptions = opts;
-  state.chartCatKeyToName = new Map(opts.map(o=>[o.key, o.name]));
-
-  if(!state.chartCatSelected) state.chartCatSelected = new Set();
-  const allowed = new Set(opts.map(o=>o.key));
-  for(const k of Array.from(state.chartCatSelected)){
-    if(!allowed.has(k)) state.chartCatSelected.delete(k);
-  }
-  renderChartCatList();
-  updateChartCatBtnText();
-}
-
-function updateChartCatBtnText(){
-  const sel = Array.from(state.chartCatSelected || []);
-  const btnText = $("chartCatBtnText");
-  if(!btnText) return;
-  if(sel.length === 0){ btnText.textContent = "選擇品類（0）"; return; }
-  const names = sel.map(k => state.chartCatKeyToName.get(k) || k);
-  const show = names.slice(0,2).join("、");
-  btnText.textContent = sel.length <= 2 ? `已選：${show}` : `已選：${show}…（${sel.length}）`;
-}
-
-function renderChartCatList(){
-  const list = $("chartCatList");
-  if(!list) return;
-  const q = ( $("chartCatSearch")?.value || "" ).trim();
-  list.innerHTML = "";
-  const opts = state.chartCatOptions || [];
-  const frag = document.createDocumentFragment();
-
-  for(const o of opts){
-    if(q && !(o.name.includes(q))) continue;
-
-    const row = document.createElement("label");
-    row.className = "flex items-center gap-3 p-2 rounded-xl hover:bg-slate-50 cursor-pointer";
-
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.className = "w-5 h-5";
-    cb.checked = (state.chartCatSelected || new Set()).has(o.key);
-    cb.addEventListener("change", ()=>{
-      if(!state.chartCatSelected) state.chartCatSelected = new Set();
-      if(cb.checked) state.chartCatSelected.add(o.key);
-      else state.chartCatSelected.delete(o.key);
-      updateChartCatBtnText();
-      markChartsDirty();
-    });
-
-    const name = document.createElement("div");
-    name.className = "flex-1 font-bold text-slate-900";
-    name.textContent = o.name;
-
-    const meta = document.createElement("div");
-    meta.className = "text-slate-500 font-bold text-sm";
-    meta.textContent = `${o.count}`;
-
-    row.appendChild(cb);
-    row.appendChild(name);
-    row.appendChild(meta);
-    frag.appendChild(row);
-  }
-  list.appendChild(frag);
-}
-
-function openChartCatDropdown(open){
-  const dd = $("chartCatDropdown");
-  if(!dd) return;
-  if(open) dd.classList.remove("hidden");
-  else dd.classList.add("hidden");
-}
-
-function initChartCatUI(){
-  const btn = $("chartCatBtn");
-  const wrap = $("chartCatWrap");
-  if(!btn || !wrap) return;
-
-  btn.addEventListener("click", (e)=>{
-    e.stopPropagation();
-    const dd = $("chartCatDropdown");
-    const isOpen = dd && !dd.classList.contains("hidden");
-    openChartCatDropdown(!isOpen);
-    if(!isOpen){
-      // fresh render when opening
-      renderChartCatList();
-      $("chartCatSearch")?.focus();
-    }
-  });
-
-  $("chartCatSearch")?.addEventListener("input", ()=> renderChartCatList());
-
-  $("chartCatClearBtn")?.addEventListener("click", ()=>{
-    if(!state.chartCatSelected) state.chartCatSelected = new Set();
-    state.chartCatSelected.clear();
-    renderChartCatList();
-    updateChartCatBtnText();
-    markChartsDirty();
-  });
-
-  $("chartCatCloseBtn")?.addEventListener("click", ()=> openChartCatDropdown(false));
-
-  document.addEventListener("click", (e)=>{
-    const dd = $("chartCatDropdown");
-    if(!dd || dd.classList.contains("hidden")) return;
-    if(wrap.contains(e.target)) return;
-    openChartCatDropdown(false);
-  });
-}
-
-function buildCatVarSeries(){
-  const temp = state.temp;
-  const selected = Array.from(state.chartCatSelected || []);
-  if(!selected.length) return {title:"品類種類數趨勢", labels:[], datasets:[]};
-
-  // Build focus dates aligned with KPI weekChart logic.
-  const all = getAllDatesForTemp(temp)
-    .map(o => ({...o, has: !!getSummaryForDay(temp, o.mmdd)}))
-    .filter(x=>x.has);
-
-  if(!all.length) return {title:"品類種類數趨勢", labels:[], datasets:[]};
-
-  const mode = state.rangeMode;
-  let title = "品類種類數趨勢";
-  let focus = all;
-
-  if(mode === "month"){
-    focus = all.filter(o => (getWeekStartUTC(o.dateObj).getUTCMonth()+1) === state.month);
-    title = `品類種類數趨勢（${String(state.month).padStart(2,"0")} 月｜週二至週一）`;
-  }else if(mode === "week"){
-    const ws = new Date(state.weekStartStr + "T00:00:00Z");
-    const we = addDaysUTC(ws,6);
-    focus = all.filter(o => o.dateObj >= ws && o.dateObj <= we);
-    title = `品類種類數趨勢（日別｜${dateObjToStr(ws)}～${dateObjToStr(we)}）`;
-  }else if(mode === "day"){
-    if(state.dayStr){
-      const dSel = new Date(state.dayStr + "T00:00:00Z");
-      const m = dSel.getUTCMonth()+1;
-      focus = all.filter(o => (getWeekStartUTC(o.dateObj).getUTCMonth()+1) === m);
-      title = `品類種類數趨勢（${String(m).padStart(2,"0")} 月｜週二至週一）`;
-    }
-  }else{
-    title = "品類種類數趨勢（全年｜週二至週一）";
-  }
-
-  if(!focus.length) return {title, labels:[], datasets:[]};
-
-  // Build buckets
-  const labels = [];
-  const buckets = [];
-  const mmddToBucket = new Map();
-  const focusMmddSet = new Set(focus.map(o=>o.mmdd));
-
-  if(mode === "week"){
-    focus.sort((a,b)=>a.dateObj-b.dateObj);
-    for(let i=0;i<focus.length;i++){
-      const o = focus[i];
-      labels.push(o.dateStr.slice(5));
-      buckets.push({mmdds:[o.mmdd]});
-      mmddToBucket.set(o.mmdd, i);
-    }
-  }else{
-    const byWeek = new Map();
-    for(const it of focus){
-      const ws = getWeekStartUTC(it.dateObj);
-      const wsStr = dateObjToStr(ws);
-      if(!byWeek.has(wsStr)) byWeek.set(wsStr, []);
-      byWeek.get(wsStr).push(it.mmdd);
-    }
-    const weeks = Array.from(byWeek.entries()).sort((a,b)=>a[0].localeCompare(b[0]));
-    for(let i=0;i<weeks.length;i++){
-      const [wsStr, mmdds] = weeks[i];
-      labels.push(wsStr.slice(5));
-      buckets.push({mmdds});
-      for(const mmdd of mmdds) mmddToBucket.set(mmdd, i);
-    }
-  }
-
-  const bucketCatSets = buckets.map(()=> new Map(selected.map(k=>[k, new Set()] )));
-
-  for(const rec of state.records.values()){
-    if(rec.temp !== temp) continue;
-    if(!focusMmddSet.has(rec.mmdd)) continue;
-
-    const catKey = cleanKey(rec.category || "");
-    if(!catKey || catKey === "0") continue;
-    if(!selected.includes(catKey)) continue;
-
-    const prodKey = cleanKey(rec.product || "");
-    if(!prodKey) continue;
-
-    const bidx = mmddToBucket.get(rec.mmdd);
-    if(bidx === undefined) continue;
-    bucketCatSets[bidx].get(catKey).add(prodKey);
-  }
-
-  const datasets = selected.map((catKey)=>({
-    label: state.chartCatKeyToName.get(catKey) || catKey,
-    data: bucketCatSets.map(m => (m.get(catKey)?.size ?? 0)),
-    spanGaps: true,
-    tension: 0.25,
-    pointRadius: 3,
-    pointHoverRadius: 5
-  }));
-
-  return {title, labels, datasets};
-}
-
-function renderCatVarChart(){
-  const titleEl = $("catVarChartTitle");
-  const hintEl = $("catVarEmptyHint");
-  const canvas = $("catVarChart");
-  if(!canvas) return;
-
-  const selected = Array.from(state.chartCatSelected || []);
-  if(!selected.length){
-    if(titleEl) titleEl.textContent = "品類種類數趨勢";
-    if(hintEl) hintEl.classList.remove("hidden");
-    if(catVarChart){ catVarChart.destroy(); catVarChart = null; }
-    return;
-  }
-  if(hintEl) hintEl.classList.add("hidden");
-
-  const series = buildCatVarSeries();
-  if(titleEl) titleEl.textContent = series.title;
-
-  const ctx = canvas.getContext("2d");
-  if(catVarChart){ catVarChart.destroy(); catVarChart = null; }
-  catVarChart = new Chart(ctx, {
-    type: "line",
-    data: { labels: series.labels, datasets: series.datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      plugins: {
-        legend: { display: true, position: "top" },
-        decimation: { enabled: true, algorithm: "min-max" },
-        tooltip: { callbacks: {
-          label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y ?? 0}`
-        }},
-        valueLabels: { enabled: false }
-      },
-      scales: {
-        x: { grid:{display:false} },
-        y: { beginAtZero: true, ticks: { precision: 0 } }
-      }
-    }
-  });
-}
-
 
 function destroyCharts(){
   if(monthChart){ monthChart.destroy(); monthChart = null; }
   if(weekChart){ weekChart.destroy(); weekChart = null; }
-  if(catVarChart){ catVarChart.destroy(); catVarChart = null; }
 }
 
 function destroyProdChart(){
@@ -1814,12 +1554,37 @@ function renderProductTrend(rows){
 }
 
 
-function renderCharts(){
-  const kpi = state.chartKpi;
+function renderChartfunction renderCharts(){
+  const kpi1 = state.chartKpi;
+  const kpi2 = state.chartKpi2 || "";
 
-  const ms = buildMonthlySeries();
-  const ws = buildWeeklyOrDailySeries();
-  $("weekChartTitle").textContent = ws.title;
+  const ms1 = buildMonthlySeries(kpi1);
+  const ms2 = kpi2 ? buildMonthlySeries(kpi2) : null;
+
+  const ws1 = buildWeeklyOrDailySeries(kpi1);
+  const ws2 = kpi2 ? buildWeeklyOrDailySeries(kpi2) : null;
+
+  $("weekChartTitle").textContent = ws1.title;
+
+  const isDecimal = (k) => ["attendance","efficiency","avgPrice"].includes(k);
+  const formatTick = (k, v) => {
+    if(v === null || v === undefined) return "";
+    const n = Number(v);
+    if(!Number.isFinite(n)) return "";
+    if(k === "efficiency") return n.toFixed(1);
+    if(k === "attendance") return n.toFixed(1);
+    if(k === "avgPrice") return n.toFixed(2);
+    return Math.round(n).toLocaleString("zh-Hant-TW");
+  };
+  const formatTooltip = (k, v) => {
+    if(v === null || v === undefined) return "無資料";
+    const n = Number(v);
+    if(!Number.isFinite(n)) return "無資料";
+    if(k === "efficiency") return n.toFixed(1);
+    if(k === "attendance") return n.toFixed(2);
+    if(k === "avgPrice") return n.toFixed(2);
+    return Math.round(n).toLocaleString("zh-Hant-TW");
+  };
 
   const commonOptions = {
     responsive: true,
@@ -1830,63 +1595,91 @@ function renderCharts(){
       decimation: { enabled: true, algorithm: "min-max" },
       tooltip: { callbacks: {
         label: (ctx) => {
+          const k = ctx.dataset._kpi || kpi1;
           const v = ctx.parsed.y;
-          if(v === null || v === undefined) return "無資料";
-          if(["attendance","efficiency","avgPrice"].includes(kpi)) return `${ctx.dataset.label}: ${v.toFixed(2)}`;
-          return `${ctx.dataset.label}: ${Math.round(v).toLocaleString("zh-Hant-TW")}`;
+          return `${ctx.dataset.label}: ${formatTooltip(k, v)}`;
         }
       }},
       valueLabels: { enabled: false }
     },
-    scales: { x: { grid:{display:false} } }
+    scales: {
+      x: { grid:{display:false} },
+      y: { position: "left", ticks: { callback: (v)=>formatTick(kpi1, v) } },
+      y1: {
+        position: "right",
+        display: !!kpi2,
+        grid: { drawOnChartArea: false },
+        ticks: { callback: (v)=>formatTick(kpi2, v) }
+      }
+    }
   };
 
   const mctx = $("monthChart").getContext("2d");
   destroyCharts();
   destroyProdChart();
 
+  const mDatasets = [{
+    label: `${kpiLabel(kpi1)}（左軸）`,
+    data: ms1.values,
+    yAxisID: "y",
+    _kpi: kpi1,
+    spanGaps: true,
+    tension: 0.25,
+    pointRadius: 3,
+    pointHoverRadius: 5
+  }];
+  if(ms2){
+    mDatasets.push({
+      label: `${kpiLabel(kpi2)}（右軸）`,
+      data: ms2.values,
+      yAxisID: "y1",
+      _kpi: kpi2,
+      spanGaps: true,
+      tension: 0.25,
+      pointRadius: 3,
+      pointHoverRadius: 5
+    });
+  }
+
   monthChart = new Chart(mctx, {
     type: "line",
-    data: {
-      labels: ms.labels,
-      datasets: [{
-        label: `${kpiLabel(kpi)}（月平均）`,
-        data: ms.values,
-        spanGaps: true,
-        tension: 0.25,
-        pointRadius: 3,
-        pointHoverRadius: 5,
-        pointHoverRadius: 5
-      }]
-    },
+    data: { labels: ms1.labels, datasets: mDatasets },
     options: commonOptions
   });
 
   const wctx = $("weekChart").getContext("2d");
+  const wDatasets = [{
+    label: `${kpiLabel(kpi1)}（左軸）`,
+    data: ws1.values,
+    yAxisID: "y",
+    _kpi: kpi1,
+    spanGaps: true,
+    tension: 0.25,
+    pointRadius: 3,
+    pointHoverRadius: 5
+  }];
+  if(ws2){
+    wDatasets.push({
+      label: `${kpiLabel(kpi2)}（右軸）`,
+      data: ws2.values,
+      yAxisID: "y1",
+      _kpi: kpi2,
+      spanGaps: true,
+      tension: 0.25,
+      pointRadius: 3,
+      pointHoverRadius: 5
+    });
+  }
+
   weekChart = new Chart(wctx, {
     type: "line",
-    data: {
-      labels: ws.labels,
-      datasets: [{
-        label: `${kpiLabel(kpi)}`,
-        data: ws.values,
-        spanGaps: true,
-        tension: 0.25,
-        pointRadius: 3,
-        pointHoverRadius: 5,
-        pointHoverRadius: 5
-      }]
-    },
+    data: { labels: ws1.labels, datasets: wDatasets },
     options: commonOptions
   });
 
-  renderCatVarChart();
-
   state.chartsDirty = false;
   $("chartDirtyHint").classList.add("hidden");
-}
-
-/* =========================
+}==========
    Drilldown helpers
 ========================= */
 function getDateSetInSelection(){
@@ -2215,7 +2008,6 @@ function refreshAll(){
   refreshKpiCards();
   refreshLineSection();
   buildProdIndex();
-  refreshChartCatOptions();
 }
 
 /* =========================
@@ -2267,8 +2059,22 @@ $("daySelect").addEventListener("change", ()=>{
 });
 $("chartKpiSelect").addEventListener("change", ()=>{
   state.chartKpi = $("chartKpiSelect").value;
+  if(state.chartKpi2 && state.chartKpi2 === state.chartKpi){
+    state.chartKpi2 = "";
+    if($("chartKpiSelect2")) $("chartKpiSelect2").value = "";
+  }
   markChartsDirty();
 });
+$("chartKpiSelect2").addEventListener("change", ()=>{
+  const v = $("chartKpiSelect2").value;
+  state.chartKpi2 = v;
+  if(state.chartKpi2 && state.chartKpi2 === state.chartKpi){
+    state.chartKpi2 = "";
+    $("chartKpiSelect2").value = "";
+  }
+  markChartsDirty();
+});
+
 
 $("showChartBtn").addEventListener("click", ()=>{
   state.chartsVisible = true;
@@ -2302,10 +2108,15 @@ if(_fileInput){
 $("clearBtn").addEventListener("click", ()=>{
   state.summaries.clear();
   state.records.clear();
+  state.itemCountDaily.clear();
   state.lineHumanDaily.clear();
   state.lineAvgFromSheets.clear();
   state.loadedFiles = [];
   state.availableMmdd = new Set();
+
+  // reset chart compare
+  state.chartKpi2 = "";
+  if($("chartKpiSelect2")) $("chartKpiSelect2").value = "";
 
   destroyCharts();
   destroyProdChart();
@@ -2328,7 +2139,6 @@ $("lineSelect").addEventListener("change", ()=>{
   hideProdSuggest();
   refreshLineSection();
   buildProdIndex();
-  refreshChartCatOptions();
 });
 $("catSelect").addEventListener("change", ()=>{
   $("prodSelect").value = "";
