@@ -154,7 +154,7 @@
           <div class="label mb-2">目前顯示</div>
           <div id="activeRangeText" class="font-extrabold text-slate-900 text-lg">—</div>
           <div id="activeRangeHint" class="hint mt-1">—</div>
-        <div id="activeCatCounts" class="mt-2 text-slate-600 text-sm font-bold leading-relaxed"></div>
+        
 </div>
       </div>
     </div>
@@ -234,12 +234,13 @@
     </div>
 
     <!-- Drilldown -->
-    <!-- 品類種類數（顯示於 KPI 趨勢圖下方、線別/品類/品名 上方） -->
+    <!-- 品類種類（顯示於 KPI 趨勢圖下方、線別/品類/品名 上方） -->
   <div class="card mt-6">
     <div class="flex items-center justify-between gap-4">
       <div class="h2">整體品類種類（當前範圍）</div>
-      <div id="activeCatCounts" class="text-slate-700 font-bold text-sm text-right"></div>
+      <div id="activeCatMeta" class="text-slate-500 text-sm font-bold"></div>
     </div>
+    <div id="activeCatCards" class="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3"></div>
   </div>
 
 <div class="card space-y-4">
@@ -1108,13 +1109,14 @@ function refreshActiveRangeText(){
 }
 
 function refreshActiveCatCounts(){
-  const el = $("activeCatCounts");
-  if(!el) return;
+  const wrap = $("activeCatCards");
+  const meta = $("activeCatMeta");
+  if(!wrap) return;
 
   const temp = state.temp;
   const all = getAllDatesForTemp(temp);
 
-  // 品類「幾種」：以目前顯示範圍為準；但「月別」採「該月日曆月(1~31)」統計（不含跨月天數），符合「整月平均」的直覺。
+  // 月別：以日曆月統計（1~31）；其他：以目前選取範圍統計
   let mmddSet = new Set();
   if(state.rangeMode === "month"){
     const m = state.month;
@@ -1132,7 +1134,7 @@ function refreshActiveCatCounts(){
     if(rec.temp !== temp) continue;
     if(!mmddSet.has(rec.mmdd)) continue;
 
-    // 若已選線別才套用線別過濾（value 空字串時不過濾）
+    // 若已選線別才套用線別過濾
     if(lineKeySel && cleanKey(rec.line) !== lineKeySel) continue;
 
     const cat = cleanText(rec.category || "");
@@ -1146,8 +1148,10 @@ function refreshActiveCatCounts(){
     map.get(cat).add(prod);
   }
 
+  wrap.innerHTML = "";
+  if(meta) meta.textContent = "";
+
   if(map.size === 0){
-    el.textContent = "";
     return;
   }
 
@@ -1155,10 +1159,22 @@ function refreshActiveCatCounts(){
     .map(([cat, set]) => ({cat, n: set.size}))
     .sort((a,b)=> b.n - a.n || a.cat.localeCompare(b.cat, "zh-Hant"));
 
-  const top = arr.slice(0, 8);
-  const parts = top.map(x => `${x.cat} ${x.n} 種`);
-  const more = arr.length - top.length;
-  el.textContent = more > 0 ? (parts.join(" ｜ ") + ` ｜ 其他 ${more} 類`) : parts.join(" ｜ ");
+  if(meta){
+    meta.textContent = `共 ${arr.length} 類`;
+  }
+
+  // Render each category as a mini card
+  const frag = document.createDocumentFragment();
+  for(const x of arr){
+    const d = document.createElement("div");
+    d.className = "rounded-2xl border border-slate-200 bg-white p-3 shadow-sm";
+    d.innerHTML = `
+      <div class="text-slate-900 font-extrabold truncate">${escapeHtml(x.cat)}</div>
+      <div class="text-slate-500 text-sm font-bold mt-1">${x.n} 種</div>
+    `;
+    frag.appendChild(d);
+  }
+  wrap.appendChild(frag);
 }
 
 
