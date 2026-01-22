@@ -610,15 +610,30 @@ function parseTempSheet(wb, sheetName, temp, mmdd){
   })() : -1;
 
   let currentLine = "";
+  let currentCat = "";
   for(let r=hr+1; r<grid.length; r++){
     const row = grid[r] || [];
     const lineCell = cleanText(row[idxLine]);
-    if(lineCell) currentLine = displayLineName(lineCell);
+    if(lineCell){
+      currentLine = displayLineName(lineCell);
+      currentCat = ""; // 新線別時重置品類（避免向下沿用跨線別）
+    }
 
     const prod = (idxProd>=0) ? cleanText(row[idxProd]) : "";
     if(!currentLine || !prod) continue;
 
-    const cat = (idxCat>=0) ? cleanText(row[idxCat]) : "";
+    const catCell = (idxCat>=0) ? cleanText(row[idxCat]) : "";
+    const catCellKey = cleanKey(catCell);
+    let cat = "";
+    if(catCellKey === "0"){
+      // 0 代表非品類列（例如平均/空列），不沿用
+      cat = "0";
+    }else if(catCell){
+      currentCat = catCell;
+      cat = catCell;
+    }else{
+      cat = currentCat; // 合併儲存格/僅首筆有值時：向下沿用
+    }
 
     const rec = {
       mmdd, temp,
