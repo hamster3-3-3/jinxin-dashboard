@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
+  <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
 
@@ -55,7 +56,7 @@
 </head>
 
 <body class="min-h-screen">
-  <div class="max-w-7xl mx-auto p-5 md:p-8 space-y-6">
+  <div class="max-w-screen-2xl mx-auto p-5 md:p-8 space-y-6">
     <!-- Header -->
     <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
       <div>
@@ -337,26 +338,40 @@
           <div class="card mt-6">
             <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
               <div class="h2">趨勢圖</div>
-              <div class="flex items-center gap-2">
-                <label class="text-slate-600 text-sm font-bold">顯示項目</label>
-                <select id="prodChartMetric" class="select">
-                  <option value="qty">生產量</option>
-                  <option value="revenue">營收</option>
-                  <option value="people">人數</option>
-                  <option value="cap">產能/時</option>
-                  <option value="eff">人時性</option>
-                  <option value="runMin">稼動時間/分</option>
-                </select>
-              </div>
+              <div class="flex flex-col md:flex-row md:items-center gap-3">
+  <div class="flex items-center gap-2">
+    <label class="text-slate-600 text-sm font-bold">顯示項目</label>
+    <select id="prodChartMetric" class="select" style="width: 12rem;">
+      <option value="qty">生產量</option>
+      <option value="revenue">營收</option>
+      <option value="people">人數</option>
+      <option value="cap">產能/時</option>
+      <option value="eff">人時性</option>
+      <option value="runMin">稼動時間/分</option>
+    </select>
+  </div>
+  <div class="flex items-center gap-2">
+    <label class="text-slate-600 text-sm font-bold">對比指標</label>
+    <select id="prodChartMetric2" class="select" style="width: 12rem;">
+      <option value="">不對比</option>
+      <option value="qty">生產量</option>
+      <option value="revenue">營收</option>
+      <option value="people">人數</option>
+      <option value="cap">產能/時</option>
+      <option value="eff">人時性</option>
+      <option value="runMin">稼動時間/分</option>
+    </select>
+  </div>
+</div>
             </div>
             <div class="mt-4">
               <div id="prodChartTitle" class="text-slate-600 text-sm font-bold mb-2"></div>
-              <div class="relative" style="height: 280px;">
+              <div class="relative" style="height: 360px;">
                 <canvas id="prodTrendCanvas"></canvas>
               </div>
             </div>
           </div>
-<table class="w-full text-sm">
+<table class="w-full text-[15px]">
               <thead>
                 <tr>
                   <th class="text-left">日期</th>
@@ -1578,32 +1593,113 @@ function buildProductSeries(rows, metric){
 function renderProductTrend(rows){
   if(!$("prodTrendCanvas")) return;
 
-  const metricSel = $("prodChartMetric");
-  const metric = metricSel ? metricSel.value : "qty";
-  const {title, labels, values} = buildProductSeries(rows, metric);
+  const sel1 = $("prodChartMetric");
+  const metric1 = sel1 ? sel1.value : "qty";
 
-  $("prodChartTitle").textContent = title || "趨勢";
+  const sel2 = $("prodChartMetric2");
+  let metric2 = sel2 ? (sel2.value || "") : "";
+  if(metric2 && metric2 === metric1){
+    metric2 = "";
+    if(sel2) sel2.value = "";
+  }
+
+  const s1 = buildProductSeries(rows, metric1);
+  const s2 = metric2 ? buildProductSeries(rows, metric2) : null;
+
+  const labels = s1.labels || [];
+  const alignValues = (s)=>{
+    const map = new Map();
+    for(let i=0;i<(s.labels||[]).length;i++){
+      map.set(s.labels[i], (s.values||[])[i]);
+    }
+    return labels.map(l => map.has(l) ? map.get(l) : null);
+  };
+
+  const values1 = (s1.values||[]).slice();
+  const values2 = s2 ? alignValues(s2) : null;
+
+  $("prodChartTitle").textContent = s1.title || "趨勢";
   destroyProdChart();
+
+  const formatTick = (k, v)=>{
+    const num = Number(v);
+    if(!Number.isFinite(num)) return "";
+    if(k === "revenue" || k === "qty") return Math.round(num).toLocaleString("en-US");
+    if(k === "runMin") return num.toFixed(1);
+    return num.toFixed(2);
+  };
+  const formatValue = (k, v)=>{
+    const num = Number(v);
+    if(!Number.isFinite(num)) return "—";
+    if(k === "revenue" || k === "qty") return Math.round(num).toLocaleString("en-US");
+    if(k === "runMin") return num.toFixed(1);
+    return num.toFixed(2);
+  };
+
+  const label1 = sel1 ? sel1.selectedOptions[0].textContent : "指標1";
+  const label2 = (metric2 && sel2) ? sel2.selectedOptions[0].textContent : "";
+
+  const datasets = [{
+    label: label1,
+    data: values1,
+    tension: 0.25,
+    pointRadius: 3,
+    pointHoverRadius: 5,
+    spanGaps: true,
+    yAxisID: "y",
+    _metricKey: metric1
+  }];
+
+  if(metric2 && values2){
+    datasets.push({
+      label: label2,
+      data: values2,
+      tension: 0.25,
+      pointRadius: 3,
+      pointHoverRadius: 5,
+      spanGaps: true,
+      yAxisID: "y1",
+      _metricKey: metric2
+    });
+  }
 
   const ctx = $("prodTrendCanvas").getContext("2d");
   prodChart = new Chart(ctx, {
     type: "line",
-    data: {
-      labels,
-      datasets: [{
-        label: metricSel ? metricSel.selectedOptions[0].textContent : "趨勢",
-        data: values,
-        tension: 0.25,
-        pointRadius: 3,
-        pointHoverRadius: 5,
-        spanGaps: true
-      }]
-    },
+    data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: true }, valueLabels: { enabled: false } },
-      scales: { y: { beginAtZero: false } }
+      plugins: {
+        legend: { display: true },
+        valueLabels: { enabled: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx)=>{
+              const k = ctx.dataset._metricKey || metric1;
+              return `${ctx.dataset.label}: ${formatValue(k, ctx.parsed.y)}`;
+            }
+          }
+        }
+      },
+      scales: (function(){
+        const scales = {
+          y: {
+            position: "left",
+            beginAtZero: false,
+            ticks: { callback: (v)=>formatTick(metric1, v) }
+          }
+        };
+        if(metric2){
+          scales.y1 = {
+            position: "right",
+            beginAtZero: false,
+            grid: { drawOnChartArea: false },
+            ticks: { callback: (v)=>formatTick(metric2, v) }
+          };
+        }
+        return scales;
+      })()
     }
   });
 }
@@ -2208,6 +2304,12 @@ $("prodSelect").addEventListener("change", ()=> refreshProductDetails());
 $("prodChartMetric")?.addEventListener("change", ()=>{
   if($("prodDetails") && !$("prodDetails").classList.contains("hidden")){
     refreshProductDetails(); // will re-render chart
+  }
+});
+
+$("prodChartMetric2")?.addEventListener("change", ()=>{
+  if($("prodDetails") && !$("prodDetails").classList.contains("hidden")){
+    refreshProductDetails();
   }
 });
 
