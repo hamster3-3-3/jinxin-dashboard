@@ -25,7 +25,7 @@
     .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 1rem; padding: 1rem; box-shadow: 0 1px 1px rgba(15,23,42,.04); }
     .label { color:#64748b; font-weight:600; }
     .val { color:#0f172a; font-weight:800; letter-spacing:.2px; }
-    .hint { color:#94a3b8; font-size:.85rem; }
+    .hint { display:none !important; }
     .mono { font-variant-numeric: tabular-nums; }
     .chip { display:inline-flex; gap:.4rem; align-items:center; padding:.25rem .6rem; border-radius: 999px; border:1px solid #e2e8f0; background:#fff; font-weight:700; color:#334155; }
     .chip .dot { width:.55rem; height:.55rem; border-radius: 999px; background:#22c55e; }
@@ -150,33 +150,27 @@
       <div class="card">
         <div class="label">總生產量</div>
         <div id="kpiQty" class="val text-2xl mono mt-1">—</div>
-        <div id="kpiHint" class="hint mt-1">—</div>
-      </div>
+</div>
       <div class="card">
         <div class="label">營業額</div>
         <div id="kpiRev" class="val text-2xl mono mt-1">—</div>
-        <div class="hint mt-1" id="kpiHint2">—</div>
-      </div>
+</div>
       <div class="card">
         <div class="label">出勤人數</div>
         <div id="kpiAtt" class="val text-2xl mono mt-1">—</div>
-        <div class="hint mt-1" id="kpiHint3">—</div>
-      </div>
+</div>
       <div class="card">
         <div class="label">人時性</div>
         <div id="kpiEff" class="val text-2xl mono mt-1">—</div>
-        <div class="hint mt-1" id="kpiHint4">—</div>
-      </div>
+</div>
       <div class="card">
         <div class="label">平均廠價</div>
         <div id="kpiPrice" class="val text-2xl mono mt-1">—</div>
-        <div class="hint mt-1" id="kpiHint5">—</div>
-      </div>
+</div>
       <div class="card">
         <div class="label">多次生產數</div>
         <div id="kpiMulti" class="val text-2xl mono mt-1">—</div>
-        <div class="hint mt-1" id="kpiHint6">—</div>
-      </div>
+</div>
     </div>
 
     <!-- Trends (lazy render) -->
@@ -227,7 +221,7 @@
 
     <!-- Drilldown -->
     <div class="card space-y-4">
-      <div class="font-extrabold text-slate-900">線別 / 品類 / 品名下鑽</div>
+      <div class="font-extrabold text-slate-900">線別 / 品類 / 品名</div>
 
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div>
@@ -241,13 +235,11 @@
             <div class="card">
               <div class="label">人時性達成率平均</div>
               <div id="lineHumanAvg" class="val text-2xl mono mt-1">—</div>
-              <div id="lineHumanHint" class="hint mt-1">—</div>
-            </div>
+</div>
             <div id="capCard" class="card">
               <div class="label">產能達成率平均（4°C）</div>
               <div id="lineCapAvg" class="val text-2xl mono mt-1">—</div>
-              <div id="lineCapHint" class="hint mt-1">—</div>
-            </div>
+</div>
           </div>
         </div>
       </div>
@@ -264,7 +256,7 @@
           <select id="prodSelect" class="select" disabled></select>
         </div>
         <div class="flex items-end">
-          <button id="resetDrillBtn" class="btn" disabled>清除下鑽選擇</button>
+          <button id="resetDrillBtn" class="btn" disabled>清除選項</button>
         </div>
       </div>
 
@@ -321,10 +313,6 @@
           </div>
         </div>
       </div>
-    </div>
-
-    <div class="text-slate-500 text-sm">
-      備註：本工具以「日報」欄位直接彙總；線別為日報實際出現動態生成。趨勢圖採手動生成/更新以確保流暢度。
     </div>
   </div>
 
@@ -616,6 +604,30 @@ function parseTempSheet(wb, sheetName, temp, mmdd){
           capAvg: (capAvgCol>=0) ? toNumber(row[capAvgCol]) : NaN,
         });
       }
+    }
+  }
+
+  // 4°C：線別達成率平均（人時性/產能）
+  // 來源：晉欣4度C分頁右側區塊
+  // - 人時性差異分析：S欄（達成率平均）
+  // - 產能差異分析：AD欄（達成率平均）
+  if(temp === "4"){
+    const MAX_SCAN = Math.min(grid.length, 260);
+    for(let rr=0; rr<MAX_SCAN; rr++){
+      const row = grid[rr] || [];
+      const lineCell = cleanText(row[0]);
+      if(!lineCell) continue;
+
+      // S=19欄(1-based) => 0-based index 18
+      // AD=30欄(1-based) => 0-based index 29
+      const humanAvg = toNumber(row[18]);
+      const capAvg = toNumber(row[29]);
+
+      if(!Number.isFinite(humanAvg) && !Number.isFinite(capAvg)) continue;
+
+      const line = displayLineName(lineCell);
+      const lk = `4|${mmdd}|${cleanKey(line)}`;
+      upsert(state.lineAvgFromSheets, lk, { mmdd, temp:"4", line, humanAvg, capAvg });
     }
   }
 }
@@ -998,14 +1010,7 @@ function refreshKpiCards(){
   $("kpiAtt").textContent = Number.isFinite(k.att) ? fmtDec(k.att, 2) : "—";
   $("kpiEff").textContent = Number.isFinite(k.eff) ? fmtDec(k.eff, 2) : "—";
   $("kpiPrice").textContent = Number.isFinite(k.avgPrice) ? fmtDec(k.avgPrice, 2) : "—";
-  $("kpiMulti").textContent = Number.isFinite(k.multi) ? fmtInt(k.multi) : "—";
-  $("kpiHint").textContent = k.hint || "—";
-  $("kpiHint2").textContent = k.hint || "—";
-  $("kpiHint3").textContent = k.hint || "—";
-  $("kpiHint4").textContent = k.hint || "—";
-  $("kpiHint5").textContent = k.hint || "—";
-  $("kpiHint6").textContent = k.hint || "—";
-}
+  $("kpiMulti").textContent = Number.isFinite(k.multi) ? fmtInt(k.multi) : "—";}
 
 /* =========================
    趨勢圖：延後生成 + 手動更新
@@ -1261,26 +1266,16 @@ function refreshLineSection(){
   $("resetDrillBtn").disabled = true;
   $("prodDetails").classList.add("hidden");
 
-  $("lineHumanAvg").textContent = "—";
-  $("lineHumanHint").textContent = "—";
-  $("lineCapAvg").textContent = "—";
-  $("lineCapHint").textContent = "—";
-
-  if(!lineKey){
+  $("lineHumanAvg").textContent = "—";  $("lineCapAvg").textContent = "—";  if(!lineKey){
     $("catSelect").innerHTML = "";
     $("prodSelect").innerHTML = "";
     return;
   }
 
   const h = calcLineHumanAvg(lineKey);
-  $("lineHumanAvg").textContent = Number.isFinite(h) ? fmtPct(h) : "—";
-  $("lineHumanHint").textContent = Number.isFinite(h) ? "範圍內日報平均" : "此範圍無達成率資料";
-
-  if(state.temp === "4"){
+  $("lineHumanAvg").textContent = Number.isFinite(h) ? fmtPct(h) : "—";  if(state.temp === "4"){
     const c = calcLineCapAvg(lineKey);
-    $("lineCapAvg").textContent = Number.isFinite(c) ? fmtPct(c) : "—";
-    $("lineCapHint").textContent = Number.isFinite(c) ? "範圍內日報平均（4°C）" : "此範圍無產能達成率資料";
-  }
+    $("lineCapAvg").textContent = Number.isFinite(c) ? fmtPct(c) : "—";  }
 
   const mmddSet = getDateSetInSelection();
   const cats = new Map();
@@ -1556,11 +1551,7 @@ $("resetDrillBtn").addEventListener("click", ()=>{
   $("prodSelect").disabled = true;
   $("resetDrillBtn").disabled = true;
   $("prodDetails").classList.add("hidden");
-  $("lineHumanAvg").textContent = "—";
-  $("lineHumanHint").textContent = "—";
-  $("lineCapAvg").textContent = "—";
-  $("lineCapHint").textContent = "—";
-});
+  $("lineHumanAvg").textContent = "—";  $("lineCapAvg").textContent = "—";});
 
 (async function init(){
   // XLSX / Chart.js 已改為本地檔（./xlsx.full.min.js, ./chart.umd.min.js）
