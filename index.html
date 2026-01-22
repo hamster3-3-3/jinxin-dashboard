@@ -302,7 +302,30 @@
         <div class="mt-4">
           <div class="font-extrabold text-slate-900 mb-2">日別明細</div>
           <div class="table">
-            <table class="w-full text-sm">
+            <!-- 品名趨勢圖（顯示於：營運指標/生產實績/日報登錄 之下，日別明細 之上） -->
+          <div class="card mt-6">
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div class="h2">趨勢圖</div>
+              <div class="flex items-center gap-2">
+                <label class="text-slate-600 text-sm font-bold">顯示項目</label>
+                <select id="prodChartMetric" class="select">
+                  <option value="qty">生產量</option>
+                  <option value="revenue">營收</option>
+                  <option value="people">人數</option>
+                  <option value="cap">產能/時</option>
+                  <option value="eff">人時性</option>
+                  <option value="runMin">稼動時間/分</option>
+                </select>
+              </div>
+            </div>
+            <div class="mt-4">
+              <div id="prodChartTitle" class="text-slate-600 text-sm font-bold mb-2"></div>
+              <div class="relative" style="height: 280px;">
+                <canvas id="prodTrendCanvas"></canvas>
+              </div>
+            </div>
+          </div>
+<table class="w-full text-sm">
               <thead>
                 <tr>
                   <th class="text-left">日期</th>
@@ -1033,6 +1056,7 @@ function refreshKpiCards(){
 ========================= */
 let monthChart = null;
 let weekChart = null;
+let prodChart = null;
 
 function kpiLabel(k){
   return {
@@ -1177,6 +1201,118 @@ function destroyCharts(){
   if(weekChart){ weekChart.destroy(); weekChart = null; }
 }
 
+function destroyProdChart(){
+  if(prodChart){ prodChart.destroy(); prodChart = null; }
+}
+
+function buildProductSeries(rows, metric){
+  const mode = state.rangeMode;
+  const items = rows.map(x => {
+    const d = new Date(x.dateStr + "T00:00:00Z");
+    return {dateObj:d, dateStr:x.dateStr, rec:x.rec};
+  }).filter(x => !isNaN(x.dateObj));
+
+  if(!items.length) return {title:"趨勢", labels:[], values:[]};
+
+  const isSum = (metric === "qty" || metric === "revenue");
+  const agg = (vals)=>{
+    const nums = vals.map(toNumber).filter(v => Number.isFinite(v));
+    if(!nums.length) return null;
+    if(isSum) return nums.reduce((a,b)=>a+b,0);
+    return nums.reduce((a,b)=>a+b,0)/nums.length;
+  };
+
+  if(mode === "year"){
+    const labels=[], values=[];
+    for(let m=1; m<=12; m++){
+      labels.push(String(m).padStart(2,"0"));
+      const bucket = items.filter(it => (it.dateObj.getUTCMonth()+1)===m).map(it => it.rec[metric]);
+      values.push(agg(bucket));
+    }
+    return {title:`月別（全年｜${state.year}）`, labels, values};
+  }
+
+  if(mode === "week"){
+    items.sort((a,b)=>a.dateObj-b.dateObj);
+    const labels = items.map(it => it.dateStr.slice(5));
+    const values = items.map(it => {
+      const v = toNumber(it.rec[metric]);
+      return Number.isFinite(v) ? v : null;
+    });
+    const ws = new Date(state.weekStartStr + "T00:00:00Z");
+    const we = addDaysUTC(ws,6);
+    return {title:`日別（${dateObjToStr(ws)}～${dateObjToStr(we)}）`, labels, values};
+  }
+
+  if(mode === "day"){
+    const dSel = new Date(state.dayStr + "T00:00:00Z");
+    const mSel = dSel.getUTCMonth()+1;
+    const focus = items.filter(it => (it.dateObj.getUTCMonth()+1)===mSel).sort((a,b)=>a.dateObj-b.dateObj);
+    const labels = focus.map(it => it.dateStr.slice(5));
+    const values = focus.map(it => {
+      const v = toNumber(it.rec[metric]);
+      return Number.isFinite(v) ? v : null;
+    });
+    return {title:`日別（${String(mSel).padStart(2,"0")} 月）`, labels, values};
+  }
+
+  const byWeek = new Map();
+  let title = "週別（全年｜每週平均）";
+  let focus = items;
+
+  if(mode === "month"){
+    focus = items.filter(it => (it.dateObj.getUTCMonth()+1)===state.month);
+    title = `週別（${String(state.month).padStart(2,"0")} 月｜每週平均）`;
+  }
+
+  for(const it of focus){
+    const ws = getWeekStartUTC(it.dateObj);
+    const wsStr = dateObjToStr(ws);
+    if(!byWeek.has(wsStr)) byWeek.set(wsStr, []);
+    byWeek.get(wsStr).push(it);
+  }
+  const weeks = Array.from(byWeek.entries()).sort((a,b)=>a[0].localeCompare(b[0]));
+  const labels=[], values=[];
+  for(const [wsStr, arr] of weeks){
+    labels.push(wsStr.slice(5));
+    values.push(agg(arr.map(x => x.rec[metric])));
+  }
+  return {title, labels, values};
+}
+
+function renderProductTrend(rows){
+  if(!$("prodTrendCanvas")) return;
+
+  const metricSel = $("prodChartMetric");
+  const metric = metricSel ? metricSel.value : "qty";
+  const {title, labels, values} = buildProductSeries(rows, metric);
+
+  $("prodChartTitle").textContent = title || "趨勢";
+  destroyProdChart();
+
+  const ctx = $("prodTrendCanvas").getContext("2d");
+  prodChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        label: metricSel ? metricSel.selectedOptions[0].textContent : "趨勢",
+        data: values,
+        tension: 0.25,
+        pointRadius: 3,
+        spanGaps: true
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: true } },
+      scales: { y: { beginAtZero: false } }
+    }
+  });
+}
+
+
 function renderCharts(){
   const kpi = state.chartKpi;
 
@@ -1205,6 +1341,7 @@ function renderCharts(){
 
   const mctx = $("monthChart").getContext("2d");
   destroyCharts();
+  destroyProdChart();
 
   monthChart = new Chart(mctx, {
     type: "line",
@@ -1371,7 +1508,7 @@ function refreshProductDetails(){
   const lineKey = $("lineSelect").value || "";
   const catKey = $("catSelect").value || "";
   const prodKey = $("prodSelect").value || "";
-  if(!lineKey || !catKey || !prodKey){ $("prodDetails").classList.add("hidden"); return; }
+  if(!lineKey || !catKey || !prodKey){ $("prodDetails").classList.add("hidden"); destroyProdChart(); return; }
 
   const mmddSet = getDateSetInSelection();
   const rows = [];
@@ -1435,6 +1572,7 @@ $("pChange").textContent = changeCnt ? fmtDec(changeSum/changeCnt, 1) : "—";
   }
 
   $("prodDetails").classList.remove("hidden");
+  renderProductTrend(rows);
 }
 
 /* =========================
@@ -1649,6 +1787,7 @@ $("clearBtn").addEventListener("click", ()=>{
   state.availableMmdd = new Set();
 
   destroyCharts();
+  destroyProdChart();
   state.chartsVisible = false;
   state.chartsDirty = true;
   $("chartArea").classList.add("hidden");
@@ -1677,6 +1816,12 @@ $("catSelect").addEventListener("change", ()=>{
   refreshProductDetails();
 });
 $("prodSelect").addEventListener("change", ()=> refreshProductDetails());
+$("prodChartMetric")?.addEventListener("change", ()=>{
+  if($("prodDetails") && !$("prodDetails").classList.contains("hidden")){
+    refreshProductDetails(); // will re-render chart
+  }
+});
+
 $("resetDrillBtn").addEventListener("click", ()=>{
   const _ps = $("prodSearch"); if(_ps){ _ps.value=""; }
   hideProdSuggest();
