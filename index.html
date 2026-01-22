@@ -233,7 +233,7 @@
 
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div>
-          <label class="label block mb-2">線別（依日報實際出現）</label>
+          <label class="label block mb-2">線別</label>
           <select id="lineSelect" class="select" disabled></select>
           <div class="hint mt-2">選擇線別後：顯示人時性達成率平均。4°C 另外顯示產能達成率平均；18°C 不顯示。</div>
         </div>
@@ -262,7 +262,7 @@
         <div>
           <label class="label block mb-2">品名</label>
           <div class="relative">
-            <input id="prodSearch" class="input" placeholder="輸入品名關鍵字（可不先選線別）" disabled autocomplete="off" />
+            <input id="prodSearch" class="input" placeholder="輸入品名關鍵字" disabled autocomplete="off" />
             <div id="prodSuggest" class="suggest hidden"></div>
           </div>
           <select id="prodSelect" class="select hidden" disabled></select>
@@ -753,6 +753,7 @@ setDataChip("warn", "自動載入中…");
 
   rebuildAvailableMmdd();
   refreshSelectors();
+  setupProdSearch();
   refreshAll();
 
   $("clearBtn").disabled = false;
