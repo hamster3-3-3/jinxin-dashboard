@@ -25,8 +25,7 @@
     .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 1rem; padding: 1rem; box-shadow: 0 1px 1px rgba(15,23,42,.04); }
     .label { color:#64748b; font-weight:600; }
     .val { color:#0f172a; font-weight:800; letter-spacing:.2px; }
-    .hint { display:none !important; }
-    .mono { font-variant-numeric: tabular-nums; }
+.mono { font-variant-numeric: tabular-nums; }
     .chip { display:inline-flex; gap:.4rem; align-items:center; padding:.25rem .6rem; border-radius: 999px; border:1px solid #e2e8f0; background:#fff; font-weight:700; color:#334155; }
     .chip .dot { width:.55rem; height:.55rem; border-radius: 999px; background:#22c55e; }
     .chip.warn .dot { background:#f59e0b; }
@@ -42,7 +41,16 @@
     .divider { height:1px; background:#e2e8f0; }
     canvas { background:#fff; border:1px solid #e2e8f0; border-radius:1rem; }
     .chartWrap { height: 260px; } /* 控制圖表高度，避免過大 */
-  </style>
+  /* UI tweaks */
+  .hint { display:none !important; }
+  .input { width:100%; border:1px solid #e2e8f0; border-radius:0.75rem; padding:0.75rem 1rem; background:#fff; font-weight:600; color:#0f172a; }
+  .input:focus { outline:none; box-shadow: 0 0 0 4px rgba(59,130,246,.18); border-color:#93c5fd; }
+  .input:disabled { background:#f1f5f9; color:#94a3b8; }
+  .suggest { position:absolute; left:0; right:0; top:100%; margin-top:0.5rem; background:#fff; border:1px solid #e2e8f0; border-radius:0.75rem; box-shadow:0 10px 30px rgba(15,23,42,.12); max-height:16rem; overflow:auto; z-index:50; }
+  .suggest button { display:flex; flex-direction:column; gap:.15rem; width:100%; text-align:left; padding:.65rem .8rem; }
+  .suggest button:hover { background:#f1f5f9; }
+  .suggest .sub { color:#64748b; font-weight:700; font-size:.85rem; }
+</style>
 </head>
 
 <body class="min-h-screen">
@@ -253,7 +261,11 @@
         </div>
         <div>
           <label class="label block mb-2">品名</label>
-          <select id="prodSelect" class="select" disabled></select>
+          <div class="relative">
+            <input id="prodSearch" class="input" placeholder="輸入品名關鍵字（可不先選線別）" disabled autocomplete="off" />
+            <div id="prodSuggest" class="suggest hidden"></div>
+          </div>
+          <select id="prodSelect" class="select hidden" disabled></select>
         </div>
         <div class="flex items-end">
           <button id="resetDrillBtn" class="btn" disabled>清除選項</button>
@@ -280,9 +292,7 @@
           </div>
           <div class="card">
             <div class="font-extrabold text-slate-900">日報登錄</div>
-            <div class="mt-3 space-y-2 text-slate-800 font-semibold">
-              <div class="flex justify-between"><span>生產時間</span><span id="pTime" class="mono">—</span></div>
-              <div class="flex justify-between"><span>換線/分</span><span id="pChange" class="mono">—</span></div>
+            <div class="mt-3 space-y-2 text-slate-800 font-semibold">              <div class="flex justify-between"><span>換線/分</span><span id="pChange" class="mono">—</span></div>
               <div class="flex justify-between"><span>稼動時間/分</span><span id="pRun" class="mono">—</span></div>
               <div class="flex justify-between"><span>休息時間</span><span id="pBreak" class="mono">—</span></div>
             </div>
@@ -302,8 +312,7 @@
                   <th class="text-left">人數</th>
                   <th class="text-left">產能/時</th>
                   <th class="text-left">人時性</th>
-                  <th class="text-left">生產時間</th>
-                  <th class="text-left">換線/分</th>
+                                    <th class="text-left">換線/分</th>
                   <th class="text-left">稼動時間/分</th>
                   <th class="text-left">休息時間</th>
                 </tr>
@@ -337,6 +346,10 @@ function cleanText(v){
   return String(v).replace(/\u00a0/g," ").replace(/\s+/g," ").trim();
 }
 function cleanKey(v){ return cleanText(v).replace(/\s+/g,""); }
+function escapeHtml(s){
+  return cleanText(s).replace(/[&<>"']/g, (c)=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
+
 function toNumber(v){
   if(typeof v === "number" && Number.isFinite(v)) return v;
   if(v === null || v === undefined) return NaN;
@@ -420,6 +433,8 @@ const state = {
 
   chartsVisible: false,
   chartsDirty: true,
+  prodIndex: [],
+
 };
 
 function setDataChip(status, text){
@@ -1284,7 +1299,7 @@ function refreshLineSection(){
     if(!mmddSet.has(rec.mmdd)) continue;
     if(cleanKey(rec.line) !== lineKey) continue;
     const ck = cleanKey(rec.category || "");
-    if(!ck) continue;
+    if(!ck || ck==="0") continue;
     if(!cats.has(ck)) cats.set(ck, cleanText(rec.category));
   }
   const catSel = $("catSelect");
@@ -1393,11 +1408,7 @@ function refreshProductDetails(){
   $("pPeople").textContent = pcnt ? fmtDec(peopleSum/pcnt, 2) : "—";
   $("pCap").textContent = ccnt ? fmtDec(capSum/ccnt, 2) : "—";
   $("pEff").textContent = ecnt ? fmtDec(effSum/ecnt, 2) : "—";
-
-  const first = rows.find(x => x.rec.prodStart || x.rec.prodEnd);
-  const time = first ? `${fmtTime(first.rec.prodStart)}~${fmtTime(first.rec.prodEnd)}` : "—";
-  $("pTime").textContent = (rows.length === 1) ? time : "多日（詳見下表）";
-  $("pChange").textContent = changeCnt ? fmtDec(changeSum/changeCnt, 1) : "—";
+$("pChange").textContent = changeCnt ? fmtDec(changeSum/changeCnt, 1) : "—";
   $("pRun").textContent = runCnt ? fmtDec(runSum/runCnt, 1) : "—";
   const bFirst = rows.find(x => x.rec.breakStart || x.rec.breakEnd);
   const btime = bFirst ? `${fmtTime(bFirst.rec.breakStart)}~${fmtTime(bFirst.rec.breakEnd)}` : "—";
@@ -1415,8 +1426,7 @@ function refreshProductDetails(){
       <td class="mono">${Number.isFinite(toNumber(rec.people)) ? fmtDec(toNumber(rec.people),2) : "—"}</td>
       <td class="mono">${Number.isFinite(toNumber(rec.cap)) ? fmtDec(toNumber(rec.cap),2) : "—"}</td>
       <td class="mono">${Number.isFinite(toNumber(rec.eff)) ? fmtDec(toNumber(rec.eff),2) : "—"}</td>
-      <td class="mono">${fmtTime(rec.prodStart)}~${fmtTime(rec.prodEnd)}</td>
-      <td class="mono">${Number.isFinite(toNumber(rec.changeMin)) ? fmtDec(toNumber(rec.changeMin),1) : "—"}</td>
+            <td class="mono">${Number.isFinite(toNumber(rec.changeMin)) ? fmtDec(toNumber(rec.changeMin),1) : "—"}</td>
       <td class="mono">${Number.isFinite(toNumber(rec.runMin)) ? fmtDec(toNumber(rec.runMin),1) : "—"}</td>
       <td class="mono">${fmtTime(rec.breakStart)}~${fmtTime(rec.breakEnd)}</td>
     `;
@@ -1425,6 +1435,123 @@ function refreshProductDetails(){
 
   $("prodDetails").classList.remove("hidden");
 }
+
+/* =========================
+   品名關鍵字搜尋（不必先選線別）
+========================= */
+function buildProdIndex(){
+  const mmddSet = getDateSetInSelection();
+  const seen = new Set();
+  const idx = [];
+  for(const rec of state.records.values()){
+    if(rec.temp !== state.temp) continue;
+    if(!mmddSet.has(rec.mmdd)) continue;
+
+    const lineKey = cleanKey(rec.line);
+    const catKey = cleanKey(rec.category || "");
+    const prodKey = cleanKey(rec.product);
+
+    if(!lineKey || !catKey || !prodKey) continue;
+    if(catKey === "0") continue;
+
+    const key = `${lineKey}|${catKey}|${prodKey}`;
+    if(seen.has(key)) continue;
+    seen.add(key);
+
+    idx.push({
+      lineKey,
+      line: displayLineName(rec.line),
+      catKey,
+      cat: cleanText(rec.category),
+      prodKey,
+      prod: cleanText(rec.product),
+    });
+  }
+  idx.sort((a,b)=>{
+    const t = a.prod.localeCompare(b.prod, "zh-Hant");
+    if(t!==0) return t;
+    const t2 = a.cat.localeCompare(b.cat, "zh-Hant");
+    if(t2!==0) return t2;
+    return a.line.localeCompare(b.line, "zh-Hant");
+  });
+  state.prodIndex = idx;
+
+  const inp = $("prodSearch");
+  if(inp) inp.disabled = idx.length===0;
+  hideProdSuggest();
+}
+
+function hideProdSuggest(){
+  const box = $("prodSuggest");
+  if(!box) return;
+  box.classList.add("hidden");
+  box.innerHTML = "";
+}
+
+function renderProdSuggest(items){
+  const box = $("prodSuggest");
+  if(!box) return;
+  box.innerHTML = "";
+  for(const it of items){
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.innerHTML = `<span>${escapeHtml(it.prod)}</span><span class="sub">${escapeHtml(it.cat)} ｜ ${escapeHtml(it.line)}</span>`;
+    btn.addEventListener("click", ()=> applyProdPick(it));
+    box.appendChild(btn);
+  }
+  box.classList.remove("hidden");
+}
+
+function applyProdPick(it){
+  $("lineSelect").value = it.lineKey;
+  $("catSelect").value = "";
+  $("prodSelect").value = "";
+  refreshLineSection();
+
+  $("catSelect").value = it.catKey;
+  refreshProductSelect();
+
+  $("prodSelect").value = it.prodKey;
+  refreshProductDetails();
+
+  const inp = $("prodSearch");
+  if(inp) inp.value = it.prod;
+  hideProdSuggest();
+}
+
+function setupProdSearch(){
+  const inp = $("prodSearch");
+  const box = $("prodSuggest");
+  if(!inp || !box) return;
+
+  inp.addEventListener("input", ()=>{
+    const q = cleanText(inp.value || "").trim();
+    if(!q){ hideProdSuggest(); return; }
+
+    const out = [];
+    const qk = cleanKey(q);
+    for(const it of state.prodIndex){
+      if(it.prod.includes(q) || cleanKey(it.prod).includes(qk)){
+        out.push(it);
+        if(out.length >= 30) break;
+      }
+    }
+    if(out.length) renderProdSuggest(out);
+    else hideProdSuggest();
+  });
+
+  inp.addEventListener("focus", ()=>{
+    if((inp.value||"").trim()) inp.dispatchEvent(new Event("input"));
+  });
+
+  document.addEventListener("click", (e)=>{
+    const container = inp.parentElement;
+    if(container && container.contains(e.target)) return;
+    hideProdSuggest();
+  });
+}
+
+
 
 /* =========================
    Main refresh (不自動重繪趨勢圖)
@@ -1440,6 +1567,7 @@ function refreshAll(){
   refreshActiveRangeText();
   refreshKpiCards();
   refreshLineSection();
+  buildProdIndex();
 }
 
 /* =========================
@@ -1535,16 +1663,23 @@ $("clearBtn").addEventListener("click", ()=>{
 $("lineSelect").addEventListener("change", ()=>{
   $("catSelect").value = "";
   $("prodSelect").value = "";
+  const _ps = $("prodSearch"); if(_ps){ _ps.value=""; }
+  hideProdSuggest();
   refreshLineSection();
+  buildProdIndex();
 });
 $("catSelect").addEventListener("change", ()=>{
   $("prodSelect").value = "";
+  const _ps = $("prodSearch"); if(_ps){ _ps.value=""; }
+  hideProdSuggest();
   refreshProductSelect();
   refreshProductDetails();
 });
 $("prodSelect").addEventListener("change", ()=> refreshProductDetails());
 $("resetDrillBtn").addEventListener("click", ()=>{
-  $("lineSelect").value = "";
+  const _ps = $("prodSearch"); if(_ps){ _ps.value=""; }
+  hideProdSuggest();
+$("lineSelect").value = "";
   $("catSelect").innerHTML = "";
   $("prodSelect").innerHTML = "";
   $("catSelect").disabled = true;
