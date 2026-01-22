@@ -152,7 +152,8 @@
           <div class="label mb-2">目前顯示</div>
           <div id="activeRangeText" class="font-extrabold text-slate-900 text-lg">—</div>
           <div id="activeRangeHint" class="hint mt-1">—</div>
-        </div>
+        <div id="activeCatCounts" class="mt-2 text-slate-600 text-sm font-bold leading-relaxed"></div>
+</div>
       </div>
     </div>
 
@@ -1077,7 +1078,64 @@ function refreshActiveRangeText(){
   }
   $("activeRangeText").textContent = title;
   $("activeRangeHint").textContent = hint;
+
+  refreshActiveCatCounts();
 }
+
+function refreshActiveCatCounts(){
+  const el = $("activeCatCounts");
+  if(!el) return;
+
+  const temp = state.temp;
+  const all = getAllDatesForTemp(temp);
+
+  // 品類「幾種」：以目前顯示範圍為準；但「月別」採「該月日曆月(1~31)」統計（不含跨月天數），符合「整月平均」的直覺。
+  let mmddSet = new Set();
+  if(state.rangeMode === "month"){
+    const m = state.month;
+    all.filter(o => (o.dateObj.getUTCMonth()+1) === m).forEach(o => mmddSet.add(o.mmdd));
+  }else{
+    mmddSet = getDateSetInSelection();
+  }
+
+  const lineVal = ($("lineSelect")?.value) || "";
+  const lineKeySel = cleanKey(lineVal);
+
+  const map = new Map(); // cat -> Set(prod)
+
+  for(const rec of state.records.values()){
+    if(rec.temp !== temp) continue;
+    if(!mmddSet.has(rec.mmdd)) continue;
+
+    // 若已選線別才套用線別過濾（value 空字串時不過濾）
+    if(lineKeySel && cleanKey(rec.line) !== lineKeySel) continue;
+
+    const cat = cleanText(rec.category || "");
+    const catKey = cleanKey(cat);
+    if(!catKey || catKey === "0") continue;
+
+    const prod = cleanText(rec.product || "");
+    if(!prod) continue;
+
+    if(!map.has(cat)) map.set(cat, new Set());
+    map.get(cat).add(prod);
+  }
+
+  if(map.size === 0){
+    el.textContent = "";
+    return;
+  }
+
+  const arr = Array.from(map.entries())
+    .map(([cat, set]) => ({cat, n: set.size}))
+    .sort((a,b)=> b.n - a.n || a.cat.localeCompare(b.cat, "zh-Hant"));
+
+  const top = arr.slice(0, 8);
+  const parts = top.map(x => `${x.cat} ${x.n} 種`);
+  const more = arr.length - top.length;
+  el.textContent = more > 0 ? (parts.join(" ｜ ") + ` ｜ 其他 ${more} 類`) : parts.join(" ｜ ");
+}
+
 
 function refreshKpiCards(){
   const k = calcKpis();
@@ -1580,6 +1638,8 @@ function refreshLineSection(){
     opt.textContent = "（此線別無明細）";
     catSel.appendChild(opt);
   }
+
+  refreshActiveCatCounts();
 }
 
 function refreshProductSelect(){
