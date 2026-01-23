@@ -179,19 +179,19 @@
     <!-- KPI cards -->
     <div class="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4">
       <div class="card">
-        <div class="label">總生產量</div>
+        <div class="label">總生產量(平均)</div>
         <div id="kpiQty" class="val text-2xl mono mt-1">—</div>
 </div>
       <div class="card">
-        <div class="label">營業額</div>
+        <div class="label">營業額(平均)</div>
         <div id="kpiRev" class="val text-2xl mono mt-1">—</div>
 </div>
       <div class="card">
-        <div class="label">出勤人數</div>
+        <div class="label">出勤人數(平均)</div>
         <div id="kpiAtt" class="val text-2xl mono mt-1">—</div>
 </div>
       <div class="card">
-        <div class="label">人時性</div>
+        <div class="label">人時性(平均)</div>
         <div id="kpiEff" class="val text-2xl mono mt-1">—</div>
 </div>
       <div class="card">
@@ -199,7 +199,7 @@
         <div id="kpiPrice" class="val text-2xl mono mt-1">—</div>
 </div>
       <div class="card">
-        <div class="label">多次生產數</div>
+        <div class="label">多次生產數(平均)</div>
         <div id="kpiMulti" class="val text-2xl mono mt-1">—</div>
 </div>
     </div>
@@ -2606,6 +2606,7 @@ function _safeNum(v){
 function _lowestRateAgg(mode){
   // mode: "human" | "cap"
   const mmddSet = getDateSetInSelection();
+  const _daysCount = Math.max(1, (mmddSet && mmddSet.size) ? mmddSet.size : 0);
 
   // key -> aggregated stats within current selection
   // { lineKey, catKey, prodKey, line, cat, prod, achSum, achCnt, qtySum, qtyCnt, peopleSum, peopleCnt, effSum, effCnt, capSum, capCnt }
@@ -2669,7 +2670,8 @@ function _lowestRateAgg(mode){
       avgPeople: (it.peopleCnt>0) ? (it.peopleSum / it.peopleCnt) : NaN,
       avgEff: (it.effCnt>0) ? (it.effSum / it.effCnt) : NaN,
       avgCap: (it.capCnt>0) ? (it.capSum / it.capCnt) : NaN,
-      totalQty: (it.qtyCnt>0) ? it.qtySum : NaN
+      totalQty: (it.qtyCnt>0) ? it.qtySum : NaN,
+      avgQtyDay: (it.qtyCnt>0) ? (it.qtySum / _daysCount) : NaN
     });
   }
 
@@ -2706,6 +2708,7 @@ const sub = `${it.cat || "—"} ｜ ${it.line || "—"}`;
 
 const qtyText = fmtInt(it.totalQty);
 const peopleText = fmtDec(it.avgPeople, 2);
+const avgQtyDayText = fmtInt(it.avgQtyDay);
 const effText = fmtDec(it.avgEff, 2);
 const capText = fmtDec(it.avgCap, 2);
 
@@ -2718,10 +2721,14 @@ btn.innerHTML = `
     <div class="mt-1 text-xs font-bold text-slate-500">${escapeHtml(sub)}</div>
   </div>
 
-  <div class="flex-[3] grid grid-cols-3 gap-3 items-center">
+  <div class="flex-[3] grid grid-cols-4 gap-3 items-center">
     <div class="text-center">
       <div class="text-[11px] font-bold text-slate-500">生產量</div>
       <div class="mt-0.5 text-sm font-extrabold text-slate-900 mono">${escapeHtml(qtyText)}</div>
+    </div>
+    <div class="text-center">
+      <div class="text-[11px] font-bold text-slate-500">平均生產量(日)</div>
+      <div class="mt-0.5 text-sm font-extrabold text-slate-900 mono">${escapeHtml(avgQtyDayText)}</div>
     </div>
     <div class="text-center">
       <div class="text-[11px] font-bold text-slate-500">人數</div>
