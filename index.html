@@ -95,6 +95,11 @@
     <div class="card">
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div>
+          <div class="label mb-1">年別（目前內建為 2025／2026）</div>
+          <select id="yearSelect" class="select"></select>
+          <div class="hint mt-2">若未來擴充到其他年度，再開放此欄位。</div>
+        </div>
+        <div>
           <div class="label mb-2">範圍</div>
           <div class="flex flex-wrap gap-2" role="group" aria-label="Range">
             <button class="seg-btn active" data-range="year">年別</button>
@@ -126,20 +131,13 @@
           </div>
 
         </div>
-
         <div>
           <div class="label mb-2">溫層</div>
           <div class="flex flex-wrap gap-2" role="group" aria-label="Temp">
-            <button class="seg-btn active" data-temp="18">18°C</button>
-            <button class="seg-btn" data-temp="4">4°C</button>
+            <button class="seg-btn" data-temp="18">18°C</button>
+            <button class="seg-btn active" data-temp="4">4°C</button>
           </div>
           <div class="hint mt-2">18°C 不顯示產能達成率（依你要求）。</div>
-        </div>
-
-        <div>
-          <div class="label mb-1">年份（目前內建為 2025／2026）</div>
-          <select id="yearSelect" class="select"></select>
-          <div class="hint mt-2">若未來擴充到其他年度，再開放此欄位。</div>
         </div>
       </div>
 
@@ -652,8 +650,8 @@ console.log("Jinxin dashboard build:", BUILD_VERSION);
 
 const state = {
   rangeMode: "year",
-  temp: "18",
-  year: 2025,
+  temp: "4",
+  year: (new Date().getFullYear()),
   month: 7,
   weekStartStr: "",
   dayStr: "",
@@ -1222,7 +1220,14 @@ function refreshSelectors(){
     const years = Array.from(new Set(Array.from(state.availableMmdd).map(dk=>String(dk).slice(0,4)).filter(y=>/^\d{4}$/.test(y)))).sort();
     const fallback = String(state.year || 2025);
     const useYears = years.length ? years : [fallback];
-    if(!state.year || !useYears.includes(String(state.year))) state.year = Number(useYears[0]);
+    const sysY = new Date().getFullYear();
+    const sysStr = String(sysY);
+    // 預設以「系統年」為優先；若系統年不在資料內，則使用資料中最新年度
+    if(!state.year || !useYears.includes(String(state.year))){
+      if(useYears.includes(sysStr)) state.year = sysY;
+      else state.year = Number(useYears[useYears.length-1]);
+    }
+
     yearSel.innerHTML = "";
     for(const y of useYears){
       const opt = document.createElement("option");
