@@ -152,6 +152,25 @@
           <input id="daySelect" type="date" class="select mt-2" />
         </div>
 
+        <div id="customRangePanel" class="hidden">
+          <div class="label mb-1">指定期間（日別專用｜可選）</div>
+          <div class="hint">用「起日～迄日」一次查看多天彙總與明細（例：1/1～1/5）。未填完整則不生效。</div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+            <div>
+              <div class="text-slate-600 text-sm font-bold mb-1">起日</div>
+              <input id="customStart" type="date" class="select" />
+            </div>
+            <div>
+              <div class="text-slate-600 text-sm font-bold mb-1">迄日</div>
+              <input id="customEnd" type="date" class="select" />
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-2 mt-2">
+            <button id="applyCustomRange" class="btn">套用指定期間</button>
+            <button id="clearCustomRange" class="btn">清除指定期間</button>
+          </div>
+        </div>
+
         <div class="md:col-span-2">
           <div class="label mb-2">目前顯示</div>
           <div id="activeRangeText" class="font-extrabold text-slate-900 text-lg">—</div>
@@ -333,6 +352,8 @@
               <div class="flex justify-between"><span>人數</span><span id="pPeople" class="mono">—</span></div>
               <div class="flex justify-between"><span>產能/時</span><span id="pCap" class="mono">—</span></div>
               <div class="flex justify-between"><span>人時性</span><span id="pEff" class="mono">—</span></div>
+              <div class="flex justify-between"><span>人時性達成率</span><span id="pHumanAch" class="mono">—</span></div>
+              <div id="pCapAchRow" class="flex justify-between"><span>產能達成率</span><span id="pCapAch" class="mono">—</span></div>
             </div>
           </div>
           <div class="card">
@@ -567,6 +588,8 @@ const state = {
   month: 7,
   weekStartStr: "",
   dayStr: "",
+  customStartStr: \"\",
+  customEndStr: \"\",
   chartKpi: "totalQty",
   chartKpi2: "",
 
@@ -715,11 +738,10 @@ function parseTempSheet(wb, sheetName, temp, dateKey){
   const idxChange = indexOfHeaderContains(header, "換線/分");
   const idxRun = indexOfHeaderContains(header, "稼動時間/分");
 
-  // 4°C capability achievement exists; 18°C ignore
-  const idxCapAch = (temp === "4") ? (() => {
-    const all = indexOfAllHeaderContains(header, "達成率");
-    return all.length ? all[all.length-1] : -1;
-  })() : -1;
+  // 達成率欄位：通常同時包含「人時性達成率」與（4°C）「產能達成率」
+  const _achCols = indexOfAllHeaderContains(header, "達成率");
+  const idxHumanAch = _achCols.length ? _achCols[0] : -1;
+  const idxCapAch = (temp === "4") ? (_achCols.length ? _achCols[_achCols.length-1] : -1) : -1;
 
   let currentLine = "";
   let currentCat = "";
@@ -759,6 +781,7 @@ function parseTempSheet(wb, sheetName, temp, dateKey){
       prodEnd: (idxProdTime>=0) ? row[idxProdTime+1] : null,
       changeMin: (idxChange>=0) ? toNumber(row[idxChange]) : NaN,
       runMin: (idxRun>=0) ? toNumber(row[idxRun]) : NaN,
+      humanAch: (idxHumanAch>=0) ? toNumber(row[idxHumanAch]) : NaN,
       capAch: (idxCapAch>=0) ? toNumber(row[idxCapAch]) : NaN
     };
 
@@ -1037,6 +1060,8 @@ function togglePanels(){
   $("monthPanel").classList.toggle("hidden", state.rangeMode !== "month");
   $("weekPanel").classList.toggle("hidden", state.rangeMode !== "week");
   $("dayPanel").classList.toggle("hidden", state.rangeMode !== "day");
+  const cr = $("customRangePanel");
+  if(cr) cr.classList.toggle("hidden", state.rangeMode !== "day");
 }
 function fmtMd(dateObj){
   const m = String(dateObj.getUTCMonth()+1).padStart(2,"0");
@@ -1136,6 +1161,11 @@ function refreshSelectors(){
   if(!state.dayStr && dates.length) state.dayStr = dateObjToStr(dates[0]);
   daySel.value = state.dayStr || "";
 
+  const cs = $("customStart");
+  const ce = $("customEnd");
+  if(cs && state.customStartStr) cs.value = state.customStartStr;
+  if(ce && state.customEndStr) ce.value = state.customEndStr;
+
   // dynamic line select
   const lineSel = $("lineSelect");
   lineSel.innerHTML = "";
@@ -1180,10 +1210,32 @@ function getSummaryForDay(temp, mmdd){
   const dateKey = (/^\d{8}$/.test(s)) ? s : `${state.year}${s}`;
   return state.summaries.get(`${temp}|${dateKey}`) || null;
 }
+
+function getActiveDayRange(){
+  if(state.rangeMode !== "day") return null;
+  const s = (state.customStartStr || "").trim();
+  const e = (state.customEndStr || "").trim();
+  if(!s || !e) return null;
+  const sd = new Date(s + "T00:00:00Z");
+  const ed = new Date(e + "T00:00:00Z");
+  if(!Number.isFinite(sd.getTime()) || !Number.isFinite(ed.getTime())) return null;
+  const start = (sd <= ed) ? sd : ed;
+  const end = (sd <= ed) ? ed : sd;
+  return { start, end, startStr: dateObjToStr(start), endStr: dateObjToStr(end) };
+}
+
 function summariesInRange(){
   const temp = state.temp;
   const all = getAllDatesForTemp(temp);
   if(!all.length) return [];
+
+  // 日別：指定期間（起日～迄日）優先
+  const dr = getActiveDayRange();
+  if(dr){
+    return all.filter(o => o.dateObj >= dr.start && o.dateObj <= dr.end)
+              .map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)}))
+              .filter(x=>x.summary);
+  }
 
   if(state.rangeMode === "year"){
     return all.map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
@@ -1204,9 +1256,9 @@ function summariesInRange(){
   // day
   if(state.dayStr){
     const dSel = new Date(state.dayStr + "T00:00:00Z");
-    const mmdd = String(dSel.getUTCMonth()+1).padStart(2,"0") + String(dSel.getUTCDate()).padStart(2,"0");
-    const s = getSummaryForDay(temp, mmdd);
-    return s ? [{mmdd, dateObj:dSel, dateStr: state.dayStr, summary:s}] : [];
+    const dateKey = String(state.dayStr).replace(/-/g,""); // YYYYMMDD
+    const s = getSummaryForDay(temp, dateKey);
+    return s ? [{mmdd: dateKey, dateObj:dSel, dateStr: state.dayStr, summary:s}] : [];
   }
   return [];
 }
@@ -1235,6 +1287,13 @@ function calcKpis(){
     const eff = effCnt ? (effSum/effCnt) : NaN;
     const avgPrice = (qty>0 && rev>0) ? (rev/qty) : NaN;
     return {qty, rev, multi, att, eff, avgPrice, days: days.length};
+  }
+
+  const dr = getActiveDayRange();
+  if(mode === "day" && dr){
+    const base = kpiFromDays(list);
+    return { qty: base.qty, rev: base.rev, multi: base.multi, att: base.att, eff: base.eff, avgPrice: base.avgPrice,
+      hint:`指定期間（${dr.startStr} ～ ${dr.endStr}）` };
   }
 
   if(mode === "day"){
@@ -1304,6 +1363,7 @@ function calcKpis(){
 function refreshActiveRangeText(){
   const tempLabel = (state.temp === "18") ? "18°C" : "4°C";
   let title = "", hint = "";
+  const dr = getActiveDayRange();
   if(state.rangeMode === "year"){
     title = `${state.year} 年｜${tempLabel}`;
     hint = "顯示：12 個月月平均（各月日平均），再取全年平均";
@@ -1316,8 +1376,13 @@ function refreshActiveRangeText(){
     title = ws ? `${dateObjToStr(ws)} ～ ${dateObjToStr(we)}｜${tempLabel}` : `（未選週）｜${tempLabel}`;
     hint = "顯示：週內日平均";
   }else{
-    title = state.dayStr ? `${state.dayStr}｜${tempLabel}` : `（未選日）｜${tempLabel}`;
-    hint = "顯示：單日";
+    if(dr){
+      title = `${dr.startStr} ～ ${dr.endStr}｜${tempLabel}`;
+      hint = "顯示：指定期間（生產量/營收/多次生產＝加總；出勤人數/人時性＝日平均）";
+    }else{
+      title = state.dayStr ? `${state.dayStr}｜${tempLabel}` : `（未選日）｜${tempLabel}`;
+      hint = "顯示：單日";
+    }
   }
   $("activeRangeText").textContent = title;
   $("activeRangeHint").textContent = hint;
@@ -2111,7 +2176,7 @@ function refreshProductDetails(){
   }
   rows.sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
 
-  let qty=0, rev=0, multi=0, peopleSum=0, capSum=0, effSum=0, pcnt=0, ccnt=0, ecnt=0, changeSum=0, runSum=0, changeCnt=0, runCnt=0;
+  let qty=0, rev=0, multi=0, peopleSum=0, capSum=0, effSum=0, pcnt=0, ccnt=0, ecnt=0, hAchSum=0, hAchCnt=0, cAchSum=0, cAchCnt=0, changeSum=0, runSum=0, changeCnt=0, runCnt=0;
   for(const {rec} of rows){
     const q = toNumber(rec.qty); if(Number.isFinite(q)) qty += q;
     const r = toNumber(rec.revenue); if(Number.isFinite(r)) rev += r;
@@ -2120,6 +2185,9 @@ function refreshProductDetails(){
     const p = toNumber(rec.people); if(Number.isFinite(p)){ peopleSum += p; pcnt++; }
     const c = toNumber(rec.cap); if(Number.isFinite(c)){ capSum += c; ccnt++; }
     const e = toNumber(rec.eff); if(Number.isFinite(e)){ effSum += e; ecnt++; }
+
+    const ha = toNumber(rec.humanAch); if(Number.isFinite(ha)){ hAchSum += ha; hAchCnt++; }
+    const ca = toNumber(rec.capAch); if(Number.isFinite(ca)){ cAchSum += ca; cAchCnt++; }
 
     const ch = toNumber(rec.changeMin); if(Number.isFinite(ch)){ changeSum += ch; changeCnt++; }
     const ru = toNumber(rec.runMin); if(Number.isFinite(ru)){ runSum += ru; runCnt++; }
@@ -2134,6 +2202,11 @@ function refreshProductDetails(){
   $("pEff").textContent = ecnt ? fmtDec(effSum/ecnt, 2) : "—";
 $("pChange").textContent = changeCnt ? fmtDec(changeSum/changeCnt, 1) : "—";
   $("pRun").textContent = runCnt ? fmtDec(runSum/runCnt, 1) : "—";
+
+  $("pHumanAch").textContent = hAchCnt ? fmtPct(hAchSum/hAchCnt) : "—";
+  const capRow = $("pCapAchRow");
+  if(capRow) capRow.classList.toggle("hidden", state.temp !== "4");
+  $("pCapAch").textContent = (state.temp === "4" && cAchCnt) ? fmtPct(cAchSum/cAchCnt) : "—";
 
   const tb = $("prodTableBody");
   tb.innerHTML = "";
@@ -2340,6 +2413,34 @@ $("daySelect").addEventListener("change", ()=>{
   refreshAll();
   markChartsDirty();
 });
+
+const _applyCR = $("applyCustomRange");
+const _clearCR = $("clearCustomRange");
+const _cs = $("customStart");
+const _ce = $("customEnd");
+
+if(_cs) _cs.addEventListener("change", ()=>{ state.customStartStr = _cs.value; refreshAll(); markChartsDirty(); });
+if(_ce) _ce.addEventListener("change", ()=>{ state.customEndStr = _ce.value; refreshAll(); markChartsDirty(); });
+
+if(_applyCR){
+  _applyCR.addEventListener("click", ()=>{
+    state.customStartStr = (_cs && _cs.value) ? _cs.value : state.customStartStr;
+    state.customEndStr = (_ce && _ce.value) ? _ce.value : state.customEndStr;
+    refreshAll();
+    markChartsDirty();
+  });
+}
+if(_clearCR){
+  _clearCR.addEventListener("click", ()=>{
+    if(_cs) _cs.value = "";
+    if(_ce) _ce.value = "";
+    state.customStartStr = "";
+    state.customEndStr = "";
+    refreshAll();
+    markChartsDirty();
+  });
+}
+
 $("chartKpiSelect").addEventListener("change", ()=>{
   state.chartKpi = $("chartKpiSelect").value;
   if(state.chartKpi2 && state.chartKpi2 === state.chartKpi){
