@@ -1130,7 +1130,6 @@ function getSummaryForDay(temp, mmdd){
   const s = String(mmdd || "");
   const dateKey = (/^\d{8}$/.test(s)) ? s : `${state.year}${s}`;
   return state.summaries.get(`${temp}|${dateKey}`) || null;
-}|${dateKey}`) || null;
 }
 function summariesInRange(){
   const temp = state.temp;
