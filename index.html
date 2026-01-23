@@ -218,7 +218,7 @@
       <div id="chartArea" class="mt-5 hidden">
         <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
           <div>
-            <div class="label mb-2">日別（日平均）</div>
+            <div id="dailyChartTitle" class="label mb-2">日別（日平均）</div>
             <div class="chartWrap">
               <canvas id="dailyChart"></canvas>
             </div>
@@ -2033,65 +2033,199 @@ function renderCharts(){
   const kpi2 = state.chartKpi2 || "";
 
   // 以「目前視圖 +（可選）指定範圍」篩出的每日資料作為趨勢基礎
-  const list = summariesInRange().slice().sort((a,b)=>a.dateObj-b.dateObj);
+  const dailyList = summariesInRange().slice().sort((a,b)=>a.dateObj-b.dateObj);
 
-  if(!list.length){
+  if(!dailyList.length){
     destroyCharts();
+    $("dailyChartTitle").textContent = "日別（日平均）";
     $("cumChartTitle").textContent = "累計";
     state.chartsDirty = false;
     $("chartDirtyHint").classList.add("hidden");
     return;
   }
 
-  const labels = list.map(o => String(o.dateStr || "").slice(5)); // MM-DD
+  // 年別：X=月；月別：X=週；其餘：X=日
+  const groupMode = (state.rangeMode === "year") ? "month" : ((state.rangeMode === "month") ? "week" : "day");
+  const axisLabel = (groupMode === "month") ? "月別" : ((groupMode === "week") ? "週別" : "日別");
+  $("dailyChartTitle").textContent = `${axisLabel}（日平均）`;
 
-  const getDailySeries = (kpi)=>{
-    return list.map(o => {
-      const s = o.summary || {};
-      const q = toNumber(s.totalQty);
-      const r = toNumber(s.revenue);
-      const m = toNumber(s.multi);
-      const a = toNumber(s.attendance);
-      const e = toNumber(s.efficiency);
+  const pad2 = (n)=>String(n).padStart(2,"0");
+  const fmtMMDDSlash = (d)=>`${pad2(d.getMonth()+1)}/${pad2(d.getDate())}`;
 
-      if(kpi === "totalQty") return Number.isFinite(q) ? q : null;
-      if(kpi === "revenue")  return Number.isFinite(r) ? r : null;
-      if(kpi === "multi")    return Number.isFinite(m) ? m : null;
-      if(kpi === "attendance") return Number.isFinite(a) ? a : null;
-      if(kpi === "efficiency") return Number.isFinite(e) ? e : null;
-      if(kpi === "avgPrice"){
-        if(Number.isFinite(q) && q > 0 && Number.isFinite(r)) return r / q;
-        const ap = toNumber(s.avgPrice);
-        return Number.isFinite(ap) ? ap : null;
-      }
-      if(kpi === "itemCount"){
-        const v = state.itemCountDaily.get(`${state.temp}|${o.mmdd}`);
-        return Number.isFinite(v) ? v : null;
-      }
-      return null;
-    });
+  const getWeekStart = (d)=>{
+    const x = new Date(d);
+    x.setHours(0,0,0,0);
+    // 週二(2)為一週起點
+    const diff = (x.getDay() - 2 + 7) % 7;
+    x.setDate(x.getDate() - diff);
+    return x;
   };
 
-  // 累計規則：
-  // - 產量/營收/多次生產：逐日加總
-  // - 出勤人數：A（逐日加總）
+  const buckets = [];
+  const bucketByKey = new Map();
+
+  const pushToBucket = (key, label, item, meta={})=>{
+    let b = bucketByKey.get(key);
+    if(!b){
+      b = { key, label, items: [], ...meta };
+      bucketByKey.set(key, b);
+      buckets.push(b);
+    }
+    b.items.push(item);
+  };
+
+  for(const o of dailyList){
+    const d = o.dateObj;
+    if(!d) continue;
+
+    if(groupMode === "day"){
+      const key = String(o.mmdd || "");
+      const label = o.dateStr ? o.dateStr.slice(5).replace("-","/") : fmtMMDDSlash(d);
+      pushToBucket(key, label, o);
+      continue;
+    }
+
+    if(groupMode === "week"){
+      const ws = getWeekStart(d);
+      const we = new Date(ws); we.setDate(ws.getDate()+6);
+      const key = ws.toISOString().slice(0,10);
+      const label = `${fmtMMDDSlash(ws)}~${fmtMMDDSlash(we)}`; // A: MM/DD~MM/DD
+      pushToBucket(key, label, o, {weekStart: ws});
+      continue;
+    }
+
+    // month
+    const y = d.getFullYear();
+    const m = d.getMonth()+1;
+    const key = `${y}-${pad2(m)}`;
+    const label = `${m}月`;
+    pushToBucket(key, label, o, {month: m});
+  }
+
+  // 保證 bucket 排序：day=日期、week=週起點、month=月份
+  if(groupMode === "day"){
+    buckets.sort((a,b)=>{
+      const ad = dateKeyToDateObj(a.key);
+      const bd = dateKeyToDateObj(b.key);
+      return (ad && bd) ? (ad - bd) : String(a.key).localeCompare(String(b.key));
+    });
+  }else if(groupMode === "week"){
+    buckets.sort((a,b)=>(a.weekStart - b.weekStart));
+  }else{
+    buckets.sort((a,b)=>(a.month - b.month));
+  }
+
+  const labels = buckets.map(b=>b.label);
+
+  const dayValue = (kpi, o)=>{
+    const s = (o && o.summary) ? o.summary : {};
+    const q = toNumber(s.totalQty);
+    const r = toNumber(s.revenue);
+    const m = toNumber(s.multi);
+    const a = toNumber(s.attendance);
+    const e = toNumber(s.efficiency);
+
+    if(kpi === "totalQty") return Number.isFinite(q) ? q : null;
+    if(kpi === "revenue")  return Number.isFinite(r) ? r : null;
+    if(kpi === "multi")    return Number.isFinite(m) ? m : null;
+    if(kpi === "attendance") return Number.isFinite(a) ? a : null;
+    if(kpi === "efficiency") return Number.isFinite(e) ? e : null;
+
+    if(kpi === "avgPrice"){
+      if(Number.isFinite(q) && q > 0 && Number.isFinite(r)) return r / q;
+      const ap = toNumber(s.avgPrice);
+      return Number.isFinite(ap) ? ap : null;
+    }
+
+    if(kpi === "itemCount"){
+      const v = state.itemCountDaily.get(`${state.temp}|${o.mmdd}`);
+      return Number.isFinite(v) ? v : null;
+    }
+
+    return null;
+  };
+
+  const bucketDailyAvg = (kpi, bucket)=>{
+    // 所有指標：以「日平均」呈現
+    if(kpi === "avgPrice"){
+      let sumRev = 0, sumQty = 0;
+      let any = false;
+      for(const o of bucket.items){
+        const s = (o && o.summary) ? o.summary : {};
+        const q = toNumber(s.totalQty);
+        const r = toNumber(s.revenue);
+        if(Number.isFinite(r)){ sumRev += r; any = true; }
+        if(Number.isFinite(q) && q > 0){ sumQty += q; any = true; }
+      }
+      if(any && sumQty > 0) return sumRev / sumQty;
+      // fallback: 平均 daily avgPrice
+      let sum = 0, n = 0;
+      for(const o of bucket.items){
+        const v = dayValue("avgPrice", o);
+        if(Number.isFinite(v)){ sum += v; n++; }
+      }
+      return n ? (sum / n) : null;
+    }
+
+    let sum = 0, n = 0;
+    for(const o of bucket.items){
+      const v = dayValue(kpi, o);
+      if(Number.isFinite(v)){ sum += v; n++; }
+    }
+    return n ? (sum / n) : null;
+  };
+
+  const bucketSum = (kpi, bucket)=>{
+    let sum = 0;
+    let any = false;
+    for(const o of bucket.items){
+      const v = dayValue(kpi, o);
+      if(Number.isFinite(v)){ sum += v; any = true; }
+    }
+    return any ? sum : null;
+  };
+
+  // 預先建索引：dateKey(mmdd) -> Set(product)（供累計品名數）
+  const prodSetByDate = new Map();
+  if(kpi1 === "itemCount" || kpi2 === "itemCount"){
+    const temp = state.temp;
+    for(const rec of state.records.values()){
+      if(rec.temp !== temp) continue;
+      const dk = rec.mmdd;
+      if(!dk) continue;
+      const prod = cleanText(rec.product || "");
+      if(!prod) continue;
+      let set = prodSetByDate.get(dk);
+      if(!set){ set = new Set(); prodSetByDate.set(dk, set); }
+      set.add(prod);
+    }
+  }
+
+  const getDailySeries = (kpi)=>{
+    return buckets.map(b=>bucketDailyAvg(kpi, b));
+  };
+
+  // 累計規則（與原版一致，但改以 bucket 為 X 單位）：
+  // - 產量/營收/多次生產：逐 bucket 加總（bucket 內為日加總）
+  // - 出勤人數：A（逐 bucket 加總）
   // - 平均廠價：累計營收/累計產量（加權）
   // - 人時性：以「出勤人數」作權重的累計加權平均（無出勤則權重=1）
-  // - 品名數：累計『不重複品名』數（由明細 records 聯集）
+  // - 品名數：累計『不重複品名』數（明細 records 聯集）
   const getCumulativeSeries = (kpi)=>{
     const temp = state.temp;
 
     if(kpi === "avgPrice"){
       let cumRev = 0;
       let cumQty = 0;
-      return list.map(o => {
-        const s = o.summary || {};
-        const q = toNumber(s.totalQty);
-        const r = toNumber(s.revenue);
-        if(Number.isFinite(q) && q > 0) cumQty += q;
-        if(Number.isFinite(r)) cumRev += r;
-        if(cumQty > 0 && Number.isFinite(cumRev)) return cumRev / cumQty;
-        return null;
+      return buckets.map(b=>{
+        for(const o of b.items){
+          const s = (o && o.summary) ? o.summary : {};
+          const q = toNumber(s.totalQty);
+          const r = toNumber(s.revenue);
+          if(Number.isFinite(q) && q > 0) cumQty += q;
+          if(Number.isFinite(r)) cumRev += r;
+        }
+        return (cumQty > 0) ? (cumRev / cumQty) : null;
       });
     }
 
@@ -2099,39 +2233,44 @@ function renderCharts(){
       let wSum = 0;
       let w = 0;
       let last = null;
-      return list.map(o => {
-        const s = o.summary || {};
-        const e = toNumber(s.efficiency);
-        if(!Number.isFinite(e)) return last;
-        let wt = toNumber(s.attendance);
-        if(!Number.isFinite(wt) || wt <= 0) wt = 1;
-        wSum += e * wt;
-        w += wt;
-        last = (w > 0) ? (wSum / w) : null;
+      return buckets.map(b=>{
+        let has = false;
+        for(const o of b.items){
+          const s = (o && o.summary) ? o.summary : {};
+          const e = toNumber(s.efficiency);
+          if(!Number.isFinite(e)) continue;
+          let wt = toNumber(s.attendance);
+          if(!Number.isFinite(wt) || wt <= 0) wt = 1;
+          wSum += e * wt;
+          w += wt;
+          has = true;
+        }
+        if(has) last = (w > 0) ? (wSum / w) : null;
         return last;
       });
     }
 
     if(kpi === "itemCount"){
       const seen = new Set();
-      return list.map(o => {
-        // 注意：此處採「累計不重複品名」；若資料量極大可改成預先索引。
-        for(const rec of state.records.values()){
-          if(rec.temp !== temp) continue;
-          if(rec.mmdd !== o.mmdd) continue;
-          const p = cleanText(rec.product || "");
-          if(p) seen.add(p);
+      return buckets.map(b=>{
+        for(const o of b.items){
+          const dk = o.mmdd;
+          const set = prodSetByDate.get(dk);
+          if(set){
+            for(const p of set) seen.add(p);
+          }
         }
         return seen.size;
       });
     }
 
     // Sum types (含 attendance A)
-    const daily = getDailySeries(kpi);
     let cum = 0;
-    return daily.map(v => {
-      if(Number.isFinite(v)) cum += v;
-      return cum;
+    let hasAny = false;
+    return buckets.map(b=>{
+      const s = bucketSum(kpi, b);
+      if(Number.isFinite(s)){ cum += s; hasAny = true; }
+      return hasAny ? cum : null;
     });
   };
 
@@ -2180,6 +2319,7 @@ function renderCharts(){
       decimation: { enabled: true, algorithm: "min-max" }
     },
     scales: {
+      x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 18 } },
       y: {
         position: "left",
         beginAtZero: false,
@@ -2202,24 +2342,24 @@ function renderCharts(){
   const cctx = $("cumChart").getContext("2d");
 
   const dailyDatasets = [{
-    label: `${kpiLabel(kpi1)}（日別）`,
+    label: `${kpiLabel(kpi1)}（${axisLabel}）`,
     data: daily1,
     yAxisID: "y",
     _kpi: kpi1,
     spanGaps: true,
     tension: 0.25,
-    pointRadius: 3,
+    pointRadius: (labels.length > 35) ? 0 : 3,
     pointHoverRadius: 5
   }];
   if(daily2){
     dailyDatasets.push({
-      label: `${kpiLabel(kpi2)}（右軸｜日別）`,
+      label: `${kpiLabel(kpi2)}（右軸｜${axisLabel}）`,
       data: daily2,
       yAxisID: "y1",
       _kpi: kpi2,
       spanGaps: true,
       tension: 0.25,
-      pointRadius: 3,
+      pointRadius: (labels.length > 35) ? 0 : 3,
       pointHoverRadius: 5
     });
   }
@@ -2237,7 +2377,7 @@ function renderCharts(){
     _kpi: kpi1,
     spanGaps: true,
     tension: 0.15,
-    pointRadius: 2,
+    pointRadius: (labels.length > 35) ? 0 : 2,
     pointHoverRadius: 4
   }];
   if(cum2){
@@ -2248,7 +2388,7 @@ function renderCharts(){
       _kpi: kpi2,
       spanGaps: true,
       tension: 0.15,
-      pointRadius: 2,
+      pointRadius: (labels.length > 35) ? 0 : 2,
       pointHoverRadius: 4
     });
   }
@@ -2262,6 +2402,7 @@ function renderCharts(){
   state.chartsDirty = false;
   $("chartDirtyHint").classList.add("hidden");
 }
+
 
 
 /* =========================
