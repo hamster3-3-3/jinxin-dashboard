@@ -220,15 +220,15 @@
       <div id="chartArea" class="mt-5 hidden">
         <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
           <div>
-            <div class="label mb-2">月趨勢（12 個月｜月平均）</div>
+            <div class="label mb-2">日別（日平均）</div>
             <div class="chartWrap">
-              <canvas id="monthChart"></canvas>
+              <canvas id="dailyChart"></canvas>
             </div>
           </div>
           <div>
-            <div id="weekChartTitle" class="label mb-2">週趨勢</div>
+            <div id="cumChartTitle" class="label mb-2">累計</div>
             <div class="chartWrap">
-              <canvas id="weekChart"></canvas>
+              <canvas id="cumChart"></canvas>
             </div>
           </div>
         </div>
@@ -647,7 +647,7 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v35e_day_range_fix2";
+const BUILD_VERSION = "v35i_dailyavg_daily_cum_charts";
 console.log("Jinxin dashboard build:", BUILD_VERSION);
 
 const state = {
@@ -1392,27 +1392,19 @@ function calcKpis(){
     for(const d of days){
       const s = d.summary;
       const q = toNumber(s.totalQty); if(Number.isFinite(q)) qty += q;
-      const r = toNumber(s.revenue); if(Number.isFinite(r)) rev += r;
-      const m = toNumber(s.multi); if(Number.isFinite(m)) multi += m;
+      const r = toNumber(s.revenue);  if(Number.isFinite(r)) rev += r;
+      const m = toNumber(s.multi);    if(Number.isFinite(m)) multi += m;
       const a = toNumber(s.attendance); if(Number.isFinite(a)){ attSum += a; attCnt++; }
       const e = toNumber(s.efficiency); if(Number.isFinite(e)){ effSum += e; effCnt++; }
     }
     const att = attCnt ? (attSum/attCnt) : NaN;
     const eff = effCnt ? (effSum/effCnt) : NaN;
-    const avgPrice = (qty>0 && rev>0) ? (rev/qty) : NaN;
+    const avgPrice = (qty>0 && Number.isFinite(rev)) ? (rev/qty) : NaN;
     return {qty, rev, multi, att, eff, avgPrice, days: days.length};
   }
 
-  if(mode === "day" && dr){
-    const base = kpiFromDays(list);
-    return { qty: base.qty, rev: base.rev, multi: base.multi, att: base.att, eff: base.eff, avgPrice: base.avgPrice,
-      hint:`指定期間（${dr.startStr} ～ ${dr.endStr}）` };
-  }
-
-  // 其餘視圖：先照原本口徑計算，再在提示文字上標示「指定範圍」
-  let out;
-
-  if(mode === "day"){
+  // 單日（無指定範圍）
+  if(mode === "day" && !dr){
     const d = list[0];
     if(!d) return {qty:NaN, rev:NaN, multi:NaN, att:NaN, eff:NaN, avgPrice:NaN, hint:"無資料"};
     const s = d.summary;
@@ -1422,62 +1414,39 @@ function calcKpis(){
     return {qty, rev, multi, att, eff, avgPrice, hint:`單日（${d.dateStr}）`};
   }
 
+  // 其餘（週/月/年/指定範圍）：全部以「日平均」顯示
+  const base = kpiFromDays(list);
+  if(!base.days) return {qty:NaN, rev:NaN, multi:NaN, att:NaN, eff:NaN, avgPrice:NaN, hint:"無資料"};
+  const dn = Math.max(base.days, 1);
+
+  let hint = "";
   if(mode === "week"){
-    const base = kpiFromDays(list);
-    const days = Math.max(base.days, 1);
-    out = { qty: base.qty/days, rev: base.rev/days, multi: base.multi/days, att: base.att, eff: base.eff, avgPrice: base.avgPrice,
-      hint:`週內日平均（${$("weekSelect").value || ""}）`
-    };
+    hint = `週內日平均（${$("weekSelect").value || ""}）`;
   }else if(mode === "month"){
-    const byWeek = new Map();
-    for(const item of list){
-      const ws = getWeekStartUTC(item.dateObj);
-      const wsStr = dateObjToStr(ws);
-      if(!byWeek.has(wsStr)) byWeek.set(wsStr, []);
-      byWeek.get(wsStr).push(item);
-    }
-    const weeks = Array.from(byWeek.entries()).sort((a,b)=>a[0].localeCompare(b[0]));
-    const wk = weeks.map(([wsStr, items])=>{
-      const k = kpiFromDays(items);
-      const dn = Math.max(k.days, 1);
-      return { wsStr, qty:k.qty/dn, rev:k.rev/dn, multi:k.multi/dn, att:k.att, eff:k.eff, avgPrice:k.avgPrice };
-    });
-    if(!wk.length) return {qty:NaN, rev:NaN, multi:NaN, att:NaN, eff:NaN, avgPrice:NaN, hint:"無資料"};
-    const n = wk.length;
-    const avg = (key)=> wk.reduce((s,x)=> s + (Number.isFinite(x[key]) ? x[key] : 0), 0) / n;
-    out = { qty: avg("qty"), rev: avg("rev"), multi: avg("multi"), att: avg("att"), eff: avg("eff"), avgPrice: avg("avgPrice"),
-      hint:`本月每週平均（週內日平均）再取平均（${String(state.month).padStart(2,"0")} 月｜有資料週：${n}）`
-    };
+    hint = `本月日平均（${String(state.month).padStart(2,"0")} 月）`;
+  }else if(mode === "year"){
+    hint = `年別日平均（${state.year} 年）`;
   }else{
-    // year
-    const byMonth = new Map();
-    for(const item of list){
-      const mk = monthKeyFromDate(item.dateObj);
-      if(!byMonth.has(mk)) byMonth.set(mk, []);
-      byMonth.get(mk).push(item);
-    }
-    const months = [];
-    for(let m=1;m<=12;m++){
-      const mk = `${state.year}-${String(m).padStart(2,"0")}`;
-      const items = byMonth.get(mk) || [];
-      if(!items.length) continue;
-      const k = kpiFromDays(items);
-      const dn = Math.max(k.days, 1);
-      months.push({ m, qty:k.qty/dn, rev:k.rev/dn, multi:k.multi/dn, att:k.att, eff:k.eff, avgPrice:k.avgPrice });
-    }
-    if(!months.length) return {qty:NaN, rev:NaN, multi:NaN, att:NaN, eff:NaN, avgPrice:NaN, hint:"無資料"};
-    const n = months.length;
-    const avg = (key)=> months.reduce((s,x)=> s + (Number.isFinite(x[key]) ? x[key] : 0), 0) / n;
-    out = { qty: avg("qty"), rev: avg("rev"), multi: avg("multi"), att: avg("att"), eff: avg("eff"), avgPrice: avg("avgPrice"),
-      hint:`年別：12 個月月平均再取平均（有資料月份：${n}）`
-    };
+    // day + 指定範圍
+    hint = dr ? `指定期間日平均（${dr.startStr} ～ ${dr.endStr}）` : "日平均";
   }
 
-  if(dr && out && out.hint){
-    out.hint = `${out.hint}｜指定範圍（${dr.startStr} ～ ${dr.endStr}）`;
+  // 若在非日別視圖也套用了指定範圍，額外標示
+  if(dr && mode !== "day"){
+    hint = `${hint}｜指定範圍（${dr.startStr} ～ ${dr.endStr}）`;
   }
-  return out;
+
+  return {
+    qty: base.qty/dn,
+    rev: base.rev/dn,
+    multi: base.multi/dn,
+    att: base.att,
+    eff: base.eff,
+    avgPrice: base.avgPrice,
+    hint
+  };
 }
+
 
 function refreshActiveRangeText(){
   const tempLabel = (state.temp === "18") ? "18°C" : "4°C";
@@ -1488,10 +1457,10 @@ function refreshActiveRangeText(){
   // 先建立「視圖」本身的顯示文字
   if(mode === "year"){
     title = `${state.year} 年｜${tempLabel}`;
-    hint = "顯示：12 個月月平均（各月日平均），再取全年平均";
+    hint = "顯示：年別日平均（範圍內每日資料取平均）";
   }else if(mode === "month"){
     title = `${state.year}-${String(state.month).padStart(2,"0")}｜${tempLabel}`;
-    hint = "顯示：本月每週平均（週二～週一，週內日平均），再取本月平均";
+    hint = "顯示：本月日平均（範圍內每日資料取平均）";
   }else if(mode === "week"){
     const ws = state.weekStartStr ? new Date(state.weekStartStr+"T00:00:00Z") : null;
     const we = ws ? addDaysUTC(ws,6) : null;
@@ -1501,7 +1470,7 @@ function refreshActiveRangeText(){
     // day
     if(dr){
       title = `${dr.startStr} ～ ${dr.endStr}｜${tempLabel}`;
-      hint = "顯示：指定期間（生產量/營收/多次生產＝加總；出勤人數/人時性＝日平均）";
+      hint = "顯示：指定期間日平均（全部指標以每日平均顯示）";
     }else{
       title = state.dayStr ? `${state.dayStr}｜${tempLabel}` : `（未選日）｜${tempLabel}`;
       hint = "顯示：單日";
@@ -1601,8 +1570,8 @@ function refreshKpiCards(){
 /* =========================
    趨勢圖：延後生成 + 手動更新
 ========================= */
-let monthChart = null;
-let weekChart = null;
+let dailyChart = null;
+let cumChart = null;
 let prodChart = null;
 // Safety: older parsing referenced idxBreak (break time column index). We no longer use break columns,
 // but keep this to prevent runtime ReferenceError if any legacy path still touches it.
@@ -1830,8 +1799,8 @@ function buildWeeklyOrDailySeries(kpi = state.chartKpi){
 ========================= */
 
 function destroyCharts(){
-  if(monthChart){ monthChart.destroy(); monthChart = null; }
-  if(weekChart){ weekChart.destroy(); weekChart = null; }
+  if(dailyChart){ dailyChart.destroy(); dailyChart = null; }
+  if(cumChart){ cumChart.destroy(); cumChart = null; }
 }
 
 function destroyProdChart(){
@@ -2033,15 +2002,118 @@ function renderCharts(){
   const kpi1 = state.chartKpi;
   const kpi2 = state.chartKpi2 || "";
 
-  const ms1 = buildMonthlySeries(kpi1);
-  const ms2 = kpi2 ? buildMonthlySeries(kpi2) : null;
+  // 以「目前視圖 +（可選）指定範圍」篩出的每日資料作為趨勢基礎
+  const list = summariesInRange().slice().sort((a,b)=>a.dateObj-b.dateObj);
 
-  const ws1 = buildWeeklyOrDailySeries(kpi1);
-  const ws2 = kpi2 ? buildWeeklyOrDailySeries(kpi2) : null;
+  if(!list.length){
+    destroyCharts();
+    $("cumChartTitle").textContent = "累計";
+    state.chartsDirty = false;
+    $("chartDirtyHint").classList.add("hidden");
+    return;
+  }
 
-  $("weekChartTitle").textContent = ws1.title;
+  const labels = list.map(o => String(o.dateStr || "").slice(5)); // MM-DD
 
-  const isDecimal = (k) => ["attendance","efficiency","avgPrice"].includes(k);
+  const getDailySeries = (kpi)=>{
+    return list.map(o => {
+      const s = o.summary || {};
+      const q = toNumber(s.totalQty);
+      const r = toNumber(s.revenue);
+      const m = toNumber(s.multi);
+      const a = toNumber(s.attendance);
+      const e = toNumber(s.efficiency);
+
+      if(kpi === "totalQty") return Number.isFinite(q) ? q : null;
+      if(kpi === "revenue")  return Number.isFinite(r) ? r : null;
+      if(kpi === "multi")    return Number.isFinite(m) ? m : null;
+      if(kpi === "attendance") return Number.isFinite(a) ? a : null;
+      if(kpi === "efficiency") return Number.isFinite(e) ? e : null;
+      if(kpi === "avgPrice"){
+        if(Number.isFinite(q) && q > 0 && Number.isFinite(r)) return r / q;
+        const ap = toNumber(s.avgPrice);
+        return Number.isFinite(ap) ? ap : null;
+      }
+      if(kpi === "itemCount"){
+        const v = state.itemCountDaily.get(`${state.temp}|${o.mmdd}`);
+        return Number.isFinite(v) ? v : null;
+      }
+      return null;
+    });
+  };
+
+  // 累計規則：
+  // - 產量/營收/多次生產：逐日加總
+  // - 出勤人數：A（逐日加總）
+  // - 平均廠價：累計營收/累計產量（加權）
+  // - 人時性：以「出勤人數」作權重的累計加權平均（無出勤則權重=1）
+  // - 品名數：累計『不重複品名』數（由明細 records 聯集）
+  const getCumulativeSeries = (kpi)=>{
+    const temp = state.temp;
+
+    if(kpi === "avgPrice"){
+      let cumRev = 0;
+      let cumQty = 0;
+      return list.map(o => {
+        const s = o.summary || {};
+        const q = toNumber(s.totalQty);
+        const r = toNumber(s.revenue);
+        if(Number.isFinite(q) && q > 0) cumQty += q;
+        if(Number.isFinite(r)) cumRev += r;
+        if(cumQty > 0 && Number.isFinite(cumRev)) return cumRev / cumQty;
+        return null;
+      });
+    }
+
+    if(kpi === "efficiency"){
+      let wSum = 0;
+      let w = 0;
+      let last = null;
+      return list.map(o => {
+        const s = o.summary || {};
+        const e = toNumber(s.efficiency);
+        if(!Number.isFinite(e)) return last;
+        let wt = toNumber(s.attendance);
+        if(!Number.isFinite(wt) || wt <= 0) wt = 1;
+        wSum += e * wt;
+        w += wt;
+        last = (w > 0) ? (wSum / w) : null;
+        return last;
+      });
+    }
+
+    if(kpi === "itemCount"){
+      const seen = new Set();
+      return list.map(o => {
+        // 注意：此處採「累計不重複品名」；若資料量極大可改成預先索引。
+        for(const rec of state.records.values()){
+          if(rec.temp !== temp) continue;
+          if(rec.mmdd !== o.mmdd) continue;
+          const p = cleanText(rec.product || "");
+          if(p) seen.add(p);
+        }
+        return seen.size;
+      });
+    }
+
+    // Sum types (含 attendance A)
+    const daily = getDailySeries(kpi);
+    let cum = 0;
+    return daily.map(v => {
+      if(Number.isFinite(v)) cum += v;
+      return cum;
+    });
+  };
+
+  const daily1 = getDailySeries(kpi1);
+  const daily2 = kpi2 ? getDailySeries(kpi2) : null;
+  const cum1   = getCumulativeSeries(kpi1);
+  const cum2   = kpi2 ? getCumulativeSeries(kpi2) : null;
+
+  // 顯示：出勤累計採 A
+  const hasAttendance = (kpi1 === "attendance") || (kpi2 === "attendance");
+  $("cumChartTitle").textContent = hasAttendance ? "累計（出勤累計：A）" : "累計";
+
   const formatTick = (k, v) => {
     if(v === null || v === undefined) return "";
     const n = Number(v);
@@ -2061,71 +2133,47 @@ function renderCharts(){
     return Math.round(n).toLocaleString("zh-Hant-TW");
   };
 
-  const commonOptions = {
+  const makeOptions = (leftKpi, rightKpi)=>({
     responsive: true,
     maintainAspectRatio: false,
-    animation: false,
+    interaction: { mode: "index", intersect: false },
     plugins: {
-      legend: { display: true, position: "top" },
-      decimation: { enabled: true, algorithm: "min-max" },
-      tooltip: { callbacks: {
-        label: (ctx) => {
-          const k = ctx.dataset._kpi || kpi1;
-          const v = ctx.parsed.y;
-          return `${ctx.dataset.label}: ${formatTooltip(k, v)}`;
+      legend: { display: true },
+      tooltip: {
+        callbacks: {
+          label: (ctx)=>{
+            const k = ctx.dataset._kpi || leftKpi;
+            return `${ctx.dataset.label}: ${formatTooltip(k, ctx.parsed.y)}`;
+          }
         }
-      }},
-      valueLabels: { enabled: false }
+      },
+      decimation: { enabled: true, algorithm: "min-max" }
     },
     scales: {
-      x: { grid:{display:false} },
-      y: { position: "left", ticks: { callback: (v)=>formatTick(kpi1, v) } },
-      y1: {
-        position: "right",
-        display: !!kpi2,
-        grid: { drawOnChartArea: false },
-        ticks: { callback: (v)=>formatTick(kpi2, v) }
-      }
+      y: {
+        position: "left",
+        beginAtZero: false,
+        ticks: { callback: (v)=>formatTick(leftKpi, v) }
+      },
+      ...(rightKpi ? {
+        y1: {
+          position: "right",
+          beginAtZero: false,
+          grid: { drawOnChartArea: false },
+          ticks: { callback: (v)=>formatTick(rightKpi, v) }
+        }
+      } : {})
     }
-  };
-
-  const mctx = $("monthChart").getContext("2d");
-  destroyCharts();
-  destroyProdChart();
-
-  const mDatasets = [{
-    label: `${kpiLabel(kpi1)}（左軸）`,
-    data: ms1.values,
-    yAxisID: "y",
-    _kpi: kpi1,
-    spanGaps: true,
-    tension: 0.25,
-    pointRadius: 3,
-    pointHoverRadius: 5
-  }];
-  if(ms2){
-    mDatasets.push({
-      label: `${kpiLabel(kpi2)}（右軸）`,
-      data: ms2.values,
-      yAxisID: "y1",
-      _kpi: kpi2,
-      spanGaps: true,
-      tension: 0.25,
-      pointRadius: 3,
-      pointHoverRadius: 5
-    });
-  }
-
-  monthChart = new Chart(mctx, {
-    type: "line",
-    data: { labels: ms1.labels, datasets: mDatasets },
-    options: commonOptions
   });
 
-  const wctx = $("weekChart").getContext("2d");
-  const wDatasets = [{
-    label: `${kpiLabel(kpi1)}（左軸）`,
-    data: ws1.values,
+  destroyCharts();
+
+  const dctx = $("dailyChart").getContext("2d");
+  const cctx = $("cumChart").getContext("2d");
+
+  const dailyDatasets = [{
+    label: `${kpiLabel(kpi1)}（日別）`,
+    data: daily1,
     yAxisID: "y",
     _kpi: kpi1,
     spanGaps: true,
@@ -2133,10 +2181,10 @@ function renderCharts(){
     pointRadius: 3,
     pointHoverRadius: 5
   }];
-  if(ws2){
-    wDatasets.push({
-      label: `${kpiLabel(kpi2)}（右軸）`,
-      data: ws2.values,
+  if(daily2){
+    dailyDatasets.push({
+      label: `${kpiLabel(kpi2)}（右軸｜日別）`,
+      data: daily2,
       yAxisID: "y1",
       _kpi: kpi2,
       spanGaps: true,
@@ -2146,15 +2194,45 @@ function renderCharts(){
     });
   }
 
-  weekChart = new Chart(wctx, {
+  dailyChart = new Chart(dctx, {
     type: "line",
-    data: { labels: ws1.labels, datasets: wDatasets },
-    options: commonOptions
+    data: { labels, datasets: dailyDatasets },
+    options: makeOptions(kpi1, kpi2 || "")
+  });
+
+  const cumDatasets = [{
+    label: `${kpiLabel(kpi1)}（累計）`,
+    data: cum1,
+    yAxisID: "y",
+    _kpi: kpi1,
+    spanGaps: true,
+    tension: 0.15,
+    pointRadius: 2,
+    pointHoverRadius: 4
+  }];
+  if(cum2){
+    cumDatasets.push({
+      label: `${kpiLabel(kpi2)}（右軸｜累計）`,
+      data: cum2,
+      yAxisID: "y1",
+      _kpi: kpi2,
+      spanGaps: true,
+      tension: 0.15,
+      pointRadius: 2,
+      pointHoverRadius: 4
+    });
+  }
+
+  cumChart = new Chart(cctx, {
+    type: "line",
+    data: { labels, datasets: cumDatasets },
+    options: makeOptions(kpi1, kpi2 || "")
   });
 
   state.chartsDirty = false;
   $("chartDirtyHint").classList.add("hidden");
 }
+
 
 /* =========================
    Drilldown helpers
@@ -2565,6 +2643,16 @@ if(_applyCR){
   _applyCR.addEventListener("click", ()=>{
     state.customStartStr = (_cs && _cs.value) ? _cs.value : state.customStartStr;
     state.customEndStr = (_ce && _ce.value) ? _ce.value : state.customEndStr;
+
+    // 指定期間若跨到不同年份，優先以起日年份同步 yearSelect，避免資料被年度篩掉
+    const _sy = Number(String(state.customStartStr||"").slice(0,4));
+    const _ey = Number(String(state.customEndStr||"").slice(0,4));
+    const _y = (Number.isFinite(_sy) && _sy>1900) ? _sy : (Number.isFinite(_ey) && _ey>1900 ? _ey : null);
+    if(_y){
+      state.year = _y;
+      if($("yearSelect")) $("yearSelect").value = String(_y);
+      refreshSelectors();
+    }
     refreshAll();
     markChartsDirty();
   });
