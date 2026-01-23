@@ -283,7 +283,7 @@
     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div class="h2">低達成率品項（當前範圍）</div>
       <div class="flex items-center gap-2">
-        <div class="text-slate-500 text-sm font-bold">排序依據</div>
+        <div class="text-slate-500 text-sm font-bold whitespace-nowrap shrink-0 leading-none">排序依據</div>
         <select id="lowestRateMode" class="select" style="max-width: 18rem;">
           <option value="human">最低人時達成率（前六）</option>
           <option value="cap">最低產能達成率（前六）</option>
@@ -2606,21 +2606,25 @@ function _safeNum(v){
 function _lowestRateAgg(mode){
   // mode: "human" | "cap"
   const mmddSet = getDateSetInSelection();
-  const map = new Map(); // key -> {lineKey, catKey, prodKey, line, cat, prod, sum, cnt}
+
+  // key -> aggregated stats within current selection
+  // { lineKey, catKey, prodKey, line, cat, prod, achSum, achCnt, qtySum, qtyCnt, peopleSum, peopleCnt, effSum, effCnt, capSum, capCnt }
+  const map = new Map();
 
   for(const rec of state.records.values()){
     if(rec.temp !== state.temp) continue;
     if(!mmddSet.has(rec.mmdd)) continue;
 
     const lineKey = cleanKey(rec.line);
-    const catKey = cleanKey(rec.category || "");
+    const catKey  = cleanKey(rec.category || "");
     const prodKey = cleanKey(rec.product);
 
     if(!lineKey || !catKey || !prodKey) continue;
 
     const key = `${lineKey}||${catKey}||${prodKey}`;
-    const v = (mode === "cap") ? _safeNum(rec.capAch) : _safeNum(rec.humanAch);
-    if(!Number.isFinite(v)) continue;
+
+    const ach = (mode === "cap") ? _safeNum(rec.capAch) : _safeNum(rec.humanAch);
+    if(!Number.isFinite(ach)) continue; // 沒有達成率就不納入排名
 
     if(!map.has(key)){
       map.set(key, {
@@ -2628,21 +2632,48 @@ function _lowestRateAgg(mode){
         line: displayLineName(rec.line),
         cat: cleanText(rec.category || ""),
         prod: cleanText(rec.product),
-        sum: 0,
-        cnt: 0
+
+        achSum: 0, achCnt: 0,
+
+        qtySum: 0, qtyCnt: 0,
+        peopleSum: 0, peopleCnt: 0,
+        effSum: 0, effCnt: 0,
+        capSum: 0, capCnt: 0,
       });
     }
+
     const it = map.get(key);
-    it.sum += v;
-    it.cnt += 1;
+
+    it.achSum += ach;
+    it.achCnt += 1;
+
+    const q = _safeNum(rec.qty);
+    if(Number.isFinite(q)){ it.qtySum += q; it.qtyCnt += 1; }
+
+    const p = _safeNum(rec.people);
+    if(Number.isFinite(p)){ it.peopleSum += p; it.peopleCnt += 1; }
+
+    const e = _safeNum(rec.eff);
+    if(Number.isFinite(e)){ it.effSum += e; it.effCnt += 1; }
+
+    const c = _safeNum(rec.cap);
+    if(Number.isFinite(c)){ it.capSum += c; it.capCnt += 1; }
   }
 
   const out = [];
   for(const it of map.values()){
-    if(it.cnt <= 0) continue;
-    out.push({ ...it, avg: it.sum / it.cnt });
+    if(it.achCnt <= 0) continue;
+    out.push({
+      ...it,
+      avgAch: it.achSum / it.achCnt,
+      avgPeople: (it.peopleCnt>0) ? (it.peopleSum / it.peopleCnt) : NaN,
+      avgEff: (it.effCnt>0) ? (it.effSum / it.effCnt) : NaN,
+      avgCap: (it.capCnt>0) ? (it.capSum / it.capCnt) : NaN,
+      totalQty: (it.qtyCnt>0) ? it.qtySum : NaN
+    });
   }
-  out.sort((a,b)=>a.avg - b.avg);
+
+  out.sort((a,b)=>a.avgAch - b.avgAch);
   return out.slice(0, 6);
 }
 
@@ -2669,16 +2700,28 @@ function renderLowestRatePanel(){
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "w-full flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left hover:bg-white";
-    const rateText = fmtPct(it.avg);
+
+    const rateText = fmtPct(it.avgAch);
     const sub = `${it.cat || "—"} ｜ ${it.line || "—"}`;
+
+    const qtyText = fmtInt(it.totalQty);
+    const peopleText = fmtDec(it.avgPeople, 2);
+    const effText = fmtDec(it.avgEff, 2);
+    const capText = fmtDec(it.avgCap, 2);
+
+    const metrics = (mode === "cap")
+      ? `生產量 ${qtyText} ｜ 人數 ${peopleText} ｜ 產能 ${capText}`
+      : `生產量 ${qtyText} ｜ 人數 ${peopleText} ｜ 人時性 ${effText}`;
+
     btn.innerHTML = `
       <div class="min-w-0">
         <div class="font-extrabold text-slate-900 truncate">${i+1}. ${escapeHtml(it.prod)}</div>
         <div class="mt-1 text-xs font-bold text-slate-500">${escapeHtml(sub)}</div>
+        <div class="mt-2 text-xs font-bold text-slate-700 mono">${escapeHtml(metrics)}</div>
       </div>
       <div class="shrink-0 text-right">
-        <div class="text-xs font-bold text-slate-500">${label}</div>
-        <div class="text-lg font-extrabold text-slate-900 mono">${rateText}</div>
+        <div class="text-xs font-extrabold text-red-600">${label}</div>
+        <div class="text-lg font-extrabold text-red-600 mono">${rateText}</div>
       </div>
     `;
 
