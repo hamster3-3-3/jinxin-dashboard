@@ -278,6 +278,31 @@
     <div id="activeCatCards" class="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3"></div>
   </div>
 
+  <!-- 低達成率品項（當前範圍） -->
+  <div class="card mt-6">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div class="h2">低達成率品項（當前範圍）</div>
+      <div class="flex items-center gap-2">
+        <div class="text-slate-500 text-sm font-bold">排序依據</div>
+        <select id="lowestRateMode" class="select" style="max-width: 18rem;">
+          <option value="human">最低人時達成率（前六）</option>
+          <option value="cap">最低產能達成率（前六）</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="lowestRateList" class="mt-4 grid gap-2"></div>
+    <div id="lowestRateEmpty" class="mt-3 hidden text-sm font-bold text-slate-500">
+      目前範圍內未取得達成率資料。
+    </div>
+    <div class="mt-3 text-xs text-slate-500">
+      點選任一品項可自動填入「品名搜尋」，並帶出線別／品類／品名。
+    </div>
+  </div>
+
+
+  </div>
+
   <div class="card mt-6">
     <div class="flex items-center justify-between gap-4">
       <div class="h2">品名搜尋</div>
@@ -2568,6 +2593,121 @@ function markChartsDirty(){
   $("chartDirtyHint").classList.remove("hidden");
   $("updateChartBtn").disabled = false;
 }
+
+/* =========================
+   Lowest-rate Items (Top 6 Lowest)
+========================= */
+
+function _safeNum(v){
+  const n = toNumber(v);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+function _lowestRateAgg(mode){
+  // mode: "human" | "cap"
+  const mmddSet = getDateSetInSelection();
+  const map = new Map(); // key -> {lineKey, catKey, prodKey, line, cat, prod, sum, cnt}
+
+  for(const rec of state.records.values()){
+    if(rec.temp !== state.temp) continue;
+    if(!mmddSet.has(rec.mmdd)) continue;
+
+    const lineKey = cleanKey(rec.line);
+    const catKey = cleanKey(rec.category || "");
+    const prodKey = cleanKey(rec.product);
+
+    if(!lineKey || !catKey || !prodKey) continue;
+
+    const key = `${lineKey}||${catKey}||${prodKey}`;
+    const v = (mode === "cap") ? _safeNum(rec.capAch) : _safeNum(rec.humanAch);
+    if(!Number.isFinite(v)) continue;
+
+    if(!map.has(key)){
+      map.set(key, {
+        lineKey, catKey, prodKey,
+        line: displayLineName(rec.line),
+        cat: cleanText(rec.category || ""),
+        prod: cleanText(rec.product),
+        sum: 0,
+        cnt: 0
+      });
+    }
+    const it = map.get(key);
+    it.sum += v;
+    it.cnt += 1;
+  }
+
+  const out = [];
+  for(const it of map.values()){
+    if(it.cnt <= 0) continue;
+    out.push({ ...it, avg: it.sum / it.cnt });
+  }
+  out.sort((a,b)=>a.avg - b.avg);
+  return out.slice(0, 6);
+}
+
+function renderLowestRatePanel(){
+  const sel = $("lowestRateMode");
+  const box = $("lowestRateList");
+  const empty = $("lowestRateEmpty");
+  if(!sel || !box || !empty) return;
+
+  const mode = sel.value || "human";
+  const list = _lowestRateAgg(mode);
+
+  box.innerHTML = "";
+  if(!list.length){
+    empty.classList.remove("hidden");
+    return;
+  }
+  empty.classList.add("hidden");
+
+  const label = (mode === "cap") ? "產能達成率" : "人時達成率";
+
+  for(let i=0;i<list.length;i++){
+    const it = list[i];
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "w-full flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left hover:bg-white";
+    const rateText = fmtPct(it.avg);
+    const sub = `${it.cat || "—"} ｜ ${it.line || "—"}`;
+    btn.innerHTML = `
+      <div class="min-w-0">
+        <div class="font-extrabold text-slate-900 truncate">${i+1}. ${escapeHtml(it.prod)}</div>
+        <div class="mt-1 text-xs font-bold text-slate-500">${escapeHtml(sub)}</div>
+      </div>
+      <div class="shrink-0 text-right">
+        <div class="text-xs font-bold text-slate-500">${label}</div>
+        <div class="text-lg font-extrabold text-slate-900 mono">${rateText}</div>
+      </div>
+    `;
+
+    btn.addEventListener("click", ()=>{
+      // Use existing picker to fill line/cat/prod and prodSearch
+      if(typeof applyProdPick === "function"){
+        applyProdPick(it);
+      }else{
+        // Fallback: fill search box only
+        const inp = $("prodSearch");
+        if(inp){ inp.value = it.prod; }
+      }
+    });
+
+    box.appendChild(btn);
+  }
+}
+
+// hook select change
+document.addEventListener("DOMContentLoaded", ()=>{
+  const sel = $("lowestRateMode");
+  if(sel){
+    sel.addEventListener("change", ()=> {
+      renderLowestRatePanel();
+    });
+  }
+});
+
+
 function refreshAll(){
   togglePanels();
   // keep month selectors in sync
@@ -2576,6 +2716,7 @@ function refreshAll(){
   refreshKpiCards();
   refreshLineSection();
   buildProdIndex();
+  renderLowestRatePanel();
 }
 
 /* =========================
