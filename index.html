@@ -2699,32 +2699,45 @@ function renderLowestRatePanel(){
     const it = list[i];
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "w-full flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left hover:bg-white";
+    btn.className = "w-full flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left hover:bg-white";
 
-    const rateText = fmtPct(it.avgAch);
-    const sub = `${it.cat || "—"} ｜ ${it.line || "—"}`;
+const rateText = fmtPct(it.avgAch);
+const sub = `${it.cat || "—"} ｜ ${it.line || "—"}`;
 
-    const qtyText = fmtInt(it.totalQty);
-    const peopleText = fmtDec(it.avgPeople, 2);
-    const effText = fmtDec(it.avgEff, 2);
-    const capText = fmtDec(it.avgCap, 2);
+const qtyText = fmtInt(it.totalQty);
+const peopleText = fmtDec(it.avgPeople, 2);
+const effText = fmtDec(it.avgEff, 2);
+const capText = fmtDec(it.avgCap, 2);
 
-    const metrics = (mode === "cap")
-      ? `生產量 ${qtyText} ｜ 人數 ${peopleText} ｜ 產能 ${capText}`
-      : `生產量 ${qtyText} ｜ 人數 ${peopleText} ｜ 人時性 ${effText}`;
+const thirdLabel = (mode === "cap") ? "產能" : "人時性";
+const thirdVal = (mode === "cap") ? capText : effText;
 
-    btn.innerHTML = `
-      <div class="min-w-0">
-        <div class="font-extrabold text-slate-900 truncate">${i+1}. ${escapeHtml(it.prod)}</div>
-        <div class="mt-1 text-xs font-bold text-slate-500">${escapeHtml(sub)}</div>
-        <div class="mt-2 text-xs font-bold text-slate-700 mono">${escapeHtml(metrics)}</div>
-      </div>
-      <div class="shrink-0 text-right">
-        <div class="text-xs font-extrabold text-red-600">${label}</div>
-        <div class="text-lg font-extrabold text-red-600 mono">${rateText}</div>
-      </div>
-    `;
+btn.innerHTML = `
+  <div class="min-w-0 flex-[2]">
+    <div class="font-extrabold text-slate-900 truncate">${i+1}. ${escapeHtml(it.prod)}</div>
+    <div class="mt-1 text-xs font-bold text-slate-500">${escapeHtml(sub)}</div>
+  </div>
 
+  <div class="flex-[3] grid grid-cols-3 gap-3 items-center">
+    <div class="text-center">
+      <div class="text-[11px] font-bold text-slate-500">生產量</div>
+      <div class="mt-0.5 text-sm font-extrabold text-slate-900 mono">${escapeHtml(qtyText)}</div>
+    </div>
+    <div class="text-center">
+      <div class="text-[11px] font-bold text-slate-500">人數</div>
+      <div class="mt-0.5 text-sm font-extrabold text-slate-900 mono">${escapeHtml(peopleText)}</div>
+    </div>
+    <div class="text-center">
+      <div class="text-[11px] font-bold text-slate-500">${thirdLabel}</div>
+      <div class="mt-0.5 text-sm font-extrabold text-slate-900 mono">${escapeHtml(thirdVal)}</div>
+    </div>
+  </div>
+
+  <div class="shrink-0 text-right">
+    <div class="text-xs font-bold text-slate-900">${label}</div>
+    <div class="text-lg font-extrabold text-red-600 mono">${rateText}</div>
+  </div>
+`;
     btn.addEventListener("click", ()=>{
       // Use existing picker to fill line/cat/prod and prodSearch
       if(typeof applyProdPick === "function"){
