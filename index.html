@@ -12,9 +12,6 @@
   
 
   <!-- Local vendor scripts (avoid external CDN blocks) -->
-<link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;600;700&display=swap" rel="stylesheet">
 
   <!-- SheetJS -->
 <!-- Chart.js -->
@@ -104,10 +101,30 @@
             <button class="seg-btn" data-range="month">月別</button>
             <button class="seg-btn" data-range="week">週別</button>
             <button class="seg-btn" data-range="day">日別</button>
+            <button id="customRangeBtn" class="seg-btn hidden" type="button">指定範圍</button>
           </div>
           <div class="hint mt-2">
             年別＝12 個月「月平均」；月別＝每週平均；週別＝週二到週一；日別＝單日。
           </div>
+          <div id="customRangePanel" class="hidden mt-3 p-4 rounded-2xl border border-slate-200 bg-white">
+            <div class="label mb-1">指定期間（日別）</div>
+            <div class="hint">選擇「起日～迄日」後按「套用指定期間」即可一次查看多天彙總（例：1/1～1/5）。未填完整則不生效。</div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+              <div>
+                <div class="text-slate-600 text-sm font-bold mb-1">起日</div>
+                <input id="customStart" type="date" class="select" />
+              </div>
+              <div>
+                <div class="text-slate-600 text-sm font-bold mb-1">迄日</div>
+                <input id="customEnd" type="date" class="select" />
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-2 mt-2">
+              <button id="applyCustomRange" class="btn">套用指定期間</button>
+              <button id="clearCustomRange" class="btn">清除指定期間</button>
+            </div>
+          </div>
+
         </div>
 
         <div>
@@ -150,25 +167,6 @@
         <div id="dayPanel" class="hidden">
           <div class="label mb-1">日別：僅顯示單日</div>
           <input id="daySelect" type="date" class="select mt-2" />
-        </div>
-
-        <div id="customRangePanel" class="hidden">
-          <div class="label mb-1">指定期間（日別專用｜可選）</div>
-          <div class="hint">用「起日～迄日」一次查看多天彙總與明細（例：1/1～1/5）。未填完整則不生效。</div>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
-            <div>
-              <div class="text-slate-600 text-sm font-bold mb-1">起日</div>
-              <input id="customStart" type="date" class="select" />
-            </div>
-            <div>
-              <div class="text-slate-600 text-sm font-bold mb-1">迄日</div>
-              <input id="customEnd" type="date" class="select" />
-            </div>
-          </div>
-          <div class="flex flex-wrap gap-2 mt-2">
-            <button id="applyCustomRange" class="btn">套用指定期間</button>
-            <button id="clearCustomRange" class="btn">清除指定期間</button>
-          </div>
         </div>
 
         <div class="md:col-span-2">
@@ -499,6 +497,77 @@ const PRELOAD_FILES = [
   "115.01.01-05晉欣廠生產日報表.xlsx",
 ];
 
+/* =========================
+   GitHub Repo 自動偵測與檔案清單（建議：不必每次手動改 PRELOAD_FILES）
+   - 會先嘗試用 GitHub Contents API 掃描 .xlsx
+   - 若 API 失敗或掃不到，才回退到 PRELOAD_FILES
+========================= */
+const GITHUB_AUTOLOAD = true;
+// 若你想「強制指定」某個 repo，可填入（留空=自動偵測）
+const GITHUB_OWNER_OVERRIDE = "";   // 例：hamster3-3-3
+const GITHUB_REPO_OVERRIDE  = "";   // 例：jinxin-dashboard
+const GITHUB_BRANCH_OVERRIDE = "";  // 例：main / gh-pages（留空=自動判斷或預設 main）
+const GITHUB_DIR_CANDIDATES = ["", "repo", "data", "excel", "xlsx"];
+
+function detectGitHubContext(){
+  const host = location.host || "";
+  // 1) GitHub Pages: https://<owner>.github.io/<repo>/...
+  if(host.endsWith("github.io")){
+    const owner = host.split(".")[0] || "";
+    const parts = location.pathname.split("/").filter(Boolean);
+    const repo = (parts[0] || `${owner}.github.io`);
+    return { owner, repo, branch: "main" };
+  }
+  // 2) github.com: https://github.com/<owner>/<repo>/blob/<branch>/...
+  if(host === "github.com"){
+    const parts = location.pathname.split("/").filter(Boolean);
+    if(parts.length >= 2){
+      let branch = "main";
+      if(parts.length >= 4 && (parts[2] === "blob" || parts[2] === "tree")) branch = parts[3] || "main";
+      return { owner: parts[0], repo: parts[1], branch };
+    }
+  }
+  return null;
+}
+
+async function listXlsxFilesFromGitHub(){
+  if(!GITHUB_AUTOLOAD) return [];
+
+  const auto = detectGitHubContext();
+  const owner = (GITHUB_OWNER_OVERRIDE || (auto && auto.owner) || "").trim();
+  const repo  = (GITHUB_REPO_OVERRIDE  || (auto && auto.repo)  || "").trim();
+  let branch  = (GITHUB_BRANCH_OVERRIDE || (auto && auto.branch) || "main").trim() || "main";
+  if(!owner || !repo) return [];
+
+  const found = new Map(); // name -> {name,url,dir}
+  const dirs = Array.from(new Set(GITHUB_DIR_CANDIDATES.map(d => (d||"").replace(/^\/|\/$/g,""))));
+
+  for(const d of dirs){
+    const pathPart = d ? `${d}` : "";
+    const api = `https://api.github.com/repos/${owner}/${repo}/contents/${pathPart}?ref=${encodeURIComponent(branch)}`;
+    try{
+      const res = await fetch(api, { headers: { "Accept": "application/vnd.github+json" }, cache: "no-store" });
+      if(!res.ok) continue;
+      const data = await res.json();
+      if(!Array.isArray(data)) continue;
+      for(const item of data){
+        if(item && item.type === "file" && typeof item.name === "string" && item.name.toLowerCase().endsWith(".xlsx")){
+          if(item.download_url && !found.has(item.name)){
+            found.set(item.name, { name: item.name, url: item.download_url, dir: d || "" });
+          }
+        }
+      }
+    }catch(e){
+      // ignore single-dir failure
+    }
+  }
+
+  const list = Array.from(found.values());
+  list.sort((a,b) => String(a.name).localeCompare(String(b.name), "zh-Hant", { numeric: true, sensitivity: "base" }));
+  return list;
+}
+
+
 const $ = (id) => document.getElementById(id);
 
 function cleanText(v){
@@ -590,6 +659,7 @@ const state = {
   dayStr: "",
   customStartStr: "",
   customEndStr: "",
+  customRangeUiOpen: false,
   chartKpi: "totalQty",
   chartKpi2: "",
 
@@ -919,6 +989,15 @@ async function parseWorkbookArrayBuffer(buf, filename){
 
 
 async function fetchArrayBufferSmart(fileName){
+
+
+  // 若已是完整 URL，直接 fetch
+  if(/^https?:\/\//i.test(fileName)){
+    const res = await fetch(fileName, {cache:"no-store"});
+    if(!res.ok) throw new Error("HTTP " + res.status + " @ " + fileName);
+    return await res.arrayBuffer();
+  }
+
   // 目標：可同時支援
   // 1) GitHub Pages（與 HTML 同層，或放在 /repo/ 子資料夾）
   // 2) 使用者誤在 github.com/blob 頁面開啟時，改用 raw.githubusercontent.com 讀取
@@ -989,7 +1068,7 @@ async function fetchArrayBufferSmart(fileName){
 async function preload(){
   // show list
   const _preloadList = $("preloadList");
-  if(_preloadList){ _preloadList.innerHTML = PRELOAD_FILES.map(f=>`<li>${f}</li>`).join(""); }
+  if(_preloadList){ _preloadList.innerHTML = ""; }
 
   const _dataCard = $("dataSourceCard");
   if(_dataCard){
@@ -1005,20 +1084,41 @@ if(location.protocol === "file:"){
     if(_h){ _h.textContent = "偵測到你在 github.com/blob 頁面開啟。本頁會自動改用 raw.githubusercontent.com 嘗試載入，但仍建議改用 GitHub Pages 以避免瀏覽器/權限限制。"; }
   }
 setDataChip("warn", "自動載入中…");
+  // 先嘗試用 GitHub API 掃描 repo 內的 .xlsx（可避免 Pages 沒把 Excel 一起 publish 的情況）
+  let fileItems = [];
+  try{
+    const ghList = await listXlsxFilesFromGitHub();
+    if(ghList && ghList.length) fileItems = ghList;
+  }catch(e){
+    console.warn("GitHub list failed:", e);
+  }
+
+  // 若掃不到，回退到手動清單
+  if(!fileItems.length){
+    fileItems = PRELOAD_FILES.map(name => ({ name, url: name, dir: "" }));
+  }
+
+  // 顯示清單（debug=1 才會顯示整卡）
+  const _srcLabel = (fileItems[0] && fileItems[0].url && /^https?:\/\//i.test(fileItems[0].url)) ? "GitHub 清單" : "預設清單";
+  if(_preloadList){
+    _preloadList.innerHTML = fileItems.map(it => {
+      const d = (it.dir||"").trim();
+      return `<li>${escapeHtml(it.name)}${d?` <span class="text-xs text-slate-400">(${escapeHtml(d)})</span>`:""}</li>`;
+    }).join("");
+  }
 
   let ok = 0, fail = 0;
-  for(const f of PRELOAD_FILES){
+  for(const it of fileItems){
     try{
-      const buf = await fetchArrayBufferSmart(f);
-      await parseWorkbookArrayBuffer(buf, f);
+      const buf = await fetchArrayBufferSmart(it.url || it.name);
+      await parseWorkbookArrayBuffer(buf, it.name);
       ok++;
     }catch(e){
-      console.warn("preload failed:", f, e);
+      console.warn("preload failed:", it.name, e);
       fail++;
     }
   }
-
-  rebuildAvailableMmdd();
+rebuildAvailableMmdd();
   refreshSelectors();
   setupProdSearch();
   refreshAll();
@@ -1027,7 +1127,7 @@ setDataChip("warn", "自動載入中…");
 
   if(ok > 0){
     const days = state.availableMmdd.size;
-    setDataChip("ok", `已載入 ${ok} 份檔案｜共 ${days} 日` + (fail?`（${fail} 份載入失敗）`:""));
+    setDataChip("ok", `已載入 ${ok} 份檔案｜共 ${days} 日｜來源 ${_srcLabel}` + (fail?`（${fail} 份載入失敗）`:""));
   }else{
     const _card2 = $("dataSourceCard"); if(_card2) _card2.classList.remove("hidden");
     setDataChip("bad", "自動載入失敗：請確認 Excel 檔案是否可被 fetch 讀取。若 Excel 放在 repo/ 子資料夾，請確認路徑為 /repo/檔名.xlsx（本版本已自動嘗試同層與 repo/）。也可用網址參數 ?dataDir=repo 或 ?data=https://.../ 指定資料來源。");
@@ -1060,8 +1160,23 @@ function togglePanels(){
   $("monthPanel").classList.toggle("hidden", state.rangeMode !== "month");
   $("weekPanel").classList.toggle("hidden", state.rangeMode !== "week");
   $("dayPanel").classList.toggle("hidden", state.rangeMode !== "day");
+
+  const rb = $("customRangeBtn");
   const cr = $("customRangePanel");
-  if(cr) cr.classList.toggle("hidden", state.rangeMode !== "day");
+
+  if(rb){
+    rb.classList.toggle("hidden", state.rangeMode !== "day");
+    rb.classList.toggle("active", !!(state.customRangeUiOpen || (state.customStartStr && state.customEndStr)));
+  }
+
+  if(cr){
+    if(state.rangeMode !== "day"){
+      cr.classList.add("hidden");
+      state.customRangeUiOpen = false;
+    } else {
+      cr.classList.toggle("hidden", !state.customRangeUiOpen);
+    }
+  }
 }
 function fmtMd(dateObj){
   const m = String(dateObj.getUTCMonth()+1).padStart(2,"0");
@@ -2373,6 +2488,8 @@ document.querySelectorAll("[data-range]").forEach(btn=>{
   btn.addEventListener("click", ()=>{
     state.rangeMode = btn.getAttribute("data-range");
     setActiveSeg("range", state.rangeMode);
+    state.customRangeUiOpen = false;
+    togglePanels();
     refreshAll();
     markChartsDirty();
   });
@@ -2414,6 +2531,14 @@ $("daySelect").addEventListener("change", ()=>{
   markChartsDirty();
 });
 
+const _rangeBtn = $("customRangeBtn");
+if(_rangeBtn){
+  _rangeBtn.addEventListener("click", ()=>{
+    state.customRangeUiOpen = !state.customRangeUiOpen;
+    togglePanels();
+  });
+}
+
 const _applyCR = $("applyCustomRange");
 const _clearCR = $("clearCustomRange");
 const _cs = $("customStart");
@@ -2436,6 +2561,8 @@ if(_clearCR){
     if(_ce) _ce.value = "";
     state.customStartStr = "";
     state.customEndStr = "";
+    state.customRangeUiOpen = false;
+    togglePanels();
     refreshAll();
     markChartsDirty();
   });
