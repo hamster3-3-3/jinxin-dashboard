@@ -121,7 +121,7 @@
 
         <div>
           <div class="label mb-1">年份（目前內建為 2025／2026）</div>
-          <input id="yearInput" type="number" min="2000" max="2100" value="2025" class="select" disabled />
+          <select id="yearSelect" class="select"></select>
           <div class="hint mt-2">若未來擴充到其他年度，再開放此欄位。</div>
         </div>
       </div>
@@ -547,7 +547,10 @@ function monthKeyFromDate(dateObj){
   return `${dateObj.getUTCFullYear()}-${String(dateObj.getUTCMonth()+1).padStart(2,"0")}`;
 }
 function monthNumFromMmdd(mmdd){
-  const m = String(mmdd).match(/^(\d{2})\d{2}$/);
+  const s = String(mmdd);
+  let m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if(m) return Number(m[2]);
+  m = s.match(/^(\d{2})(\d{2})$/);
   return m ? Number(m[1]) : null;
 }
 
@@ -602,11 +605,13 @@ function rebuildAvailableMmdd(){
 }
 function getAllDatesForTemp(temp){
   const out = [];
-  for(const mmdd of state.availableMmdd){
-    const d = mmddToDateObj(state.year, mmdd);
-    if(d) out.push({mmdd, dateObj:d, dateStr:dateObjToStr(d)});
+  const y = String(state.year);
+  for(const dk of state.availableMmdd){
+    if(!String(dk).startsWith(y)) continue;
+    const d = dateKeyToDateObj(dk);
+    if(d) out.push({mmdd:dk, dateObj:d, dateStr:dateObjToStr(d)});
   }
-  out.sort((a,b)=>a.dateObj - b.dateObj);
+  out.sort((a,b)=>a.dateObj-b.dateObj);
   return out;
 }
 
@@ -672,7 +677,7 @@ function displayLineName(line){
 /* =========================
    Parse workbook buffer
 ========================= */
-function parseTempSheet(wb, sheetName, temp, mmdd){
+function parseTempSheet(wb, sheetName, temp, dateKey){
   const ws = wb.Sheets[sheetName];
   if(!ws) return;
   const grid = sheetToGrid(ws);
@@ -684,7 +689,7 @@ function parseTempSheet(wb, sheetName, temp, mmdd){
   const efficiency = findLabelRightValue(grid, "人時性");
   const avgPrice = findLabelRightValue(grid, "平均廠價");
   const multi = findLabelRightValue(grid, "多次生產數");
-  upsert(state.summaries, `${temp}|${mmdd}`, {mmdd,temp,totalQty,revenue,attendance,efficiency,avgPrice,multi});
+  upsert(state.summaries, `${temp}|${dateKey}`, {mmdd:dateKey,temp,totalQty,revenue,attendance,efficiency,avgPrice,multi});
 
   const hr = findHeaderRowIndex(grid);
   if(hr < 0) return;
@@ -737,8 +742,7 @@ function parseTempSheet(wb, sheetName, temp, mmdd){
       cat = currentCat; // 合併儲存格/0/空白：向下沿用
     }
 
-    const rec = {
-      mmdd, temp,
+    const rec = { mmdd:dateKey, temp,
       line: currentLine,
       category: cat,
       product: prod,
@@ -758,11 +762,11 @@ function parseTempSheet(wb, sheetName, temp, mmdd){
     
 // 品項數：以「列數」計算（同一天同品名重複也算），排除品類為 0/空白，以及彙總列（平均/合計/小計/總計）
 if(cat && cleanKey(cat) !== "0" && prod && !/(平均|合計|小計|總計)/.test(prod)){
-  const dk = `${temp}|${mmdd}`;
+  const dk = `${temp}|${dateKey}`;
   state.itemCountDaily.set(dk, (state.itemCountDaily.get(dk) || 0) + 1);
 }
 
-const key = `${temp}|${mmdd}|${cleanKey(currentLine)}|${cleanKey(cat)}|${cleanKey(prod)}`;
+const key = `${temp}|${dateKey}|${cleanKey(currentLine)}|${cleanKey(cat)}|${cleanKey(prod)}`;
     upsert(state.records, key, rec);
 
     // 4°C: average rows for line-level achievement averages
@@ -772,9 +776,8 @@ const key = `${temp}|${mmdd}|${cleanKey(currentLine)}|${cleanKey(cat)}|${cleanKe
         const allAvg = indexOfAllHeaderContains(header, "達成率平均");
         const humanAvgCol = allAvg.length ? allAvg[0] : -1;
         const capAvgCol = allAvg.length ? allAvg[allAvg.length-1] : -1;
-        const lk = `${temp}|${mmdd}|${cleanKey(displayLineName(lineName))}`;
-        upsert(state.lineAvgFromSheets, lk, {
-          mmdd, temp, line: displayLineName(lineName),
+        const lk = `${temp}|${dateKey}|${cleanKey(displayLineName(lineName))}`;
+        upsert(state.lineAvgFromSheets, lk, { mmdd:dateKey, temp, line: displayLineName(lineName),
           humanAvg: (humanAvgCol>=0) ? toNumber(row[humanAvgCol]) : NaN,
           capAvg: (capAvgCol>=0) ? toNumber(row[capAvgCol]) : NaN,
         });
@@ -807,7 +810,7 @@ const key = `${temp}|${mmdd}|${cleanKey(currentLine)}|${cleanKey(cat)}|${cleanKe
   }
 }
 
-function parseDailySummarySheet(wb, sheetName, mmdd){
+function parseDailySummarySheet(wb, sheetName, dateKey){
   const ws = wb.Sheets[sheetName];
   if(!ws) return;
   const grid = sheetToGrid(ws);
@@ -840,8 +843,8 @@ function parseDailySummarySheet(wb, sheetName, mmdd){
       if(!nm) break;
       const lineName = prefix + nm.replace(/\s+/g,"");
       const rate = toNumber((grid[rRate] || [])[c]);
-      const key = `${temp}|${mmdd}|${cleanKey(lineName)}`;
-      upsert(state.lineHumanDaily, key, {mmdd,temp,line: lineName, rate});
+      const key = `${temp}|${dateKey}|${cleanKey(lineName)}`;
+      upsert(state.lineHumanDaily, key, {mmdd:dateKey,temp,line: lineName, rate});
     }
   }
 
@@ -850,14 +853,35 @@ function parseDailySummarySheet(wb, sheetName, mmdd){
   parseSection("➃18度C 二配-各編組展開", "18", "二配 ");
 }
 
+
+function yearFromFilename(filename){
+  const s = String(filename || "");
+  const m = s.match(/^(\d{3})\./);
+  if(m){
+    const roc = Number(m[1]);
+    if(roc >= 1 && roc <= 999) return roc + 1911;
+  }
+  return state.year || 2025;
+}
+function dateKeyToDateObj(dateKey){
+  const m = String(dateKey).match(/^(\d{4})(\d{4})$/);
+  if(!m) return null;
+  return mmddToDateObj(Number(m[1]), m[2]);
+}
+function dateKeyToDateStr(dateKey){
+  const d = dateKeyToDateObj(dateKey);
+  return d ? dateObjToStr(d) : "";
+}
 async function parseWorkbookArrayBuffer(buf, filename){
   const wb = XLSX.read(buf, {type:"array"});
   state.loadedFiles.push(filename);
+  const fileYear = yearFromFilename(filename);
 
   for(const sname of wb.SheetNames){
     const mmdd = parseMmdd(sname);
     if(mmdd){
-      parseDailySummarySheet(wb, sname, mmdd);
+      const dateKey = `${fileYear}${mmdd}`;
+      parseDailySummarySheet(wb, sname, dateKey);
       continue;
     }
     const t18 = String(sname).match(/晉欣\s*18度C\s*(\d{4})/);
@@ -935,6 +959,21 @@ async function handleFiles(files){
   }
   rebuildAvailableMmdd();
   refreshSelectors();
+
+  const yearSel = $("yearSelect");
+  if(yearSel){
+    yearSel.addEventListener("change", ()=>{
+      state.year = Number(yearSel.value);
+      // reset range pickers to avoid cross-year confusion
+      state.month = null;
+      state.weekStart = null;
+      state.dayStr = null;
+      refreshSelectors();
+      markChartsDirty();
+      refreshAll();
+    });
+  }
+
   refreshAll();
   setDataChip("ok", `已合併載入｜檔案數 ${state.loadedFiles.length}｜日數 ${state.availableMmdd.size}`);
 }
@@ -993,12 +1032,32 @@ function refreshWeekOptions(){
 }
 
 function refreshSelectors(){
+
+  // yearSelect: dynamic years from loaded files
+  const yearSel = $("yearSelect");
+  if(yearSel){
+    const years = Array.from(new Set(Array.from(state.availableMmdd).map(dk=>String(dk).slice(0,4)).filter(y=>/^\d{4}$/.test(y)))).sort();
+    const fallback = String(state.year || 2025);
+    const useYears = years.length ? years : [fallback];
+    if(!state.year || !useYears.includes(String(state.year))) state.year = Number(useYears[0]);
+    yearSel.innerHTML = "";
+    for(const y of useYears){
+      const opt = document.createElement("option");
+      opt.value = y;
+      opt.textContent = y;
+      yearSel.appendChild(opt);
+    }
+    yearSel.value = String(state.year);
+  }
+
   // monthSelect: 01..12
   const monthSel = $("monthSelect");
   monthSel.innerHTML = "";
   const monthsWithData = new Set();
-  for(const mmdd of state.availableMmdd){
-    const m = monthNumFromMmdd(mmdd);
+  const y = String(state.year);
+  for(const dk of state.availableMmdd){
+    if(!String(dk).startsWith(y)) continue;
+    const m = monthNumFromMmdd(dk);
     if(m) monthsWithData.add(m);
   }
   for(let m=1;m<=12;m++){
@@ -1067,7 +1126,7 @@ function refreshSelectors(){
 }
 
 function getSummaryForDay(temp, mmdd){
-  return state.summaries.get(`${temp}|${mmdd}`) || null;
+  return state.summaries.get(`${temp}|${dateKey}`) || null;
 }
 function summariesInRange(){
   const temp = state.temp;
@@ -1994,7 +2053,7 @@ function refreshProductDetails(){
     if(cleanKey(rec.category || "") !== catKey) continue;
     if(cleanKey(rec.product) !== prodKey) continue;
 
-    const d = mmddToDateObj(state.year, rec.mmdd);
+    const d = dateKeyToDateObj(rec.mmdd);
     const dateStr = d ? dateObjToStr(d) : rec.mmdd;
     rows.push({dateStr, rec});
   }
