@@ -557,10 +557,10 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
+const BUILD_VERSION = "v35c_github_repo_autoload";
+console.log("Jinxin dashboard build:", BUILD_VERSION);
+
 const state = {
-  const BUILD_VERSION = "v35b_2025_2026_year_split";
-  console.log("Jinxin dashboard build:", BUILD_VERSION);
-  
   rangeMode: "year",
   temp: "18",
   year: 2025,
@@ -808,7 +808,7 @@ const key = `${temp}|${dateKey}|${cleanKey(currentLine)}|${cleanKey(cat)}|${clea
 
       const line = displayLineName(lineCell);
       const lk = `4|${dateKey}|${cleanKey(line)}`;
-      upsert(state.lineAvgFromSheets, lk, { mmdd, temp:"4", line, humanAvg, capAvg });
+      upsert(state.lineAvgFromSheets, lk, { mmdd: dateKey, temp:"4", line, humanAvg, capAvg });
     }
   }
 }
@@ -896,12 +896,59 @@ async function parseWorkbookArrayBuffer(buf, filename){
 
 
 async function fetchArrayBufferSmart(fileName){
-  // Resolve against current directory (works for /repo/ and /repo/index.html)
-  const dir = location.href.endsWith("/") ? location.href : location.href.replace(/\/[^\/]*$/, "/");
-  const candidates = [
-    new URL(encodeURI(fileName), dir).toString(),
-    new URL("./" + encodeURI(fileName), dir).toString(),
-  ];
+  // 目標：可同時支援
+  // 1) GitHub Pages（與 HTML 同層，或放在 /repo/ 子資料夾）
+  // 2) 使用者誤在 github.com/blob 頁面開啟時，改用 raw.githubusercontent.com 讀取
+  // 3) 透過 ?dataDir=xxx 或 ?data=https://.../ 指定資料來源目錄/URL（優先嘗試）
+
+  const encoded = encodeURIComponent(fileName).replace(/%2F/g, "/");
+
+  const href = location.href;
+  const dir = href.endsWith("/") ? href : href.replace(/\/[^\/]*$/, "/");
+
+  const params = new URLSearchParams(location.search);
+  const dataDirParam = (params.get("dataDir") || params.get("data") || "").trim();
+
+  // Relative prefixes to try
+  const prefixes = ["", "repo/"];
+  if(dataDirParam && !/^https?:\/\//i.test(dataDirParam)){
+    let p = dataDirParam.replace(/^\.?\/*/, ""); // remove leading ./ or /
+    if(p && !p.endsWith("/")) p += "/";
+    if(p && !prefixes.includes(p)) prefixes.unshift(p); // user-specified first
+  }
+
+  // Base URLs to try
+  const baseUrls = [dir];
+
+  // If user supplies a full URL, treat it as a base URL (highest priority)
+  if(dataDirParam && /^https?:\/\//i.test(dataDirParam)){
+    let base = dataDirParam;
+    if(!base.endsWith("/")) base += "/";
+    baseUrls.unshift(base);
+  }
+
+  // If opened on github.com (blob/tree), compute raw base URL automatically
+  if(location.host === "github.com"){
+    const parts = location.pathname.split("/").filter(Boolean);
+    // /<owner>/<repo>/blob/<branch>/<path...>/index.html
+    if(parts.length >= 4 && (parts[2] === "blob" || parts[2] === "tree")){
+      const owner = parts[0];
+      const repo = parts[1];
+      const branch = parts[3];
+      const pathParts = parts.slice(4);
+      if(pathParts.length) pathParts.pop(); // remove current file
+      const basePath = pathParts.length ? pathParts.join("/") + "/" : "";
+      baseUrls.unshift(`https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${basePath}`);
+    }
+  }
+
+  const candidates = [];
+  for(const base of baseUrls){
+    for(const pre of prefixes){
+      candidates.push(new URL(pre + encoded, base).toString());
+      candidates.push(new URL("./" + pre + encoded, base).toString());
+    }
+  }
 
   let lastErr = null;
   for(const url of Array.from(new Set(candidates))){
@@ -920,9 +967,19 @@ async function preload(){
   // show list
   const _preloadList = $("preloadList");
   if(_preloadList){ _preloadList.innerHTML = PRELOAD_FILES.map(f=>`<li>${f}</li>`).join(""); }
+
+  const _dataCard = $("dataSourceCard");
+  if(_dataCard){
+    const _p = new URLSearchParams(location.search);
+    if(_p.get("debug") === "1") _dataCard.classList.remove("hidden");
+  }
 if(location.protocol === "file:"){
     const _h = $("fileProtoHint");
-    if(_h){ _h.textContent = "你目前用 file:// 開啟，瀏覽器通常會擋自動載入（fetch）。請改用 GitHub Pages 或 local server。"; }
+    if(_h){ _h.textContent = "你目前用 file:// 開啟，瀏覽器通常會擋自動載入（fetch）。請改用 GitHub Pages 或本機 local server。"; }
+  }
+  if(location.host === "github.com"){
+    const _h = $("fileProtoHint");
+    if(_h){ _h.textContent = "偵測到你在 github.com/blob 頁面開啟。本頁會自動改用 raw.githubusercontent.com 嘗試載入，但仍建議改用 GitHub Pages 以避免瀏覽器/權限限制。"; }
   }
 setDataChip("warn", "自動載入中…");
 
@@ -949,7 +1006,8 @@ setDataChip("warn", "自動載入中…");
     const days = state.availableMmdd.size;
     setDataChip("ok", `已載入 ${ok} 份檔案｜共 ${days} 日` + (fail?`（${fail} 份載入失敗）`:""));
   }else{
-    setDataChip("bad", "自動載入失敗：請確認 HTML 與 Excel 檔案是否在同一路徑可被讀取（建議 GitHub Pages）");
+    const _card2 = $("dataSourceCard"); if(_card2) _card2.classList.remove("hidden");
+    setDataChip("bad", "自動載入失敗：請確認 Excel 檔案是否可被 fetch 讀取。若 Excel 放在 repo/ 子資料夾，請確認路徑為 /repo/檔名.xlsx（本版本已自動嘗試同層與 repo/）。也可用網址參數 ?dataDir=repo 或 ?data=https://.../ 指定資料來源。");
   }
 }
 
@@ -962,21 +1020,6 @@ async function handleFiles(files){
   }
   rebuildAvailableMmdd();
   refreshSelectors();
-
-  const yearSel = $("yearSelect");
-  if(yearSel){
-    yearSel.addEventListener("change", ()=>{
-      state.year = Number(yearSel.value);
-      // reset range pickers to avoid cross-year confusion
-      state.month = null;
-      state.weekStart = null;
-      state.dayStr = null;
-      refreshSelectors();
-      markChartsDirty();
-      refreshAll();
-    });
-  }
-
   refreshAll();
   setDataChip("ok", `已合併載入｜檔案數 ${state.loadedFiles.length}｜日數 ${state.availableMmdd.size}`);
 }
@@ -1069,7 +1112,10 @@ function refreshSelectors(){
     opt.textContent = String(m).padStart(2,"0") + (monthsWithData.has(m) ? "" : "（無資料）");
     monthSel.appendChild(opt);
   }
-  if(!state.month) state.month = 7;
+  if(!state.month || !monthsWithData.has(Number(state.month))){
+    const mList = Array.from(monthsWithData).sort((a,b)=>a-b);
+    state.month = mList.length ? mList[0] : 1;
+  }
   monthSel.value = String(state.month);
 
   // dates for current temp
@@ -2420,6 +2466,23 @@ $("lineSelect").value = "";
 setActiveSeg("range", state.rangeMode);
   setActiveSeg("temp", state.temp);
   refreshSelectors();
+
+  // yearSelect change: must work even when only using auto-preload
+  const yearSel = $("yearSelect");
+  if(yearSel && !yearSel.dataset.bound){
+    yearSel.dataset.bound = "1";
+    yearSel.addEventListener("change", ()=>{
+      state.year = Number(yearSel.value);
+      // Reset pickers to avoid cross-year confusion
+      state.month = null;
+      state.weekStartStr = "";
+      state.dayStr = "";
+      refreshSelectors();
+      markChartsDirty();
+      refreshAll();
+    });
+  }
+
   refreshAll();
   await preload(); // 自動載入 2025/07~2025/11
 })();
