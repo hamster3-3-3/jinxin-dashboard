@@ -101,14 +101,14 @@
             <button class="seg-btn" data-range="month">月別</button>
             <button class="seg-btn" data-range="week">週別</button>
             <button class="seg-btn" data-range="day">日別</button>
-            <button id="customRangeBtn" class="seg-btn hidden" type="button">指定範圍</button>
+            <button id="customRangeBtn" class="seg-btn" type="button">指定範圍</button>
           </div>
           <div class="hint mt-2">
             年別＝12 個月「月平均」；月別＝每週平均；週別＝週二到週一；日別＝單日。
           </div>
           <div id="customRangePanel" class="hidden mt-3 p-4 rounded-2xl border border-slate-200 bg-white">
-            <div class="label mb-1">指定期間（日別）</div>
-            <div class="hint">選擇「起日～迄日」後按「套用指定期間」即可一次查看多天彙總（例：1/1～1/5）。未填完整則不生效。</div>
+            <div class="label mb-1">指定期間（指定範圍）</div>
+            <div class="hint">選擇「起日～迄日」後按「套用指定期間」即可限制儀表板只統計該期間（例：1/1～1/5）。未填完整則不生效。</div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
               <div>
                 <div class="text-slate-600 text-sm font-bold mb-1">起日</div>
@@ -1159,23 +1159,20 @@ function togglePanels(){
   $("yearPanel").classList.toggle("hidden", state.rangeMode !== "year");
   $("monthPanel").classList.toggle("hidden", state.rangeMode !== "month");
   $("weekPanel").classList.toggle("hidden", state.rangeMode !== "week");
-  $("dayPanel").classList.toggle("hidden", state.rangeMode !== "day");
+  const rangeApplied = !!(state.customStartStr && state.customEndStr);
+  const rangeUiOpen = !!state.customRangeUiOpen;
+  // 日別：若已開啟/套用「指定範圍」，隱藏「僅顯示單日」區塊
+  $("dayPanel").classList.toggle("hidden", state.rangeMode !== "day" || rangeUiOpen || rangeApplied);
 
   const rb = $("customRangeBtn");
   const cr = $("customRangePanel");
 
   if(rb){
-    rb.classList.toggle("hidden", state.rangeMode !== "day");
-    rb.classList.toggle("active", !!(state.customRangeUiOpen || (state.customStartStr && state.customEndStr)));
+    rb.classList.toggle("active", rangeUiOpen || rangeApplied);
   }
 
   if(cr){
-    if(state.rangeMode !== "day"){
-      cr.classList.add("hidden");
-      state.customRangeUiOpen = false;
-    } else {
-      cr.classList.toggle("hidden", !state.customRangeUiOpen);
-    }
+    cr.classList.toggle("hidden", !rangeUiOpen);
   }
 }
 function fmtMd(dateObj){
@@ -1327,7 +1324,6 @@ function getSummaryForDay(temp, mmdd){
 }
 
 function getActiveDayRange(){
-  if(state.rangeMode !== "day") return null;
   const s = (state.customStartStr || "").trim();
   const e = (state.customEndStr || "").trim();
   if(!s || !e) return null;
@@ -1344,31 +1340,33 @@ function summariesInRange(){
   const all = getAllDatesForTemp(temp);
   if(!all.length) return [];
 
-  // 日別：指定期間（起日～迄日）優先
+  // 指定範圍（起日～迄日）為「全視圖」的前置過濾：
+  // - 日別：顯示期間內每日資料
+  // - 週/月/年：先套用指定範圍，再做原本的彙總口徑
   const dr = getActiveDayRange();
-  if(dr){
-    return all.filter(o => o.dateObj >= dr.start && o.dateObj <= dr.end)
-              .map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)}))
-              .filter(x=>x.summary);
-  }
+  const base = dr ? all.filter(o => o.dateObj >= dr.start && o.dateObj <= dr.end) : all;
 
   if(state.rangeMode === "year"){
-    return all.map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
+    return base.map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
   }
   if(state.rangeMode === "month"){
     const m = state.month;
     // 以「週二～週一」為一週；跨月時以週起始日（週二）決定歸屬月份
-    return all.filter(o => (getWeekStartUTC(o.dateObj).getUTCMonth()+1) === m)
-              .map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
+    return base.filter(o => (getWeekStartUTC(o.dateObj).getUTCMonth()+1) === m)
+               .map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
   }
   if(state.rangeMode === "week"){
     if(!state.weekStartStr) return [];
     const ws = new Date(state.weekStartStr + "T00:00:00Z");
     const we = addDaysUTC(ws, 6);
-    return all.filter(o => o.dateObj >= ws && o.dateObj <= we)
-              .map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
+    return base.filter(o => o.dateObj >= ws && o.dateObj <= we)
+               .map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
   }
+
   // day
+  if(dr){
+    return base.map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
+  }
   if(state.dayStr){
     const dSel = new Date(state.dayStr + "T00:00:00Z");
     const dateKey = String(state.dayStr).replace(/-/g,""); // YYYYMMDD
@@ -1387,6 +1385,7 @@ function summariesInRange(){
 function calcKpis(){
   const list = summariesInRange();
   const mode = state.rangeMode;
+  const dr = getActiveDayRange();
 
   function kpiFromDays(days){
     let qty=0, rev=0, multi=0, attSum=0, effSum=0, attCnt=0, effCnt=0;
@@ -1404,12 +1403,14 @@ function calcKpis(){
     return {qty, rev, multi, att, eff, avgPrice, days: days.length};
   }
 
-  const dr = getActiveDayRange();
   if(mode === "day" && dr){
     const base = kpiFromDays(list);
     return { qty: base.qty, rev: base.rev, multi: base.multi, att: base.att, eff: base.eff, avgPrice: base.avgPrice,
       hint:`指定期間（${dr.startStr} ～ ${dr.endStr}）` };
   }
+
+  // 其餘視圖：先照原本口徑計算，再在提示文字上標示「指定範圍」
+  let out;
 
   if(mode === "day"){
     const d = list[0];
@@ -1424,12 +1425,10 @@ function calcKpis(){
   if(mode === "week"){
     const base = kpiFromDays(list);
     const days = Math.max(base.days, 1);
-    return { qty: base.qty/days, rev: base.rev/days, multi: base.multi/days, att: base.att, eff: base.eff, avgPrice: base.avgPrice,
+    out = { qty: base.qty/days, rev: base.rev/days, multi: base.multi/days, att: base.att, eff: base.eff, avgPrice: base.avgPrice,
       hint:`週內日平均（${$("weekSelect").value || ""}）`
     };
-  }
-
-  if(mode === "month"){
+  }else if(mode === "month"){
     const byWeek = new Map();
     for(const item of list){
       const ws = getWeekStartUTC(item.dateObj);
@@ -1446,51 +1445,60 @@ function calcKpis(){
     if(!wk.length) return {qty:NaN, rev:NaN, multi:NaN, att:NaN, eff:NaN, avgPrice:NaN, hint:"無資料"};
     const n = wk.length;
     const avg = (key)=> wk.reduce((s,x)=> s + (Number.isFinite(x[key]) ? x[key] : 0), 0) / n;
-    return { qty: avg("qty"), rev: avg("rev"), multi: avg("multi"), att: avg("att"), eff: avg("eff"), avgPrice: avg("avgPrice"),
+    out = { qty: avg("qty"), rev: avg("rev"), multi: avg("multi"), att: avg("att"), eff: avg("eff"), avgPrice: avg("avgPrice"),
       hint:`本月每週平均（週內日平均）再取平均（${String(state.month).padStart(2,"0")} 月｜有資料週：${n}）`
+    };
+  }else{
+    // year
+    const byMonth = new Map();
+    for(const item of list){
+      const mk = monthKeyFromDate(item.dateObj);
+      if(!byMonth.has(mk)) byMonth.set(mk, []);
+      byMonth.get(mk).push(item);
+    }
+    const months = [];
+    for(let m=1;m<=12;m++){
+      const mk = `${state.year}-${String(m).padStart(2,"0")}`;
+      const items = byMonth.get(mk) || [];
+      if(!items.length) continue;
+      const k = kpiFromDays(items);
+      const dn = Math.max(k.days, 1);
+      months.push({ m, qty:k.qty/dn, rev:k.rev/dn, multi:k.multi/dn, att:k.att, eff:k.eff, avgPrice:k.avgPrice });
+    }
+    if(!months.length) return {qty:NaN, rev:NaN, multi:NaN, att:NaN, eff:NaN, avgPrice:NaN, hint:"無資料"};
+    const n = months.length;
+    const avg = (key)=> months.reduce((s,x)=> s + (Number.isFinite(x[key]) ? x[key] : 0), 0) / n;
+    out = { qty: avg("qty"), rev: avg("rev"), multi: avg("multi"), att: avg("att"), eff: avg("eff"), avgPrice: avg("avgPrice"),
+      hint:`年別：12 個月月平均再取平均（有資料月份：${n}）`
     };
   }
 
-  // year
-  const byMonth = new Map();
-  for(const item of list){
-    const mk = monthKeyFromDate(item.dateObj);
-    if(!byMonth.has(mk)) byMonth.set(mk, []);
-    byMonth.get(mk).push(item);
+  if(dr && out && out.hint){
+    out.hint = `${out.hint}｜指定範圍（${dr.startStr} ～ ${dr.endStr}）`;
   }
-  const months = [];
-  for(let m=1;m<=12;m++){
-    const mk = `${state.year}-${String(m).padStart(2,"0")}`;
-    const items = byMonth.get(mk) || [];
-    if(!items.length) continue;
-    const k = kpiFromDays(items);
-    const dn = Math.max(k.days, 1);
-    months.push({ m, qty:k.qty/dn, rev:k.rev/dn, multi:k.multi/dn, att:k.att, eff:k.eff, avgPrice:k.avgPrice });
-  }
-  if(!months.length) return {qty:NaN, rev:NaN, multi:NaN, att:NaN, eff:NaN, avgPrice:NaN, hint:"無資料"};
-  const n = months.length;
-  const avg = (key)=> months.reduce((s,x)=> s + (Number.isFinite(x[key]) ? x[key] : 0), 0) / n;
-  return { qty: avg("qty"), rev: avg("rev"), multi: avg("multi"), att: avg("att"), eff: avg("eff"), avgPrice: avg("avgPrice"),
-    hint:`年別：12 個月月平均再取平均（有資料月份：${n}）`
-  };
+  return out;
 }
 
 function refreshActiveRangeText(){
   const tempLabel = (state.temp === "18") ? "18°C" : "4°C";
   let title = "", hint = "";
   const dr = getActiveDayRange();
-  if(state.rangeMode === "year"){
+  const mode = state.rangeMode;
+
+  // 先建立「視圖」本身的顯示文字
+  if(mode === "year"){
     title = `${state.year} 年｜${tempLabel}`;
     hint = "顯示：12 個月月平均（各月日平均），再取全年平均";
-  }else if(state.rangeMode === "month"){
+  }else if(mode === "month"){
     title = `${state.year}-${String(state.month).padStart(2,"0")}｜${tempLabel}`;
     hint = "顯示：本月每週平均（週二～週一，週內日平均），再取本月平均";
-  }else if(state.rangeMode === "week"){
+  }else if(mode === "week"){
     const ws = state.weekStartStr ? new Date(state.weekStartStr+"T00:00:00Z") : null;
     const we = ws ? addDaysUTC(ws,6) : null;
     title = ws ? `${dateObjToStr(ws)} ～ ${dateObjToStr(we)}｜${tempLabel}` : `（未選週）｜${tempLabel}`;
     hint = "顯示：週內日平均";
   }else{
+    // day
     if(dr){
       title = `${dr.startStr} ～ ${dr.endStr}｜${tempLabel}`;
       hint = "顯示：指定期間（生產量/營收/多次生產＝加總；出勤人數/人時性＝日平均）";
@@ -1498,6 +1506,12 @@ function refreshActiveRangeText(){
       title = state.dayStr ? `${state.dayStr}｜${tempLabel}` : `（未選日）｜${tempLabel}`;
       hint = "顯示：單日";
     }
+  }
+
+  // 若在「非日別」視圖也套用了指定範圍，額外標示（不切換到日別）
+  if(dr && mode !== "day"){
+    title = `${title}｜指定範圍 ${dr.startStr} ～ ${dr.endStr}`;
+    hint = `${hint}｜已套用指定範圍`;
   }
   $("activeRangeText").textContent = title;
   $("activeRangeHint").textContent = hint;
