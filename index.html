@@ -804,7 +804,7 @@ const key = `${temp}|${dateKey}|${cleanKey(currentLine)}|${cleanKey(cat)}|${clea
       if(!Number.isFinite(humanAvg) && !Number.isFinite(capAvg)) continue;
 
       const line = displayLineName(lineCell);
-      const lk = `4|${mmdd}|${cleanKey(line)}`;
+      const lk = `4|${dateKey}|${cleanKey(line)}`;
       upsert(state.lineAvgFromSheets, lk, { mmdd, temp:"4", line, humanAvg, capAvg });
     }
   }
@@ -886,9 +886,9 @@ async function parseWorkbookArrayBuffer(buf, filename){
     }
     const t18 = String(sname).match(/晉欣\s*18度C\s*(\d{4})/);
     const t4  = String(sname).match(/晉欣\s*4度C\s*(\d{4})/);
-    if(t18) parseTempSheet(wb, sname, "18", t18[1]);
-    if(t4)  parseTempSheet(wb, sname, "4",  t4[1]);
-  }
+    if(t18) parseTempSheet(wb, sname, "18", `${fileYear}${t18[1]}`);
+    if(t4)  parseTempSheet(wb, sname, "4",  `${fileYear}${t4[1]}`);
+    }
 }
 
 
@@ -1126,7 +1126,11 @@ function refreshSelectors(){
 }
 
 function getSummaryForDay(temp, mmdd){
+  // Accept either YYYYMMDD (dateKey) or MMDD; normalize to YYYYMMDD.
+  const s = String(mmdd || "");
+  const dateKey = (/^\d{8}$/.test(s)) ? s : `${state.year}${s}`;
   return state.summaries.get(`${temp}|${dateKey}`) || null;
+}|${dateKey}`) || null;
 }
 function summariesInRange(){
   const temp = state.temp;
