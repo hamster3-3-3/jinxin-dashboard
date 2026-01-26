@@ -674,10 +674,20 @@ function _parseDevConfirmDate(v){
 
 function _fmtLaunchDate(d){
   if(!(d instanceof Date) || isNaN(d)) return "";
-  const mo = d.getUTCMonth()+1;
-  const da = d.getUTCDate();
-  return `${mo}/${da}`;
+  const y = d.getUTCFullYear();
+  const mo = String(d.getUTCMonth()+1).padStart(2,'0');
+  const da = String(d.getUTCDate()).padStart(2,'0');
+  return `${y}/${mo}/${da}`;
 }
+
+function _calcLaunchDays(d){
+  if(!(d instanceof Date) || isNaN(d)) return null;
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const launchUtc = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  return Math.floor((todayUtc - launchUtc)/86400000);
+}
+
 
 function parseDevConfirmWorkbook(wb){
   if(!wb || !wb.SheetNames || wb.SheetNames.length===0) return;
@@ -718,21 +728,32 @@ function parseDevConfirmWorkbook(wb){
   state.devConfirmLoaded = true;
 }
 
-function getLaunchDateStrForProd(prodName){
-  if(!prodName) return "";
-  const key = cleanKey(prodName);
-  if(!key) return "";
-  const direct = state.devLaunchMap.get(key);
-  if(direct) return direct.str || "";
+function getLaunchDateInfoForProd(prodBaseName){
+  if(!prodBaseName) return {date:null, str:""};
+  const key = cleanKey(prodBaseName);
+  if(!key) return {date:null, str:""};
 
+  const direct = state.devLaunchMap.get(key);
+  if(direct) return {date: direct.date||null, str: direct.str||""};
+
+  // Partial matching (dashboard name may contain extra prefixes). Choose the latest launch date if multiple matches exist.
+  let best=null;
   for(const ent of state.devLaunchEntries){
-    if(!ent || !ent.k) continue;
+    if(!ent || !ent.k || !ent.v) continue;
     if(key.includes(ent.k) || ent.k.includes(key)){
-      return ent.v?.str || "";
+      const v = ent.v;
+      if(!best || (v.date && best.date && v.date > best.date) || (v.date && !best.date)){
+        best = v;
+      }
     }
   }
-  return "";
+  return best ? {date: best.date||null, str: best.str||""} : {date:null, str:""};
 }
+
+function getLaunchDateStrForProd(prodName){
+  return getLaunchDateInfoForProd(prodName).str || "";
+}
+
 
 async function parseDevConfirmArrayBuffer(buf){
   await ensureXLSX();
@@ -2975,9 +2996,13 @@ if(pairFilter === "two"){
   const out = [];
   for(const it of map.values()){
     if(it.achCnt <= 0) continue;
+    const li = getLaunchDateInfoForProd(it.prod);
+    const launchStr = (li.str||"");
+    const launchDays = _calcLaunchDays(li.date);
     out.push({
       ...it,
-      launchStr: getLaunchDateStrForProd(it.prod),
+      launchStr,
+      launchDays,
       avgAch: it.achSum / it.achCnt,
       avgPeople: (it.peopleCnt>0) ? (it.peopleSum / it.peopleCnt) : NaN,
       avgEff: (it.effCnt>0) ? (it.effSum / it.effCnt) : NaN,
@@ -3026,6 +3051,7 @@ const peopleText = fmtDec(it.avgPeople, 2);
 const avgQtyDayText = fmtInt(it.avgQtyDay);
 const effText = fmtDec(it.avgEff, 2);
 const capText = fmtDec(it.avgCap, 2);
+const launchDaysText = (it.launchDays===null || it.launchDays===undefined) ? "—" : String(it.launchDays);
 
 const thirdLabel = (mode === "cap") ? "產能" : "人時性";
 const thirdVal = (mode === "cap") ? capText : effText;
@@ -3036,10 +3062,14 @@ btn.innerHTML = `
     <div class="mt-1 text-xs font-bold text-slate-500">${escapeHtml(sub)}</div>
   </div>
 
-  <div class="flex-[3] grid grid-cols-5 gap-3 items-center">
+  <div class="flex-[3] grid grid-cols-6 gap-3 items-center">
     <div class="text-center">
       <div class="text-[11px] font-bold text-slate-500">上市日期</div>
       <div class="mt-0.5 text-sm font-extrabold text-slate-900 mono">${escapeHtml(it.launchStr || "—")}</div>
+    </div>
+    <div class="text-center">
+      <div class="text-[11px] font-bold text-slate-500">上市天數</div>
+      <div class="mt-0.5 text-sm font-extrabold text-slate-900 mono">${escapeHtml(launchDaysText)}</div>
     </div>
     <div class="text-center">
       <div class="text-[11px] font-bold text-slate-500">生產量</div>
