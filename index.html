@@ -608,6 +608,21 @@ function cleanText(v){
   return String(v).replace(/\u00a0/g," ").replace(/\s+/g," ").trim();
 }
 function cleanKey(v){ return cleanText(v).replace(/\s+/g,""); }
+
+function normalizeProdName(v){
+  if(v === null || v === undefined) return "";
+  return String(v)
+    .replace(/\u00a0/g," ")
+    .replace(/[\u200B-\u200D\uFEFF]/g,"")
+    .replace(/\u3000/g," ")
+    .replace(/\s+/g," ")
+    .trim();
+}
+function isTwoPei(v){
+  const s = normalizeProdName(v);
+  return s.slice(0,2) === "二配";
+}
+
 function escapeHtml(s){
   return cleanText(s).replace(/[&<>"']/g, (c)=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 }
@@ -2634,12 +2649,6 @@ function buildProdIndex(){
     const prodKey = cleanKey(rec.product);
 
     if(!lineKey || !catKey || !prodKey) continue;
-
-    // 配別篩選：二配 = 商品名前二字為「二配」
-    const _pn = String(rec.product || "").trim();
-    const _isTwo = _pn.startsWith("二配");
-    if(pairFilter === "two" && !_isTwo) continue;
-    if(pairFilter === "nonTwo" && _isTwo) continue;
     if(catKey === "0") continue;
 
     const key = `${lineKey}|${catKey}|${prodKey}`;
@@ -2778,6 +2787,13 @@ function _lowestRateAgg(mode, pairFilter){
     const prodKey = cleanKey(rec.product);
 
     if(!lineKey || !catKey || !prodKey) continue;
+// 配別篩選：以品名前二字是否為「二配」判定
+if(pairFilter === "two"){
+  if(!isTwoPei(rec.product)) continue;
+}else if(pairFilter === "nonTwo"){
+  if(isTwoPei(rec.product)) continue;
+}
+
 
     const key = `${lineKey}||${catKey}||${prodKey}`;
 
