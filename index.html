@@ -282,12 +282,22 @@
   <div class="card mt-6">
     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div class="h2">低達成率品項（當前範圍）</div>
-      <div class="flex items-center gap-2">
-        <div class="text-slate-500 text-sm font-bold whitespace-nowrap shrink-0 leading-none">排序依據</div>
-        <select id="lowestRateMode" class="select" style="max-width: 18rem;">
-          <option value="human">最低人時達成率（前六）</option>
-          <option value="cap">最低產能達成率（前六）</option>
-        </select>
+      <div class="flex items-center gap-4">
+        <div class="flex items-center gap-2">
+          <div class="text-slate-500 text-sm font-bold whitespace-nowrap shrink-0 leading-none">配別</div>
+          <select id="pairFilter" class="select" style="max-width: 10rem;">
+            <option value="all">全部</option>
+            <option value="nonTwo">非二配</option>
+            <option value="two">二配</option>
+          </select>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="text-slate-500 text-sm font-bold whitespace-nowrap shrink-0 leading-none">排序依據</div>
+          <select id="lowestRateMode" class="select" style="max-width: 18rem;">
+            <option value="human">最低人時達成率（前六）</option>
+            <option value="cap">最低產能達成率（前六）</option>
+          </select>
+        </div>
       </div>
     </div>
 
@@ -2624,6 +2634,12 @@ function buildProdIndex(){
     const prodKey = cleanKey(rec.product);
 
     if(!lineKey || !catKey || !prodKey) continue;
+
+    // 配別篩選：二配 = 商品名前二字為「二配」
+    const _pn = String(rec.product || "").trim();
+    const _isTwo = _pn.startsWith("二配");
+    if(pairFilter === "two" && !_isTwo) continue;
+    if(pairFilter === "nonTwo" && _isTwo) continue;
     if(catKey === "0") continue;
 
     const key = `${lineKey}|${catKey}|${prodKey}`;
@@ -2744,7 +2760,7 @@ function _safeNum(v){
   return Number.isFinite(n) ? n : NaN;
 }
 
-function _lowestRateAgg(mode){
+function _lowestRateAgg(mode, pairFilter){
   // mode: "human" | "cap"
   const mmddSet = getDateSetInSelection();
   const _daysCount = Math.max(1, (mmddSet && mmddSet.size) ? mmddSet.size : 0);
@@ -2826,8 +2842,11 @@ function renderLowestRatePanel(){
   const empty = $("lowestRateEmpty");
   if(!sel || !box || !empty) return;
 
+  const pf = $("pairFilter");
+  const pair = (pf && pf.value) ? pf.value : "all";
+
   const mode = sel.value || "human";
-  const list = _lowestRateAgg(mode);
+  const list = _lowestRateAgg(mode, pair);
 
   box.innerHTML = "";
   if(!list.length){
@@ -2906,6 +2925,12 @@ document.addEventListener("DOMContentLoaded", ()=>{
   const sel = $("lowestRateMode");
   if(sel){
     sel.addEventListener("change", ()=> {
+      renderLowestRatePanel();
+    });
+  }
+  const pf = $("pairFilter");
+  if(pf){
+    pf.addEventListener("change", ()=> {
       renderLowestRatePanel();
     });
   }
