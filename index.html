@@ -542,6 +542,8 @@ const GITHUB_REPO_OVERRIDE  = "";   // 例：jinxin-dashboard
 const GITHUB_BRANCH_OVERRIDE = "";  // 例：main / gh-pages（留空=自動判斷或預設 main）
 const GITHUB_DIR_CANDIDATES = ["", "repo", "data", "excel", "xlsx"];
 
+const DEV_CONFIRM_FILENAME = "2025-2026鮮食開發確認表.xlsx";
+const DEV_CONFIRM_HINT_RE = /鮮食開發確認表/i;
 function detectGitHubContext(){
   const host = location.host || "";
   // 1) GitHub Pages: https://<owner>.github.io/<repo>/...
@@ -622,6 +624,132 @@ function isTwoPei(v){
   const s = normalizeProdName(v);
   return s.slice(0,2) === "二配";
 }
+
+
+function _inferYearForDevConfirm(month){
+  // Heuristic for 2025-2026 dev confirmation table:
+  // months 1-6 => 2026; months 7-12 => 2025
+  if(!month || month<1 || month>12) return new Date().getFullYear();
+  return (month<=6) ? 2026 : 2025;
+}
+
+function _parseDevConfirmDate(v){
+  if(v === null || v === undefined || v === "") return null;
+  if(v instanceof Date && !isNaN(v)) return v;
+
+  if(typeof v === "number" && isFinite(v)){
+    try{
+      if(window.XLSX && XLSX.SSF && typeof XLSX.SSF.parse_date_code === "function"){
+        const dc = XLSX.SSF.parse_date_code(v);
+        if(dc && dc.y && dc.m && dc.d){
+          return new Date(Date.UTC(dc.y, dc.m-1, dc.d));
+        }
+      }
+      const epoch = Date.UTC(1899, 11, 30);
+      return new Date(epoch + Math.round(v) * 86400000);
+    }catch(_e){
+      return null;
+    }
+  }
+
+  const s = String(v).trim();
+  if(!s) return null;
+  const s2 = s.replace(/[年月]/g, "/").replace(/日/g, "").replace(/-/g, "/").replace(/\s+/g, "");
+  let m = s2.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+  if(m){
+    const y = +m[1], mo = +m[2], d = +m[3];
+    if(mo>=1 && mo<=12 && d>=1 && d<=31) return new Date(Date.UTC(y, mo-1, d));
+    return null;
+  }
+  m = s2.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if(m){
+    const mo = +m[1], d = +m[2];
+    if(mo>=1 && mo<=12 && d>=1 && d<=31){
+      const y = _inferYearForDevConfirm(mo);
+      return new Date(Date.UTC(y, mo-1, d));
+    }
+  }
+  return null;
+}
+
+function _fmtLaunchDate(d){
+  if(!(d instanceof Date) || isNaN(d)) return "";
+  const mo = d.getUTCMonth()+1;
+  const da = d.getUTCDate();
+  return `${mo}/${da}`;
+}
+
+function parseDevConfirmWorkbook(wb){
+  if(!wb || !wb.SheetNames || wb.SheetNames.length===0) return;
+
+  const newMap = new Map(); // key => {date: Date, str: string, rawName: string}
+
+  for(const sn of wb.SheetNames){
+    const ws = wb.Sheets[sn];
+    if(!ws) continue;
+
+    const rows = XLSX.utils.sheet_to_json(ws, {header: 1, raw: true, defval: ""});
+    if(!rows || rows.length===0) continue;
+
+    // Default: date at col A, product name at col C
+    for(const row of rows){
+      if(!row) continue;
+      const name = String(row[2] ?? "").trim();
+      if(!name) continue;
+      if(/商品名稱|商品名|品名/i.test(name)) continue;
+
+      const key = cleanKey(name);
+      if(!key) continue;
+
+      const dt = _parseDevConfirmDate(row[0]);
+      if(!dt) continue;
+
+      const prev = newMap.get(key);
+      if(!prev || (prev.date instanceof Date && dt > prev.date)){
+        newMap.set(key, {date: dt, str: _fmtLaunchDate(dt), rawName: name});
+      }
+    }
+  }
+
+  state.devLaunchMap = newMap;
+  state.devLaunchEntries = Array.from(newMap.entries())
+    .map(([k,v])=>({k, v}))
+    .sort((a,b)=> (b.k.length - a.k.length) || ((b.v.date||0) - (a.v.date||0)));
+  state.devConfirmLoaded = true;
+}
+
+function getLaunchDateStrForProd(prodName){
+  if(!prodName) return "";
+  const key = cleanKey(prodName);
+  if(!key) return "";
+  const direct = state.devLaunchMap.get(key);
+  if(direct) return direct.str || "";
+
+  for(const ent of state.devLaunchEntries){
+    if(!ent || !ent.k) continue;
+    if(key.includes(ent.k) || ent.k.includes(key)){
+      return ent.v?.str || "";
+    }
+  }
+  return "";
+}
+
+async function parseDevConfirmArrayBuffer(buf){
+  await ensureXLSX();
+  const wb = XLSX.read(buf, {type:"array", cellDates:true});
+  parseDevConfirmWorkbook(wb);
+}
+
+async function loadDevConfirmFromRepo(){
+  if(state.devConfirmLoaded) return;
+  try{
+    const buf = await fetchArrayBufferSmart(DEV_CONFIRM_FILENAME);
+    await parseDevConfirmArrayBuffer(buf);
+  }catch(e){
+    console.warn("Dev confirm load failed:", e);
+  }
+}
+
 
 function escapeHtml(s){
   return cleanText(s).replace(/[&<>"']/g, (c)=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
@@ -723,6 +851,9 @@ const state = {
 
   chartsVisible: false,
   chartsDirty: true,
+  devLaunchMap: new Map(),
+  devLaunchEntries: [],
+  devConfirmLoaded: false,
   prodIndex: [],
 
 };
@@ -1134,6 +1265,7 @@ if(location.protocol === "file:"){
 setDataChip("warn", "自動載入中…");
   // 先嘗試用 GitHub API 掃描 repo 內的 .xlsx（可避免 Pages 沒把 Excel 一起 publish 的情況）
   let fileItems = [];
+  await loadDevConfirmFromRepo();
   try{
     const ghList = await listXlsxFilesFromGitHub();
     if(ghList && ghList.length) fileItems = ghList;
@@ -1159,6 +1291,12 @@ setDataChip("warn", "自動載入中…");
   for(const it of fileItems){
     try{
       const buf = await fetchArrayBufferSmart(it.url || it.name);
+      if((it.name && (DEV_CONFIRM_HINT_RE.test(it.name) || it.name === DEV_CONFIRM_FILENAME))){
+        if(!state.devConfirmLoaded){
+          await parseDevConfirmArrayBuffer(buf);
+        }
+        continue;
+      }
       await parseWorkbookArrayBuffer(buf, it.name);
       ok++;
     }catch(e){
@@ -2839,6 +2977,7 @@ if(pairFilter === "two"){
     if(it.achCnt <= 0) continue;
     out.push({
       ...it,
+      launchStr: getLaunchDateStrForProd(it.prod),
       avgAch: it.achSum / it.achCnt,
       avgPeople: (it.peopleCnt>0) ? (it.peopleSum / it.peopleCnt) : NaN,
       avgEff: (it.effCnt>0) ? (it.effSum / it.effCnt) : NaN,
@@ -2897,7 +3036,11 @@ btn.innerHTML = `
     <div class="mt-1 text-xs font-bold text-slate-500">${escapeHtml(sub)}</div>
   </div>
 
-  <div class="flex-[3] grid grid-cols-4 gap-3 items-center">
+  <div class="flex-[3] grid grid-cols-5 gap-3 items-center">
+    <div class="text-center">
+      <div class="text-[11px] font-bold text-slate-500">上市日期</div>
+      <div class="mt-0.5 text-sm font-extrabold text-slate-900 mono">${escapeHtml(it.launchStr || "—")}</div>
+    </div>
     <div class="text-center">
       <div class="text-[11px] font-bold text-slate-500">生產量</div>
       <div class="mt-0.5 text-sm font-extrabold text-slate-900 mono">${escapeHtml(qtyText)}</div>
@@ -3205,6 +3348,7 @@ setActiveSeg("range", state.rangeMode);
   }
 
   refreshAll();
+  await loadDevConfirmFromRepo();
   await preload(); // 自動載入 2025/07~2025/11
 })();
 </script>
