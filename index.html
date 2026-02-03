@@ -594,7 +594,9 @@ function detectGitHubContext(){
     const owner = host.split(".")[0] || "";
     const parts = location.pathname.split("/").filter(Boolean);
     const repo = (parts[0] || `${owner}.github.io`);
-    return { owner, repo, branch: "main" };
+    // On GitHub Pages we may not know which branch is the repo's default branch.
+    // Leave branch empty so the GitHub Contents API falls back to the default branch.
+    return { owner, repo, branch: "" };
   }
   // 2) github.com: https://github.com/<owner>/<repo>/blob/<branch>/...
   if(host === "github.com"){
@@ -622,7 +624,8 @@ async function listXlsxFilesFromGitHub(){
 
   for(const d of dirs){
     const pathPart = d ? `${d}` : "";
-    const api = `https://api.github.com/repos/${owner}/${repo}/contents/${pathPart}?ref=${encodeURIComponent(branch)}`;
+    const refQ = branch ? `?ref=${encodeURIComponent(branch)}` : "";
+    const api = `https://api.github.com/repos/${owner}/${repo}/contents/${pathPart}${refQ}`;
     try{
       const res = await fetch(api, { headers: { "Accept": "application/vnd.github+json" }, cache: "no-store" });
       if(!res.ok) continue;
@@ -631,7 +634,7 @@ async function listXlsxFilesFromGitHub(){
       for(const item of data){
         if(item && item.type === "file" && typeof item.name === "string" && item.name.toLowerCase().endsWith(".xlsx")){
           if(item.download_url && !found.has(item.name)){
-            found.set(item.name, { name: item.name, url: item.download_url, dir: d || "" });
+            found.set(item.name, { name: item.name, url: item.download_url, path: item.path || item.name, dir: d || "" });
           }
         }
       }
@@ -1369,21 +1372,38 @@ async function fetchArrayBufferSmart(fileName){
   const pathDir = here.pathname.endsWith("/") ? here.pathname : here.pathname.replace(/\/[^\/]*$/, "/");
 
   // Build ancestor directories: current dir -> parent -> ... -> /
+  // - Normal (https/http): use origin + path
+  // - file://: origin is "null", so use file URL directories instead to avoid Invalid URL errors
   const baseUrls = [];
   const seen = new Set();
-  function pushBase(p){
-    const u = here.origin + p;
-    if(!seen.has(u)){ seen.add(u); baseUrls.push(u); }
+  function pushBaseUrl(u){
+    if(u && !seen.has(u)){ seen.add(u); baseUrls.push(u); }
   }
-  // current directory and its ancestors
-  let p = pathDir;
-  while(true){
-    pushBase(p);
-    if(p === "/") break;
-    // remove last segment
-    p = p.replace(/[^\/]+\/$/, "");
-    if(!p.endsWith("/")) p += "/";
-    if(!p) p = "/";
+
+  const isFileOrigin = (here.origin === "null" || location.protocol === "file:");
+  if(!isFileOrigin){
+    let p = pathDir;
+    while(true){
+      pushBaseUrl(here.origin + p);
+      if(p === "/") break;
+      p = p.replace(/[^\/]+\/$/, "");
+      if(!p.endsWith("/")) p += "/";
+      if(!p) p = "/";
+    }
+  }else{
+    // file:// current directory and its ancestors
+    let u = here.href.endsWith("/") ? here.href : here.href.replace(/\/[^\/]*$/, "/");
+    // Normalize: ensure trailing slash
+    if(!u.endsWith("/")) u += "/";
+    for(let i=0; i<50; i++){
+      pushBaseUrl(u);
+      // stop at file root
+      if(u === "file:///" || u === "file:/") break;
+      const u2 = u.replace(/[^\/]+\/$/, "");
+      if(!u2 || u2 === u) break;
+      u = u2;
+      if(!u.endsWith("/")) u += "/";
+    }
   }
 
   // If user supplies a full URL, treat it as a base URL (highest priority)
@@ -1461,7 +1481,7 @@ setDataChip("warn", "自動載入中…");
 
   // 若掃不到，回退到手動清單
   if(!fileItems.length){
-    fileItems = PRELOAD_FILES.map(name => ({ name, url: name, dir: "" }));
+    fileItems = PRELOAD_FILES.map(name => ({ name, url: name, path: name, dir: "" }));
   }
 
   // 顯示清單（debug=1 才會顯示整卡）
@@ -1476,7 +1496,19 @@ setDataChip("warn", "自動載入中…");
   let ok = 0, fail = 0;
   for(const it of fileItems){
     try{
-      const buf = await fetchArrayBufferSmart(it.url || it.name);
+      let buf = null;
+      // Prefer same-origin/relative path first (works best on GitHub Pages),
+      // then fall back to raw/download URL if provided.
+      try{
+        buf = await fetchArrayBufferSmart(it.path || it.name || it.url);
+      }catch(e1){
+        const primary = (it.path || it.name || "").trim();
+        if(it.url && it.url !== primary){
+          buf = await fetchArrayBufferSmart(it.url);
+        }else{
+          throw e1;
+        }
+      }
       if((it.name && (DEV_CONFIRM_HINT_RE.test(it.name) || it.name === DEV_CONFIRM_FILENAME))){
         if(!state.devConfirmLoaded){
           await parseDevConfirmArrayBuffer(buf);
