@@ -1131,10 +1131,12 @@ function indexOfAllHeaderContains(headerRow, token){
 function upsert(map, key, value){ map.set(key, value); }
 
 function displayLineName(line){
-  let s = cleanText(line).replace(/\s+/g,"");
+  // 線別名稱：將合併儲存格的換行/多空白整理成單一空白，避免下拉選單顯示過醜
+  let s = cleanText(line).replace(/\s+/g," ").trim();
   if(s.startsWith("二配") && !s.startsWith("二配 ")){ s = s.replace(/^二配/, "二配 "); }
   return s;
 }
+
 
 /* =========================
    Parse workbook buffer
@@ -1231,38 +1233,24 @@ if(cat && cleanKey(cat) !== "0" && prod && !/(平均|合計|小計|總計)/.test
 const key = `${temp}|${dateKey}|${cleanKey(currentLine)}|${cleanKey(cat)}|${cleanKey(prod)}`;
     upsert(state.records, key, rec);
 
-    // 4°C: average rows for line-level achievement averages
-    if(temp === "4" && prod.includes("平均")){
-      const lineName = cleanText(row[2]);
-      if(lineName){
-        const allAvg = indexOfAllHeaderContains(header, "達成率平均");
-        const humanAvgCol = allAvg.length ? allAvg[0] : -1;
-        const capAvgCol = allAvg.length ? allAvg[allAvg.length-1] : -1;
-        const lk = `${temp}|${dateKey}|${cleanKey(displayLineName(lineName))}`;
-        upsert(state.lineAvgFromSheets, lk, { mmdd:dateKey, temp, line: displayLineName(lineName),
-          humanAvg: (humanAvgCol>=0) ? toNumber(row[humanAvgCol]) : NaN,
-          capAvg: (capAvgCol>=0) ? toNumber(row[capAvgCol]) : NaN,
-        });
-      }
-    }
-  }
-
   // 4°C：線別達成率平均（人時性/產能）
   // 來源：晉欣4度C分頁右側區塊（合併儲存格：需 merge-aware 讀值）
   // - 人時性差異分析：達成率平均（左側 "達成率平均" 欄）
   // - 產能差異分析：達成率平均（右側 "達成率平均" 欄）
-  if(temp === "4"){
+  // 線別達成率平均（人時性/產能）：來自溫層分頁右側「達成率平均」欄位（合併儲存格，merge-aware）
+  // - 人時性：S 欄（或第一個「達成率平均」欄）
+  // - 產能：AD 欄（或最後一個「達成率平均」欄；18°C 若無則為 NaN）
+  {
     const arr = extractLineAveragesFromSheet(ws);
     for(const it of arr){
       if(!it || !it.line) continue;
       const humanAvg = (it.humanAvg === null || it.humanAvg === undefined) ? NaN : it.humanAvg;
       const capAvg   = (it.capAvg   === null || it.capAvg   === undefined) ? NaN : it.capAvg;
 
-      // 若有人時平均存在但產能缺失，仍先寫入（後續顯示以人時為準；產能在此邏輯中通常不會缺）
       if(!Number.isFinite(humanAvg) && !Number.isFinite(capAvg)) continue;
 
-      const lk = `4|${dateKey}|${cleanKey(it.line)}`;
-      upsert(state.lineAvgFromSheets, lk, { mmdd: dateKey, temp:"4", line: it.line, humanAvg, capAvg });
+      const lk = `${temp}|${dateKey}|${cleanKey(it.line)}`;
+      upsert(state.lineAvgFromSheets, lk, { mmdd: dateKey, temp, line: it.line, humanAvg, capAvg });
     }
   }
 }
@@ -1663,13 +1651,17 @@ function refreshSelectors(){
   const _prevLineVal = lineSel.value || "";
   lineSel.innerHTML = "";
   const lines = new Map();
+
+  // 線別來源：以溫層分頁（晉欣4度Cxxxx / 晉欣18度Cxxxx）A欄合併儲存格為主，
+  // 避免誤抓到日報總表/明細 C 欄的短名稱（如：4度二組A、綜合一組…）。
+  for(const v of state.lineAvgFromSheets.values()){
+    if(v.temp !== state.temp) continue;
+    lines.set(cleanKey(v.line), v.line);
+  }
+  // 明細補齊（若某些線別只出現在品項列）
   for(const rec of state.records.values()){
     if(rec.temp !== state.temp) continue;
     lines.set(cleanKey(rec.line), rec.line);
-  }
-  for(const v of state.lineHumanDaily.values()){
-    if(v.temp !== state.temp) continue;
-    lines.set(cleanKey(v.line), v.line);
   }
   const arr = Array.from(lines.entries()).map(([k,v])=>[k, displayLineName(v)])
     .sort((a,b)=>a[1].localeCompare(b[1],"zh-Hant"));
@@ -2923,8 +2915,8 @@ function getDateSetInSelection(){
   return new Set(items.map(x=>x.mmdd));
 }
 function calcLineHumanAvg(lineKey){
-  // 以「達成率平均」為主（lineAvgFromSheets），確保與右側平均卡片一致；
-  // 若缺資料，才回退使用 daily summary 的「達成率」（lineHumanDaily）。
+  // 達成率平均：以溫層分頁右側「達成率平均」欄位為唯一資料來源（merge-aware）
+  // 依使用者選取範圍（年/月/週/日/指定）取平均
   const mmddSet = getDateSetInSelection();
   const vals = [];
   for(const mmdd of mmddSet){
@@ -2932,16 +2924,12 @@ function calcLineHumanAvg(lineKey){
     const recAvg = state.lineAvgFromSheets.get(key);
     if(recAvg && Number.isFinite(toNumber(recAvg.humanAvg))){
       vals.push(toNumber(recAvg.humanAvg));
-      continue;
-    }
-    const recRate = state.lineHumanDaily.get(key);
-    if(recRate && Number.isFinite(toNumber(recRate.rate))){
-      vals.push(toNumber(recRate.rate));
     }
   }
   return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : NaN;
 }
 function calcLineCapAvg(lineKey){
+(lineKey){
   if(state.temp !== "4") return NaN;
   const mmddSet = getDateSetInSelection();
   const vals = [];
