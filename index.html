@@ -2929,7 +2929,6 @@ function calcLineHumanAvg(lineKey){
   return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : NaN;
 }
 function calcLineCapAvg(lineKey){
-(lineKey){
   if(state.temp !== "4") return NaN;
   const mmddSet = getDateSetInSelection();
   const vals = [];
