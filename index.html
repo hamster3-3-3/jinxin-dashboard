@@ -648,6 +648,15 @@ async function listXlsxFilesFromGitHub(){
 
 const $ = (id) => document.getElementById(id);
 
+function scrollToElWithSticky(el){
+  if(!el) return;
+  const sticky = $("timeRangeCard");
+  const offset = sticky ? (sticky.getBoundingClientRect().height + 12) : 12;
+  const top = el.getBoundingClientRect().top + window.pageYOffset - offset;
+  window.scrollTo({ top, behavior: "smooth" });
+}
+
+
 function cleanText(v){
   if(v === null || v === undefined) return "";
   return String(v).replace(/\u00a0/g," ").replace(/\s+/g," ").trim();
@@ -1541,6 +1550,7 @@ function refreshSelectors(){
 
   // dynamic line select
   const lineSel = $("lineSelect");
+  const _prevLineVal = lineSel.value || "";
   lineSel.innerHTML = "";
   const lines = new Map();
   for(const rec of state.records.values()){
@@ -1561,10 +1571,21 @@ function refreshSelectors(){
     for(const [k, disp] of arr){
       const opt = document.createElement("option");
       opt.value = k;
-      opt.textContent = disp;
+
+      // 在線別清單中顯示該線別於「當前範圍」的人時/產能達成率平均（方便直接比對）
+      const h = calcLineHumanAvg(k);
+      const c = calcLineCapAvg(k);
+      const hTxt = Number.isFinite(h) ? fmtPct(h) : "—";
+      const cTxt = (state.temp === "4" && Number.isFinite(c)) ? fmtPct(c) : "—";
+
+      opt.textContent = (state.temp === "4")
+        ? `${disp} ｜ 人時 ${hTxt} ｜ 產能 ${cTxt}`
+        : `${disp} ｜ 人時 ${hTxt}`;
+
       lineSel.appendChild(opt);
     }
     lineSel.disabled = false;
+    if(_prevLineVal){ lineSel.value = _prevLineVal; }
   }else{
     const opt = document.createElement("option");
     opt.value = "";
@@ -3551,6 +3572,9 @@ function renderLowestRatePanel(){
   for(let i=0;i<list.length;i++){
     const it = list[i];
     const btn = document.createElement("button");
+    const _isTop6 = i < 6;
+    const _titleCls = _isTop6 ? "text-red-700" : "text-slate-900";
+    const _rateCls  = _isTop6 ? "text-red-600" : "text-slate-900";
     btn.type = "button";
     btn.className = "w-full flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left hover:bg-white";
 
@@ -3569,7 +3593,7 @@ const thirdVal = (mode === "cap") ? capText : effText;
 
 btn.innerHTML = `
   <div class="min-w-0 flex-[2]">
-    <div class="font-extrabold text-slate-900 truncate">${i+1}. ${escapeHtml(it.prod)}</div>
+    <div class="font-extrabold ${_titleCls} truncate">${i+1}. ${escapeHtml(it.prod)}</div>
     <div class="mt-1 text-xs font-bold text-slate-500">${escapeHtml(sub)}</div>
   </div>
 
@@ -3602,13 +3626,14 @@ btn.innerHTML = `
 
   <div class="shrink-0 text-right">
     <div class="text-xs font-bold text-slate-900">${label}</div>
-    <div class="text-lg font-extrabold text-red-600 mono">${rateText}</div>
+    <div class="text-lg font-extrabold ${_rateCls} mono">${rateText}</div>
   </div>
 `;
     btn.addEventListener("click", ()=>{
-      // Use existing picker to fill line/cat/prod and prodSearch
+      // 點選低達成率品項：直接跳轉到『線別 / 品類 / 品名』區塊並帶入選項
       if(typeof applyProdPick === "function"){
         applyProdPick(it);
+        requestAnimationFrame(()=>{ scrollToElWithSticky($("lineSelect")); });
       }else{
         // Fallback: fill search box only
         const inp = $("prodSearch");
