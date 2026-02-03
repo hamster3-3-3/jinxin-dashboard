@@ -580,7 +580,7 @@ const PRELOAD_FILES = [
    - 目的：避免 GitHub Contents API / raw 下載在部分環境下遇到 CORS、rate limit、或路徑編碼問題
 ========================= */
 const MANIFEST_AUTOLOAD = true;
-const MANIFEST_CANDIDATES = ["./data/manifest.json", "./manifest.json"];
+const MANIFEST_CANDIDATES = ["./manifest.json", "./data/manifest.json"];
 /* =========================
    GitHub Repo 自動偵測與檔案清單（建議：不必每次手動改 PRELOAD_FILES）
    - 會先嘗試用 GitHub Contents API 掃描 .xlsx
@@ -633,19 +633,31 @@ async function listXlsxFilesFromManifest(){
     try{
       const res = await fetch(mf, { cache: "no-store" });
       if(!res.ok) continue;
+
       const j = await res.json();
       const files = j && Array.isArray(j.files) ? j.files : null;
       if(!files || !files.length) continue;
 
-      // manifest 所在資料夾做為 base（例：./data/manifest.json -> ./data/）
-      const base = mf.replace(/[^\/?#]+(\?.*)?$/, "");
+      // 以 manifest 本身的位置作為 base（可同時支援 root 或 /data/）
+      const mfAbs = new URL(mf, location.href);
+      const baseDir = mfAbs.href.replace(/[^\/?#]+(\?.*)?$/, ""); // keep trailing slash
+
       const items = [];
-      for(const name of files){
-        if(typeof name !== "string") continue;
-        if(!name.toLowerCase().endsWith(".xlsx")) continue;
-        const encName = encodeURIComponent(name).replace(/%2F/g, "/");
-        items.push({ name, url: base + name, path: base + name, dir: base });
+      for(const entry of files){
+        if(typeof entry !== "string") continue;
+        const p = entry.trim();
+        if(!p) continue;
+        if(!p.toLowerCase().endsWith(".xlsx")) continue;
+
+        // 使用 URL 解析，讓中文/空白自動正確編碼（避免手動 encode 導致 %25...）
+        const u = new URL(p, mfAbs).href;
+
+        // 顯示名稱：取最後一段
+        const name = p.split("/").filter(Boolean).pop() || p;
+
+        items.push({ name, url: u, path: u, dir: baseDir });
       }
+
       items.sort((a,b) => String(a.name).localeCompare(String(b.name), "zh-Hant", { numeric:true, sensitivity:"base" }));
       __manifestUsed = mf;
       return items;
@@ -655,6 +667,7 @@ async function listXlsxFilesFromManifest(){
   }
   return [];
 }
+
 async function listXlsxFilesFromGitHub(){
   if(!GITHUB_AUTOLOAD) return [];
 
