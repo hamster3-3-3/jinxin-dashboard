@@ -573,6 +573,14 @@ const PRELOAD_FILES = [
   "115.01.01-05晉欣廠生產日報表.xlsx",
 ];
 
+
+/* =========================
+   Manifest.json 自動載入（推薦｜對應你圖二的方式）
+   - 若 repo 中有 /data/manifest.json（或在網址帶 ?manifest=...），本頁會優先依 manifest.json 的 files 清單載入 Excel
+   - 目的：避免 GitHub Contents API / raw 下載在部分環境下遇到 CORS、rate limit、或路徑編碼問題
+========================= */
+const MANIFEST_AUTOLOAD = true;
+const MANIFEST_CANDIDATES = ["./data/manifest.json", "./manifest.json"];
 /* =========================
    GitHub Repo 自動偵測與檔案清單（建議：不必每次手動改 PRELOAD_FILES）
    - 會先嘗試用 GitHub Contents API 掃描 .xlsx
@@ -610,6 +618,43 @@ function detectGitHubContext(){
   return null;
 }
 
+
+let __manifestUsed = "";
+async function listXlsxFilesFromManifest(){
+  if(!MANIFEST_AUTOLOAD) return [];
+
+  const params = new URLSearchParams(location.search);
+  const mfParam = (params.get("manifest") || "").trim();
+  const candidates = [];
+  if(mfParam) candidates.push(mfParam);
+  candidates.push(...MANIFEST_CANDIDATES);
+
+  for(const mf of candidates){
+    try{
+      const res = await fetch(mf, { cache: "no-store" });
+      if(!res.ok) continue;
+      const j = await res.json();
+      const files = j && Array.isArray(j.files) ? j.files : null;
+      if(!files || !files.length) continue;
+
+      // manifest 所在資料夾做為 base（例：./data/manifest.json -> ./data/）
+      const base = mf.replace(/[^\/?#]+(\?.*)?$/, "");
+      const items = [];
+      for(const name of files){
+        if(typeof name !== "string") continue;
+        if(!name.toLowerCase().endsWith(".xlsx")) continue;
+        const encName = encodeURIComponent(name).replace(/%2F/g, "/");
+        items.push({ name, url: base + name, path: base + name, dir: base });
+      }
+      items.sort((a,b) => String(a.name).localeCompare(String(b.name), "zh-Hant", { numeric:true, sensitivity:"base" }));
+      __manifestUsed = mf;
+      return items;
+    }catch(e){
+      // try next candidate
+    }
+  }
+  return [];
+}
 async function listXlsxFilesFromGitHub(){
   if(!GITHUB_AUTOLOAD) return [];
 
@@ -1469,23 +1514,45 @@ if(location.protocol === "file:"){
     if(_h){ _h.textContent = "偵測到你在 github.com/blob 頁面開啟。本頁會自動改用 raw.githubusercontent.com 嘗試載入，但仍建議改用 GitHub Pages 以避免瀏覽器/權限限制。"; }
   }
 setDataChip("warn", "自動載入中…");
-  // 先嘗試用 GitHub API 掃描 repo 內的 .xlsx（可避免 Pages 沒把 Excel 一起 publish 的情況）
+
   let fileItems = [];
+  let srcLabel = "預設清單";
+
+  // 先載入「鮮食開發確認表」（若存在）
   await loadDevConfirmFromRepo();
+
+  // 0) 優先：manifest.json（圖二方式）
   try{
-    const ghList = await listXlsxFilesFromGitHub();
-    if(ghList && ghList.length) fileItems = ghList;
+    const mfList = await listXlsxFilesFromManifest();
+    if(mfList && mfList.length){
+      fileItems = mfList;
+      srcLabel = "manifest.json";
+    }
   }catch(e){
-    console.warn("GitHub list failed:", e);
+    console.warn("Manifest list failed:", e);
   }
 
-  // 若掃不到，回退到手動清單
+  // 1) fallback：GitHub Contents API 掃描 repo 內的 .xlsx
+  if(!fileItems.length){
+    try{
+      const ghList = await listXlsxFilesFromGitHub();
+      if(ghList && ghList.length){
+        fileItems = ghList;
+        srcLabel = "GitHub 清單";
+      }
+    }catch(e){
+      console.warn("GitHub list failed:", e);
+    }
+  }
+
+  // 2) fallback：手動清單
   if(!fileItems.length){
     fileItems = PRELOAD_FILES.map(name => ({ name, url: name, path: name, dir: "" }));
+    srcLabel = "預設清單";
   }
 
   // 顯示清單（debug=1 才會顯示整卡）
-  const _srcLabel = (fileItems[0] && fileItems[0].url && /^https?:\/\//i.test(fileItems[0].url)) ? "GitHub 清單" : "預設清單";
+  const _srcLabel = (srcLabel === "manifest.json" && __manifestUsed) ? `manifest.json（${__manifestUsed}）` : srcLabel;
   if(_preloadList){
     _preloadList.innerHTML = fileItems.map(it => {
       const d = (it.dir||"").trim();
