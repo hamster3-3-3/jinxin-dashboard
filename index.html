@@ -272,10 +272,25 @@
     <!-- 品類種類（顯示於 KPI 趨勢圖下方、線別/品類/品名 上方） -->
   <div class="card mt-6">
     <div class="flex items-center justify-between gap-4">
-      <div class="h2">整體品類種類（當前範圍）</div>
+      <div class="h2">整體品群（當前範圍）</div>
       <div id="activeCatMeta" class="text-slate-500 text-sm font-bold"></div>
     </div>
     <div id="activeCatCards" class="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3"></div>
+    <!-- 品群→品名跳轉 -->
+    <div id="activeGroupPanel" class="hidden mt-4 p-4 rounded-2xl border border-slate-200 bg-white">
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-slate-900 font-extrabold truncate">已選品群：<span id="activeGroupName">—</span></div>
+          <div class="text-slate-500 text-sm font-bold mt-1">選擇品名後將自動跳轉至「線別／品類／品名」並展開明細（依目前範圍）。</div>
+        </div>
+        <div class="w-full md:w-96">
+          <select id="activeGroupProdSelect" class="select" disabled>
+            <option value="">請先點選上方品群</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <!-- 低達成率品項（當前範圍） -->
@@ -1746,6 +1761,17 @@ function refreshActiveCatCounts(){
   if(meta) meta.textContent = "";
 
   if(map.size === 0){
+    // also reset active group panel
+    state.activeGroupCat = "";
+    const panel = $("activeGroupPanel");
+    if(panel) panel.classList.add("hidden");
+    const sel = $("activeGroupProdSelect");
+    if(sel){
+      sel.disabled = true;
+      sel.innerHTML = '<option value="">請先點選上方品群</option>';
+    }
+    const nameEl = $("activeGroupName");
+    if(nameEl) nameEl.textContent = "—";
     return;
   }
 
@@ -1754,21 +1780,49 @@ function refreshActiveCatCounts(){
     .sort((a,b)=> b.n - a.n || a.cat.localeCompare(b.cat, "zh-Hant"));
 
   if(meta){
-    meta.textContent = `共 ${arr.length} 類`;
+    meta.textContent = `共 ${arr.length} 群`;
   }
 
-  // Render each category as a mini card
+  // Render each category as a mini card (clickable)
   const frag = document.createDocumentFragment();
   for(const x of arr){
     const d = document.createElement("div");
-    d.className = "rounded-2xl border border-slate-200 bg-white p-3 shadow-sm";
+    d.className = "rounded-2xl border border-slate-200 bg-white p-3 shadow-sm hover:bg-slate-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500";
+    d.tabIndex = 0;
+    d.setAttribute("role","button");
+    d.setAttribute("aria-label", `選擇品群：${x.cat}`);
     d.innerHTML = `
       <div class="text-slate-900 font-extrabold truncate">${escapeHtml(x.cat)}</div>
       <div class="text-slate-500 text-sm font-bold mt-1">${x.n} 種</div>
     `;
+    const onPick = ()=> selectActiveGroup(x.cat);
+    d.addEventListener("click", onPick);
+    d.addEventListener("keydown", (e)=>{
+      if(e.key === "Enter" || e.key === " "){
+        e.preventDefault();
+        onPick();
+      }
+    });
     frag.appendChild(d);
   }
   wrap.appendChild(frag);
+
+  // If previously selected group is no longer available, hide panel
+  if(state.activeGroupCat){
+    const exists = arr.some(x=> cleanKey(x.cat) === cleanKey(state.activeGroupCat));
+    if(!exists){
+      state.activeGroupCat = "";
+      const panel = $("activeGroupPanel");
+      if(panel) panel.classList.add("hidden");
+      const sel = $("activeGroupProdSelect");
+      if(sel){
+        sel.disabled = true;
+        sel.innerHTML = '<option value="">請先點選上方品群</option>';
+      }
+      const nameEl = $("activeGroupName");
+      if(nameEl) nameEl.textContent = "—";
+    }
+  }
 }
 
 
@@ -2623,6 +2677,139 @@ function calcLineCapAvg(lineKey){
   return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : NaN;
 }
 
+
+/* =========================
+   Active Group (品群) → 產品跳轉
+========================= */
+state.activeGroupCat = "";
+
+function getActiveGroupMmddSet(){
+  const temp = state.temp;
+  const all = getAllDatesForTemp(temp);
+  // 月別：以日曆月統計（1~31）；其他：以目前選取範圍統計
+  if(state.rangeMode === "month"){
+    const m = state.month;
+    const s = new Set();
+    all.filter(o => (o.dateObj.getUTCMonth()+1) === m).forEach(o => s.add(o.mmdd));
+    return s;
+  }
+  return getDateSetInSelection();
+}
+
+function listProductsForGroup(catName){
+  const temp = state.temp;
+  const mmddSet = getActiveGroupMmddSet();
+  const lineVal = ($("lineSelect")?.value) || "";
+  const lineKeySel = cleanKey(lineVal);
+  const catKeySel = cleanKey(cleanText(catName || ""));
+  const set = new Set();
+
+  for(const rec of state.records.values()){
+    if(rec.temp !== temp) continue;
+    if(!mmddSet.has(rec.mmdd)) continue;
+    if(lineKeySel && cleanKey(rec.line) !== lineKeySel) continue;
+
+    const ck = cleanKey(cleanText(rec.category || ""));
+    if(!ck || ck === "0") continue;
+    if(ck !== catKeySel) continue;
+
+    const prod = cleanText(rec.product || "");
+    if(!prod) continue;
+    set.add(prod);
+  }
+  return Array.from(set).sort((a,b)=> a.localeCompare(b, "zh-Hant"));
+}
+
+function findLatestRecForGroupProduct(catName, prodName){
+  const temp = state.temp;
+  const mmddSet = getActiveGroupMmddSet();
+  const lineVal = ($("lineSelect")?.value) || "";
+  const lineKeySel = cleanKey(lineVal);
+  const catKeySel = cleanKey(cleanText(catName || ""));
+  const prodKeySel = cleanKey(cleanText(prodName || ""));
+
+  let best = null;
+  for(const rec of state.records.values()){
+    if(rec.temp !== temp) continue;
+    if(!mmddSet.has(rec.mmdd)) continue;
+    if(lineKeySel && cleanKey(rec.line) !== lineKeySel) continue;
+
+    if(cleanKey(cleanText(rec.category || "")) !== catKeySel) continue;
+    if(cleanKey(cleanText(rec.product || "")) !== prodKeySel) continue;
+
+    if(!best || String(rec.mmdd) > String(best.mmdd)) best = rec;
+  }
+  return best;
+}
+
+function selectActiveGroup(catName){
+  state.activeGroupCat = catName || "";
+  const panel = $("activeGroupPanel");
+  const nameEl = $("activeGroupName");
+  const sel = $("activeGroupProdSelect");
+
+  if(nameEl) nameEl.textContent = catName || "—";
+  if(!sel) return;
+
+  const prods = catName ? listProductsForGroup(catName) : [];
+  sel.innerHTML = "";
+  if(!catName){
+    sel.disabled = true;
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "請先點選上方品群";
+    sel.appendChild(opt);
+  }else if(prods.length === 0){
+    sel.disabled = true;
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "（此品群無可選品名）";
+    sel.appendChild(opt);
+  }else{
+    sel.disabled = false;
+    const opt0 = document.createElement("option");
+    opt0.value = "";
+    opt0.textContent = "請選擇品名";
+    sel.appendChild(opt0);
+    for(const p of prods){
+      const opt = document.createElement("option");
+      opt.value = p;
+      opt.textContent = p;
+      sel.appendChild(opt);
+    }
+  }
+
+  if(panel){
+    panel.classList.remove("hidden");
+    panel.scrollIntoView({behavior:"smooth", block:"start"});
+  }
+}
+
+function jumpToGroupProduct(prodName){
+  if(!state.activeGroupCat || !prodName) return;
+  const rec = findLatestRecForGroupProduct(state.activeGroupCat, prodName);
+  if(!rec) return;
+
+  // reuse existing drilldown logic
+  applyProdPick({
+    lineKey: cleanKey(rec.line),
+    catKey: cleanKey(rec.category),
+    prodKey: cleanKey(rec.product),
+    line: rec.line,
+    cat: rec.category,
+    prod: rec.product
+  });
+
+  // scroll to details
+  const d = $("prodDetails");
+  if(d){
+    d.scrollIntoView({behavior:"smooth", block:"start"});
+  }else{
+    $("lineSelect")?.scrollIntoView({behavior:"smooth", block:"start"});
+  }
+}
+
+
 function refreshLineSection(){
   const lineKey = $("lineSelect").value || "";
   $("catSelect").disabled = true;
@@ -3325,6 +3512,12 @@ $("catSelect").addEventListener("change", ()=>{
   refreshProductDetails();
 });
 $("prodSelect").addEventListener("change", ()=> refreshProductDetails());
+$("activeGroupProdSelect")?.addEventListener("change", (e)=>{
+  const v = e.target.value || "";
+  if(!v) return;
+  jumpToGroupProduct(v);
+});
+
 $("prodChartMetric")?.addEventListener("change", ()=>{
   if($("prodDetails") && !$("prodDetails").classList.contains("hidden")){
     refreshProductDetails(); // will re-render chart
