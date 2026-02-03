@@ -966,6 +966,120 @@ function getAllDatesForTemp(temp){
 function sheetToGrid(ws){
   return XLSX.utils.sheet_to_json(ws, {header: 1, defval: null, raw: true});
 }
+
+/* =========================
+   Line Avg (merge-aware) from Daily Sheet
+   - Human avg: leftmost "達成率平均" col
+   - Cap avg: rightmost "達成率平均" col
+   - Values may be stored in merged cells; we read merge top-left.
+========================= */
+function getMergedCellValue(ws, r, c){
+  const addr = XLSX.utils.encode_cell({r, c});
+  const cell = ws[addr];
+  if(cell && cell.v !== undefined && cell.v !== null && cell.v !== "") return cell.v;
+  const merges = ws["!merges"] || [];
+  for(const m of merges){
+    if(r>=m.s.r && r<=m.e.r && c>=m.s.c && c<=m.e.c){
+      const top = XLSX.utils.encode_cell({r:m.s.r, c:m.s.c});
+      const tc = ws[top];
+      return (tc && tc.v !== undefined) ? tc.v : null;
+    }
+  }
+  return null;
+}
+function toPct01(v){
+  if(v === null || v === undefined || v === "") return null;
+  if(typeof v === "string"){
+    const s = v.trim().replace("%","");
+    const n = Number(s);
+    if(!Number.isFinite(n)) return null;
+    return (n>1) ? (n/100) : n;
+  }
+  if(typeof v === "number" && Number.isFinite(v)){
+    return (v>1 && v<=100) ? (v/100) : (v<=1 ? v : null);
+  }
+  return null;
+}
+function findHeaderCols(ws, text){
+  const cols = [];
+  for(const a in ws){
+    if(a[0] === "!") continue;
+    const v = ws[a]?.v;
+    if(typeof v === "string" && v.trim() === text){
+      cols.push(XLSX.utils.decode_cell(a).c);
+    }
+  }
+  cols.sort((a,b)=>a-b);
+  return cols;
+}
+function extractLineAveragesFromSheet(ws){
+  const merges = ws["!merges"] || [];
+  const avgCols = findHeaderCols(ws, "達成率平均");
+  let humanCol = 18; // S fallback
+  let capCol = 29;   // AD fallback
+  if(avgCols.length >= 2){
+    humanCol = avgCols[0];
+    capCol = avgCols[avgCols.length-1];
+  }
+
+  // line groups: merged blocks in column A
+  const groups = [];
+  for(const m of merges){
+    if(m.s.c===0 && m.e.c===0 && (m.e.r-m.s.r)>=1){
+      const rawName = cleanText(getMergedCellValue(ws, m.s.r, 0));
+      if(!rawName) continue;
+      groups.push({ line: displayLineName(rawName), r0: m.s.r, r1: m.e.r });
+    }
+  }
+
+  // fallback: if no merges in col A, scan A col changes
+  if(!groups.length){
+    const ref = XLSX.utils.decode_range(ws["!ref"] || "A1:A1");
+    let cur=null, s=null;
+    for(let r=ref.s.r; r<=ref.e.r; r++){
+      const v = cleanText(getMergedCellValue(ws, r, 0));
+      if(v){
+        if(cur!==null) groups.push({ line: displayLineName(cur), r0:s, r1:r-1 });
+        cur=v; s=r;
+      }
+    }
+    if(cur!==null) groups.push({ line: displayLineName(cur), r0:s, r1:ref.e.r });
+  }
+
+  function findMergedPctInGroup(g, targetCol, colRadius=0, minCol=0){
+    let best=null;
+    for(const m of merges){
+      const h = m.e.r - m.s.r;
+      if(h < 1) continue; // must span rows (average cell)
+      if(m.e.r < g.r0 || m.s.r > g.r1) continue;
+      if(m.s.c < minCol) continue;
+      const colOverlap = (targetCol >= m.s.c && targetCol <= m.e.c) ||
+        (colRadius>0 && (targetCol+colRadius)>=m.s.c && (targetCol-colRadius)<=m.e.c);
+      if(!colOverlap) continue;
+      const v = getMergedCellValue(ws, m.s.r, m.s.c);
+      const p = toPct01(v);
+      if(p === null) continue;
+      if(!best || h > best.h) best = {p, h};
+    }
+    return best ? best.p : null;
+  }
+
+  const out = [];
+  for(const g of groups){
+    const human01 = findMergedPctInGroup(g, humanCol, 0, 0);
+    let cap01 = findMergedPctInGroup(g, capCol, 0, 0);
+    if(human01 !== null && cap01 === null){
+      // expand a bit around expected cap col (merged top-left may shift)
+      cap01 = findMergedPctInGroup(g, capCol, 8, 0);
+    }
+    if(human01 !== null && cap01 === null){
+      // last resort: search merged pct in right-side area (col>=25)
+      cap01 = findMergedPctInGroup(g, capCol, 40, 25);
+    }
+    out.push({ line: g.line, humanAvg: human01, capAvg: cap01 });
+  }
+  return out;
+}
 function findCell(grid, predicate, maxR=200, maxC=60){
   const R = Math.min(grid.length, maxR);
   for(let r=0;r<R;r++){
@@ -1116,55 +1230,43 @@ if(cat && cleanKey(cat) !== "0" && prod && !/(平均|合計|小計|總計)/.test
 
 const key = `${temp}|${dateKey}|${cleanKey(currentLine)}|${cleanKey(cat)}|${cleanKey(prod)}`;
     upsert(state.records, key, rec);
+
+    // 4°C: average rows for line-level achievement averages
+    if(temp === "4" && prod.includes("平均")){
+      const lineName = cleanText(row[2]);
+      if(lineName){
+        const allAvg = indexOfAllHeaderContains(header, "達成率平均");
+        const humanAvgCol = allAvg.length ? allAvg[0] : -1;
+        const capAvgCol = allAvg.length ? allAvg[allAvg.length-1] : -1;
+        const lk = `${temp}|${dateKey}|${cleanKey(displayLineName(lineName))}`;
+        upsert(state.lineAvgFromSheets, lk, { mmdd:dateKey, temp, line: displayLineName(lineName),
+          humanAvg: (humanAvgCol>=0) ? toNumber(row[humanAvgCol]) : NaN,
+          capAvg: (capAvgCol>=0) ? toNumber(row[capAvgCol]) : NaN,
+        });
+      }
+    }
   }
 
+  // 4°C：線別達成率平均（人時性/產能）
+  // 來源：晉欣4度C分頁右側區塊（合併儲存格：需 merge-aware 讀值）
+  // - 人時性差異分析：達成率平均（左側 "達成率平均" 欄）
+  // - 產能差異分析：達成率平均（右側 "達成率平均" 欄）
+  if(temp === "4"){
+    const arr = extractLineAveragesFromSheet(ws);
+    for(const it of arr){
+      if(!it || !it.line) continue;
+      const humanAvg = (it.humanAvg === null || it.humanAvg === undefined) ? NaN : it.humanAvg;
+      const capAvg   = (it.capAvg   === null || it.capAvg   === undefined) ? NaN : it.capAvg;
 
-  // 線別達成率平均（人時性/產能）：以日分頁右側「線別」表格中的兩個「達成率平均」為準
-  // - 第一個「達成率平均」：人時性達成率平均（例如 S）
-  // - 第二個「達成率平均」：產能達成率平均（例如 AH；若不存在則顯示 —）
-  (function parseLineAvgBlock(){
-    const MAX_R = Math.min(grid.length, 160);
-    let hdrR = -1;
-    let lineCol = -1;
-    let avgCols = [];
-
-    for(let rr=0; rr<MAX_R; rr++){
-      const row = grid[rr] || [];
-      const lc = row.findIndex(v => cleanText(v) === "線別");
-      const av = indexOfAllHeaderContains(row, "達成率平均");
-      if(lc >= 0 && av.length >= 1){
-        hdrR = rr;
-        lineCol = lc;
-        avgCols = av;
-        break;
-      }
-    }
-    if(hdrR < 0) return;
-
-    const humanCol = avgCols[0];
-    const capCol = (avgCols.length >= 2) ? avgCols[1] : -1;
-
-    let empty = 0;
-    for(let rr = hdrR + 1; rr < grid.length; rr++){
-      const row = grid[rr] || [];
-      const lineCell = cleanText(row[lineCol]);
-      if(!lineCell){
-        empty++;
-        if(empty >= 3) break;
-        continue;
-      }
-      empty = 0;
-
-      const line = displayLineName(lineCell);
-      const humanAvg = (humanCol >= 0) ? toNumber(row[humanCol]) : NaN;
-      const capAvg = (capCol >= 0) ? toNumber(row[capCol]) : NaN;
+      // 若有人時平均存在但產能缺失，仍先寫入（後續顯示以人時為準；產能在此邏輯中通常不會缺）
       if(!Number.isFinite(humanAvg) && !Number.isFinite(capAvg)) continue;
 
-      const lk = `${temp}|${dateKey}|${cleanKey(line)}`;
-      upsert(state.lineAvgFromSheets, lk, { mmdd: dateKey, temp, line, humanAvg, capAvg });
+      const lk = `4|${dateKey}|${cleanKey(it.line)}`;
+      upsert(state.lineAvgFromSheets, lk, { mmdd: dateKey, temp:"4", line: it.line, humanAvg, capAvg });
     }
-  })();
+  }
 }
+
 
 function parseDailySummarySheet(wb, sheetName, dateKey){
   const ws = wb.Sheets[sheetName];
@@ -1590,7 +1692,6 @@ function refreshSelectors(){
     for(const it of metrics){
       const opt = document.createElement("option");
       opt.value = it.k;
-      opt.dataset.disp = it.disp;
 
       // style: human-lowest 6 in red
       if(low6.has(it.k)){
@@ -1615,8 +1716,6 @@ function refreshSelectors(){
     lineSel.appendChild(opt);
     lineSel.disabled = true;
   }
-
-  updateLineSelectOptionLabels();
 
   // 18°C hide cap card
   $("capCard").classList.toggle("hidden", state.temp !== "4");
@@ -2824,71 +2923,39 @@ function getDateSetInSelection(){
   return new Set(items.map(x=>x.mmdd));
 }
 function calcLineHumanAvg(lineKey){
-  // 優先採用日分頁右側「達成率平均」（確保與卡片一致）；若該溫層日分頁沒有此區塊，才回退用 daily summary 的「達成率」。
+  // 以「達成率平均」為主（lineAvgFromSheets），確保與右側平均卡片一致；
+  // 若缺資料，才回退使用 daily summary 的「達成率」（lineHumanDaily）。
   const mmddSet = getDateSetInSelection();
   const vals = [];
   for(const mmdd of mmddSet){
     const key = `${state.temp}|${mmdd}|${lineKey}`;
     const recAvg = state.lineAvgFromSheets.get(key);
-    if(recAvg && Number.isFinite(toNumber(recAvg.humanAvg))) vals.push(toNumber(recAvg.humanAvg));
-  }
-  if(vals.length) return vals.reduce((a,b)=>a+b,0)/vals.length;
-
-  const vals2 = [];
-  for(const mmdd of mmddSet){
-    const key = `${state.temp}|${mmdd}|${lineKey}`;
+    if(recAvg && Number.isFinite(toNumber(recAvg.humanAvg))){
+      vals.push(toNumber(recAvg.humanAvg));
+      continue;
+    }
     const recRate = state.lineHumanDaily.get(key);
-    if(recRate && Number.isFinite(toNumber(recRate.rate))) vals2.push(toNumber(recRate.rate));
+    if(recRate && Number.isFinite(toNumber(recRate.rate))){
+      vals.push(toNumber(recRate.rate));
+    }
   }
-  return vals2.length ? vals2.reduce((a,b)=>a+b,0)/vals2.length : NaN;
+  return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : NaN;
 }
 function calcLineCapAvg(lineKey){
+  if(state.temp !== "4") return NaN;
   const mmddSet = getDateSetInSelection();
   const vals = [];
   for(const mmdd of mmddSet){
-    const key = `${state.temp}|${mmdd}|${lineKey}`;
+    const key = `4|${mmdd}|${lineKey}`;
     const recAvg = state.lineAvgFromSheets.get(key);
-    if(recAvg && Number.isFinite(toNumber(recAvg.capAvg))) vals.push(toNumber(recAvg.capAvg));
+    if(recAvg && Number.isFinite(toNumber(recAvg.capAvg))){
+      vals.push(toNumber(recAvg.capAvg));
+    }
   }
   return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : NaN;
 }
 
 
-
-
-
-function updateLineSelectOptionLabels(){
-  const lineSel = $("lineSelect");
-  if(!lineSel) return;
-  const opts = Array.from(lineSel.options).filter(o=>o && o.value);
-  if(!opts.length) return;
-
-  const metrics = opts.map(opt=>{
-    const k = opt.value;
-    const disp = opt.dataset.disp || (opt.textContent || "").replace(/（.*$/,"" ).trim();
-    const h = calcLineHumanAvg(k);
-    const c = calcLineCapAvg(k);
-    const hTxt = Number.isFinite(h) ? fmtPct(h) : "—";
-    const cTxt = Number.isFinite(c) ? fmtPct(c) : "—";
-    return {opt,k,disp,h,c,hTxt,cTxt};
-  });
-
-  const ranked = metrics.filter(x=>Number.isFinite(x.h)).sort((a,b)=>a.h-b.h);
-  const low6 = new Set(ranked.slice(0,6).map(x=>x.k));
-
-  for(const it of metrics){
-    const opt = it.opt;
-    const isLow = low6.has(it.k);
-    opt.style.color = isLow ? "#dc2626" : ""; // red-600
-    opt.style.fontWeight = isLow ? "700" : "";
-    opt.dataset.disp = it.disp;
-
-    // label (avoid long pipes)
-    // ex: 四度二組(ET-55)（人時 85.8%，產能 86.2%）
-    if(Number.isFinite(it.c)) opt.textContent = `${it.disp}（人時 ${it.hTxt}，產能 ${it.cTxt}）`;
-    else opt.textContent = `${it.disp}（人時 ${it.hTxt}）`;
-  }
-}
 /* =========================
    Active Group (品群) → 產品跳轉
 ========================= */
@@ -3730,7 +3797,6 @@ function refreshAll(){
   const wms = $("weekMonthSelect"); if(wms) wms.value = String(state.month);
   refreshActiveRangeText();
   refreshKpiCards();
-  updateLineSelectOptionLabels();
   refreshLineSection();
   buildProdIndex();
   renderLowestRatePanel();
