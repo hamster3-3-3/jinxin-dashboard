@@ -393,8 +393,7 @@
       </div>
 
       <div class="divider"></div>
-
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
         <div>
           <label class="label block mb-2">品類</label>
           <select id="catSelect" class="select" disabled></select>
@@ -403,12 +402,15 @@
           <label class="label block mb-2">品名</label>
           <select id="prodSelect" class="select" disabled></select>
         </div>
+        <div>
+          <label class="label block mb-2">上市日期</label>
+          <div id="prodLaunchDate" class="select bg-slate-50" style="display:flex;align-items:center;min-height:42px;">—</div>
+        </div>
         <div class="flex items-end">
           <button id="resetDrillBtn" class="btn" disabled>清除選項</button>
         </div>
       </div>
-
-      <div id="prodDetails" class="hidden">
+<div id="prodDetails" class="hidden">
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-2">
           <div class="card">
             <div class="font-extrabold text-slate-900">營運指標</div>
@@ -1790,23 +1792,54 @@ function getNewProductAnchorMonthEndUTC(){
 }
 
 function countMonthlyNewProducts(prodSet){
-  if(!prodSet || !prodSet.forEach) return 0;
+  // Backward-compatible: counts new products vs current anchor month-end
+  return countNewProductsByAnchor(prodSet, getNewProductAnchorMonthEndUTC());
+}
+
+function getPrevNewProductAnchorMonthEndUTC(){
   const anchor = getNewProductAnchorMonthEndUTC();
-  if(!(anchor instanceof Date) || isNaN(anchor)) return 0;
+  if(!(anchor instanceof Date) || isNaN(anchor)) return null;
+  const y = anchor.getUTCFullYear();
+  const m = anchor.getUTCMonth() + 1; // 1..12 (anchor is month-end)
+  // previous month end: Date.UTC(y, m-1, 0)
+  return new Date(Date.UTC(y, m-1, 0));
+}
+
+function isNewProductByAnchor(prodName, anchor){
+  if(!prodName) return false;
+  if(!(anchor instanceof Date) || isNaN(anchor)) return false;
+  const info = getLaunchDateInfoForProd(prodName);
+  if(!info || !(info.date instanceof Date) || isNaN(info.date)) return false;
 
   const anchorUtc = Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), anchor.getUTCDate());
+  const launchUtc = Date.UTC(info.date.getUTCFullYear(), info.date.getUTCMonth(), info.date.getUTCDate());
+  const diff = Math.floor((anchorUtc - launchUtc) / 86400000);
+  return (diff >= 0 && diff < 30);
+}
+
+function countNewProductsByAnchor(prodSet, anchor){
+  if(!prodSet || !prodSet.forEach) return 0;
+  if(!(anchor instanceof Date) || isNaN(anchor)) return 0;
   let n = 0;
-
-  // 新品定義：月底 - 上市日 < 30（且不可為負，避免未上市被算進來）
-  prodSet.forEach((prodName)=>{
-    const info = getLaunchDateInfoForProd(prodName);
-    if(!info || !(info.date instanceof Date) || isNaN(info.date)) return;
-    const launchUtc = Date.UTC(info.date.getUTCFullYear(), info.date.getUTCMonth(), info.date.getUTCDate());
-    const diff = Math.floor((anchorUtc - launchUtc) / 86400000);
-    if(diff >= 0 && diff < 30) n += 1;
-  });
-
+  prodSet.forEach((prodName)=>{ if(isNewProductByAnchor(prodName, anchor)) n += 1; });
   return n;
+}
+
+function markOptionAsNew(optEl, prodName, anchor){
+  if(!optEl) return;
+  const a = anchor || getNewProductAnchorMonthEndUTC();
+  if(isNewProductByAnchor(prodName, a)){
+    optEl.style.color = "#dc2626"; // red-600
+    optEl.style.fontWeight = "800";
+  }
+}
+
+function setProdLaunchDateDisplay(prodName){
+  const el = $("prodLaunchDate");
+  if(!el) return;
+  if(!prodName){ el.textContent = "—"; return; }
+  const info = getLaunchDateInfoForProd(prodName);
+  el.textContent = (info && info.str) ? info.str : "—";
 }
 
 function refreshActiveCatCounts(){
@@ -1870,10 +1903,13 @@ function refreshActiveCatCounts(){
   }
 
   // Render each category as a mini card (clickable)
+  const __anchorCur = getNewProductAnchorMonthEndUTC();
+  const __anchorPrev = getPrevNewProductAnchorMonthEndUTC();
   const frag = document.createDocumentFragment();
   for(const x of arr){
     const d = document.createElement("div");
-    const __newCnt = countMonthlyNewProducts(map.get(x.cat));
+    const __newCnt = countNewProductsByAnchor(map.get(x.cat), __anchorCur);
+    const __prevNewCnt = countNewProductsByAnchor(map.get(x.cat), __anchorPrev);
 
     d.className = "relative rounded-2xl border border-slate-200 bg-white p-3 shadow-sm hover:bg-slate-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500";
     d.tabIndex = 0;
@@ -1882,7 +1918,10 @@ function refreshActiveCatCounts(){
     d.innerHTML = `
       <div class="text-slate-900 font-extrabold truncate pr-16">${escapeHtml(x.cat)}</div>
       <div class="text-slate-500 text-sm font-bold mt-1">${x.n} 種</div>
-      <div class="absolute bottom-2 right-2 text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5">當月新品 <span class="text-slate-900">${__newCnt}</span></div>
+      <div class="absolute bottom-2 right-2 flex flex-col items-end gap-1">
+        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5">當月新品 <span class="text-slate-900">${__newCnt}</span></div>
+        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5">前月新品 <span class="text-slate-900">${__prevNewCnt}</span></div>
+      </div>
     `;
     const onPick = ()=> selectActiveGroup(x.cat);
     d.addEventListener("click", onPick);
@@ -2838,6 +2877,7 @@ function selectActiveGroup(catName){
   if(nameEl) nameEl.textContent = catName || "—";
   if(!sel) return;
 
+  const __anchorCurSel = getNewProductAnchorMonthEndUTC();
   const prods = catName ? listProductsForGroup(catName) : [];
   sel.innerHTML = "";
   if(!catName){
@@ -2862,6 +2902,7 @@ function selectActiveGroup(catName){
       const opt = document.createElement("option");
       opt.value = p;
       opt.textContent = p;
+      markOptionAsNew(opt, p, __anchorCurSel);
       sel.appendChild(opt);
     }
   }
@@ -3024,6 +3065,7 @@ function selectLineGroup(catName, opts={}){
   if(nameEl) nameEl.textContent = catName || "—";
   if(!sel) return;
 
+  const __anchorCurSel = getNewProductAnchorMonthEndUTC();
   const prods = (catName && lineKey) ? listProductsForGroup(catName, lineKey) : [];
   sel.innerHTML = "";
 
@@ -3046,6 +3088,7 @@ function selectLineGroup(catName, opts={}){
       const opt = document.createElement("option");
       opt.value = p;
       opt.textContent = p;
+      markOptionAsNew(opt, p, __anchorCurSel);
       sel.appendChild(opt);
     }
   }
@@ -3091,7 +3134,8 @@ function refreshLineSection(){
   $("resetDrillBtn").disabled = true;
   $("prodDetails").classList.add("hidden");
 
-  $("lineHumanAvg").textContent = "—";  $("lineCapAvg").textContent = "—";  if(!lineKey){
+  $("lineHumanAvg").textContent = "—";  $("lineCapAvg").textContent = "—";  setProdLaunchDateDisplay("");
+  if(!lineKey){
     $("catSelect").innerHTML = "";
     $("prodSelect").innerHTML = "";
     return;
@@ -3144,6 +3188,7 @@ function refreshProductSelect(){
   const prodSel = $("prodSelect");
   prodSel.innerHTML = "";
   $("prodDetails").classList.add("hidden");
+  setProdLaunchDateDisplay("");
 
   if(!lineKey || !catKey){ prodSel.disabled = true; return; }
 
@@ -3157,6 +3202,7 @@ function refreshProductSelect(){
     const pk = cleanKey(rec.product);
     if(!prods.has(pk)) prods.set(pk, cleanText(rec.product));
   }
+  const __anchorCurSel = getNewProductAnchorMonthEndUTC();
   if(prods.size){
     prodSel.disabled = false;
     const opt0 = document.createElement("option");
@@ -3167,6 +3213,7 @@ function refreshProductSelect(){
       const opt = document.createElement("option");
       opt.value = pk;
       opt.textContent = disp;
+      markOptionAsNew(opt, disp, __anchorCurSel);
       prodSel.appendChild(opt);
     }
   }else{
@@ -3182,7 +3229,10 @@ function refreshProductDetails(){
   const lineKey = $("lineSelect").value || "";
   const catKey = $("catSelect").value || "";
   const prodKey = $("prodSelect").value || "";
-  if(!lineKey || !catKey || !prodKey){ $("prodDetails").classList.add("hidden"); destroyProdChart(); return; }
+  if(!lineKey || !catKey || !prodKey){ $("prodDetails").classList.add("hidden"); destroyProdChart(); setProdLaunchDateDisplay(""); return; }
+
+  const _dispProd = $("prodSelect")?.selectedOptions?.[0]?.textContent || "";
+  setProdLaunchDateDisplay(_dispProd);
 
   const mmddSet = getDateSetInSelection();
   const rows = [];
@@ -3775,6 +3825,7 @@ $("lineSelect").addEventListener("change", ()=>{
   $("prodSelect").value = "";
   const _ps = $("prodSearch"); if(_ps){ _ps.value=""; }
   hideProdSuggest();
+  setProdLaunchDateDisplay("");
   refreshLineSection();
   buildProdIndex();
 });
@@ -3782,6 +3833,7 @@ $("catSelect").addEventListener("change", ()=>{
   $("prodSelect").value = "";
   const _ps = $("prodSearch"); if(_ps){ _ps.value=""; }
   hideProdSuggest();
+  setProdLaunchDateDisplay("");
   refreshProductSelect();
   refreshProductDetails();
 });
@@ -3821,6 +3873,7 @@ $("lineSelect").value = "";
   $("prodSelect").disabled = true;
   $("resetDrillBtn").disabled = true;
   $("prodDetails").classList.add("hidden");
+  setProdLaunchDateDisplay("");
   $("lineHumanAvg").textContent = "—";  $("lineCapAvg").textContent = "—";});
 
 (async function init(){
@@ -3853,6 +3906,8 @@ setActiveSeg("range", state.rangeMode);
 
   refreshAll();
   await loadDevConfirmFromRepo();
+  // Dev confirm loaded: refresh to update 新品數/紅字/上市日顯示
+  try{ refreshAll(); }catch(e){}
   await preload(); // 自動載入 2025/07~2025/11
 })();
 </script>
