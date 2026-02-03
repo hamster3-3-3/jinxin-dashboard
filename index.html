@@ -1568,19 +1568,32 @@ function refreshSelectors(){
     opt0.value = "";
     opt0.textContent = "請選擇線別";
     lineSel.appendChild(opt0);
-    for(const [k, disp] of arr){
-      const opt = document.createElement("option");
-      opt.value = k;
-
-      // 在線別清單中顯示該線別於「當前範圍」的人時/產能達成率平均（方便直接比對）
+    // precompute per-line averages for display + ranking (人時最低六名紅字)
+    const metrics = arr.map(([k, disp])=>{
       const h = calcLineHumanAvg(k);
       const c = calcLineCapAvg(k);
       const hTxt = Number.isFinite(h) ? fmtPct(h) : "—";
       const cTxt = (state.temp === "4" && Number.isFinite(c)) ? fmtPct(c) : "—";
+      return {k, disp, h, c, hTxt, cTxt};
+    });
+    const ranked = metrics.filter(x=>Number.isFinite(x.h)).sort((a,b)=>a.h-b.h);
+    const low6 = new Set(ranked.slice(0,6).map(x=>x.k));
 
+    for(const it of metrics){
+      const opt = document.createElement("option");
+      opt.value = it.k;
+
+      // style: human-lowest 6 in red
+      if(low6.has(it.k)){
+        opt.style.color = "#dc2626";       // tailwind red-600
+        opt.style.fontWeight = "700";
+      }
+
+      // nicer label (avoid long pipes)
+      // ex: 四度二組(ET-55)（人時 85.8%，產能 86.2%）
       opt.textContent = (state.temp === "4")
-        ? `${disp} ｜ 人時 ${hTxt} ｜ 產能 ${cTxt}`
-        : `${disp} ｜ 人時 ${hTxt}`;
+        ? `${it.disp}（人時 ${it.hTxt}，產能 ${it.cTxt}）`
+        : `${it.disp}（人時 ${it.hTxt}）`;
 
       lineSel.appendChild(opt);
     }
@@ -2800,17 +2813,21 @@ function getDateSetInSelection(){
   return new Set(items.map(x=>x.mmdd));
 }
 function calcLineHumanAvg(lineKey){
+  // 以「達成率平均」為主（lineAvgFromSheets），確保與右側平均卡片一致；
+  // 若缺資料，才回退使用 daily summary 的「達成率」（lineHumanDaily）。
   const mmddSet = getDateSetInSelection();
   const vals = [];
   for(const mmdd of mmddSet){
     const key = `${state.temp}|${mmdd}|${lineKey}`;
-    const rec = state.lineHumanDaily.get(key);
-    if(rec && Number.isFinite(toNumber(rec.rate))){
-      vals.push(toNumber(rec.rate));
+    const recAvg = state.lineAvgFromSheets.get(key);
+    if(recAvg && Number.isFinite(toNumber(recAvg.humanAvg))){
+      vals.push(toNumber(recAvg.humanAvg));
       continue;
     }
-    const rec2 = state.lineAvgFromSheets.get(key);
-    if(rec2 && Number.isFinite(toNumber(rec2.humanAvg))) vals.push(toNumber(rec2.humanAvg));
+    const recRate = state.lineHumanDaily.get(key);
+    if(recRate && Number.isFinite(toNumber(recRate.rate))){
+      vals.push(toNumber(recRate.rate));
+    }
   }
   return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : NaN;
 }
@@ -2820,8 +2837,10 @@ function calcLineCapAvg(lineKey){
   const vals = [];
   for(const mmdd of mmddSet){
     const key = `4|${mmdd}|${lineKey}`;
-    const rec = state.lineAvgFromSheets.get(key);
-    if(rec && Number.isFinite(toNumber(rec.capAvg))) vals.push(toNumber(rec.capAvg));
+    const recAvg = state.lineAvgFromSheets.get(key);
+    if(recAvg && Number.isFinite(toNumber(recAvg.capAvg))){
+      vals.push(toNumber(recAvg.capAvg));
+    }
   }
   return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : NaN;
 }
