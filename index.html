@@ -814,7 +814,7 @@ async function loadDevConfirmFromRepo(){
 
 
 function escapeHtml(s){
-  return cleanText(s).replace(/[&<>"']/g, (c)=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  return cleanText(s).replace(/[&<>"']/g, (c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",""":"&quot;","'":"&#39;"}[c]));
 }
 
 function toNumber(v){
@@ -1387,7 +1387,11 @@ async function handleFiles(files){
   setDataChip("warn", "解析中…");
   for(const file of Array.from(files)){
     const buf = await file.arrayBuffer();
-    await parseWorkbookArrayBuffer(buf, file.name);
+    if((file.name && (DEV_CONFIRM_HINT_RE.test(file.name) || file.name === DEV_CONFIRM_FILENAME))){
+      await parseDevConfirmArrayBuffer(buf);
+    }else{
+      await parseWorkbookArrayBuffer(buf, file.name);
+    }
   }
   rebuildAvailableMmdd();
   refreshSelectors();
@@ -1743,6 +1747,68 @@ function refreshActiveRangeText(){
   refreshActiveCatCounts();
 }
 
+
+// ===== 新品（當月新品數）計算 =====
+function getNewProductAnchorMonthEndUTC(){
+  // 依你定義：以「選擇的時間範圍所屬月份」的最後一天作為基準日
+  // - 月別：直接用 state.year/state.month
+  // - 週別/日別/指定範圍：取目前範圍的『結束日』所在月份，計算該月月底
+  const mode = state.rangeMode;
+  const dr = getActiveDayRange();
+
+  // 年別：用該年 12/31
+  if(mode === 'year'){
+    return new Date(Date.UTC(state.year, 12, 0));
+  }
+
+  // 若月別本身
+  if(mode === 'month'){
+    return new Date(Date.UTC(state.year, state.month, 0));
+  }
+
+  // 其餘：以範圍結束日的月份月底
+  let end = null;
+
+  // 若有指定範圍（不論在哪個視圖），以指定範圍的 end 為準
+  if(dr && dr.endStr){
+    end = new Date(dr.endStr + 'T00:00:00Z');
+  }else if(mode === 'week' && state.weekStartStr){
+    const ws = new Date(state.weekStartStr + 'T00:00:00Z');
+    end = addDaysUTC(ws, 6);
+  }else if(mode === 'day' && state.dayStr){
+    end = new Date(state.dayStr + 'T00:00:00Z');
+  }
+
+  if(!(end instanceof Date) || isNaN(end)){
+    // fallback：仍以 state.year/state.month
+    return new Date(Date.UTC(state.year, state.month, 0));
+  }
+
+  const y = end.getUTCFullYear();
+  const m = end.getUTCMonth() + 1;
+  return new Date(Date.UTC(y, m, 0));
+}
+
+function countMonthlyNewProducts(prodSet){
+  if(!prodSet || !prodSet.forEach) return 0;
+  const anchor = getNewProductAnchorMonthEndUTC();
+  if(!(anchor instanceof Date) || isNaN(anchor)) return 0;
+
+  const anchorUtc = Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), anchor.getUTCDate());
+  let n = 0;
+
+  // 新品定義：月底 - 上市日 < 30（且不可為負，避免未上市被算進來）
+  prodSet.forEach((prodName)=>{
+    const info = getLaunchDateInfoForProd(prodName);
+    if(!info || !(info.date instanceof Date) || isNaN(info.date)) return;
+    const launchUtc = Date.UTC(info.date.getUTCFullYear(), info.date.getUTCMonth(), info.date.getUTCDate());
+    const diff = Math.floor((anchorUtc - launchUtc) / 86400000);
+    if(diff >= 0 && diff < 30) n += 1;
+  });
+
+  return n;
+}
+
 function refreshActiveCatCounts(){
   const wrap = $("activeCatCards");
   const meta = $("activeCatMeta");
@@ -1807,13 +1873,16 @@ function refreshActiveCatCounts(){
   const frag = document.createDocumentFragment();
   for(const x of arr){
     const d = document.createElement("div");
-    d.className = "rounded-2xl border border-slate-200 bg-white p-3 shadow-sm hover:bg-slate-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500";
+    const __newCnt = countMonthlyNewProducts(map.get(x.cat));
+
+    d.className = "relative rounded-2xl border border-slate-200 bg-white p-3 shadow-sm hover:bg-slate-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500";
     d.tabIndex = 0;
     d.setAttribute("role","button");
     d.setAttribute("aria-label", `選擇品群：${x.cat}`);
     d.innerHTML = `
-      <div class="text-slate-900 font-extrabold truncate">${escapeHtml(x.cat)}</div>
+      <div class="text-slate-900 font-extrabold truncate pr-16">${escapeHtml(x.cat)}</div>
       <div class="text-slate-500 text-sm font-bold mt-1">${x.n} 種</div>
+      <div class="absolute bottom-2 right-2 text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5">當月新品 <span class="text-slate-900">${__newCnt}</span></div>
     `;
     const onPick = ()=> selectActiveGroup(x.cat);
     d.addEventListener("click", onPick);
@@ -2799,7 +2868,6 @@ function selectActiveGroup(catName){
 
   if(panel){
     panel.classList.remove("hidden");
-    panel.scrollIntoView({behavior:"smooth", block:"start"});
   }
 }
 
@@ -2985,7 +3053,6 @@ function selectLineGroup(catName, opts={}){
   if(panel){
     panel.classList.remove("hidden");
     if(!opts.skipScroll){
-      panel.scrollIntoView({behavior:"smooth", block:"start"});
     }
   }
 }
