@@ -698,8 +698,9 @@ function cleanText(v){
   return String(v).replace(/\u00a0/g," ").replace(/\s+/g," ").trim();
 }
 function cleanKey(v){ return cleanText(v).replace(/\s+/g,""); }
-// === 線別白名單（只顯示以下線別；其餘移除） ===
-const LINE_WHITELIST = [
+// === 線別白名單（依溫層分開；其餘移除） ===
+// 4°C 線別白名單
+const LINE_WHITELIST_4C = [
   "四度一組 (ET-600)",
   "四度二組A 熱麵 固定線 (ET-55)",
   "四度二組 (ET-55)",
@@ -714,7 +715,26 @@ const LINE_WHITELIST = [
   "綜合四組",
   "便當組 大口 固定線 (伺服包裝機)",
 ];
-const LINE_WHITELIST_KEYS = new Set(LINE_WHITELIST.map(s=>cleanKey(s)));
+
+// 18°C 線別白名單（依你提供的名單）
+const LINE_WHITELIST_18C = [
+  "壽司線",
+  "捲壽司機",
+  "3300型 飯糰機A",
+  "3300型B 飯糰機",
+  "3600型(A) 飯糰機",
+  "3600型(B) 飯糰機",
+  "二配 夾心型 飯糰機",
+  "二配 3300型A 飯糰機",
+  "二配 3300型B 飯糰機",
+  "二配 3600型A 飯糰機",
+  "二配 3600型B 飯糰機",
+];
+
+function getLineWhitelistByTemp(tempStr){
+  return tempStr === "18" ? LINE_WHITELIST_18C : LINE_WHITELIST_4C;
+}
+
 
 
 function normalizeProdName(v){
@@ -1738,7 +1758,7 @@ function refreshSelectors(){
   // 建立線別清單（先收集，再依白名單順序輸出）
   const arrAll = Array.from(lines.entries()).map(([k,v])=>[k, displayLineName(v)]);
   const dispMap = new Map(arrAll); // k -> display
-  const arr = LINE_WHITELIST
+  const arr = getLineWhitelistByTemp(state.temp)
     .map(name=>cleanKey(name))
     .filter(k=>dispMap.has(k))
     .map(k=>[k, dispMap.get(k)]);
