@@ -889,6 +889,16 @@ function toNumber(v){
   const n = Number(s);
   return Number.isFinite(n) ? n : NaN;
 }
+
+// 若分頁同時有「標準/實際」兩組欄位（4°C常見），可用 實際/標準 推得達成率
+function _calcAchFromStdAct(idxStd, idxAct, row){
+  if(idxStd<0 || idxAct<0) return NaN;
+  const std = toNumber(row[idxStd]);
+  const act = toNumber(row[idxAct]);
+  if(!Number.isFinite(std) || std<=0) return NaN;
+  if(!Number.isFinite(act)) return NaN;
+  return act / std;
+}
 function fmtInt(n){ if(!Number.isFinite(n)) return "—"; return Math.round(n).toLocaleString("zh-Hant-TW"); }
 function fmtMoney(n){ if(!Number.isFinite(n)) return "—"; return Math.round(n).toLocaleString("zh-Hant-TW"); }
 function fmtDec(n, d=2){ if(!Number.isFinite(n)) return "—"; return n.toFixed(d); }
@@ -1005,6 +1015,66 @@ function rebuildAvailableMmdd(){
     state.availableMmdd.add(parts[1]);
   }
 }
+
+// 補齊達成率：
+// 1) 若原始資料沒有達成率欄位，先嘗試用（實際/標準）推算（已在 parse 中處理）
+// 2) 若仍無，則以「同日同溫層同線別」的人時性/產能做相對化（eff 或 cap / 該線別平均）
+//    目的：讓「最低人時/產能達成率（前六）」在 18°C 分頁仍可正常顯示
+function fillFallbackAchievements(){
+  const base = new Map(); // key=temp|mmdd|lineKey -> {effSum, effCnt, capSum, capCnt}
+
+  for(const rec of state.records.values()){
+    if(!rec) continue;
+    const prod = cleanText(rec.product||"");
+    if(!prod || /(平均|合計|小計|總計)/.test(prod)) continue;
+
+    const lineKey = cleanKey(rec.line);
+    if(!lineKey) continue;
+
+    const key = `${rec.temp}|${rec.mmdd}|${lineKey}`;
+    if(!base.has(key)) base.set(key, {effSum:0, effCnt:0, capSum:0, capCnt:0});
+
+    const b = base.get(key);
+
+    const eff = _safeNum(rec.eff);
+    if(Number.isFinite(eff) && eff>0){
+      b.effSum += eff; b.effCnt += 1;
+    }
+    const cap = _safeNum(rec.cap);
+    if(Number.isFinite(cap) && cap>0){
+      b.capSum += cap; b.capCnt += 1;
+    }
+  }
+
+  for(const rec of state.records.values()){
+    if(!rec) continue;
+    const prod = cleanText(rec.product||"");
+    if(!prod || /(平均|合計|小計|總計)/.test(prod)) continue;
+
+    const lineKey = cleanKey(rec.line);
+    if(!lineKey) continue;
+
+    const key = `${rec.temp}|${rec.mmdd}|${lineKey}`;
+    const b = base.get(key);
+    if(!b) continue;
+
+    const baseEff = (b.effCnt>0) ? (b.effSum / b.effCnt) : NaN;
+    const baseCap = (b.capCnt>0) ? (b.capSum / b.capCnt) : NaN;
+
+    if(!Number.isFinite(rec.humanAch)){
+      const eff = _safeNum(rec.eff);
+      if(Number.isFinite(eff) && Number.isFinite(baseEff) && baseEff>0){
+        rec.humanAch = eff / baseEff;
+      }
+    }
+    if(!Number.isFinite(rec.capAch)){
+      const cap = _safeNum(rec.cap);
+      if(Number.isFinite(cap) && Number.isFinite(baseCap) && baseCap>0){
+        rec.capAch = cap / baseCap;
+      }
+    }
+  }
+}
 function getAllDatesForTemp(temp){
   const out = [];
   const y = String(state.year);
@@ -1116,15 +1186,26 @@ function parseTempSheet(wb, sheetName, temp, dateKey){
   const idxPeopleList = indexOfAllHeaderContains(header, "人數");
   const idxCapList = indexOfAllHeaderContains(header, "產能/時");
   const idxEffList = indexOfAllHeaderContains(header, "人時性");
-  const idxPeople = (idxPeopleList.length>=2) ? idxPeopleList[1] : (idxPeopleList[0] ?? -1);
-  const idxCap = (idxCapList.length>=2) ? idxCapList[1] : (idxCapList[0] ?? -1);
-  const idxEff = (idxEffList.length>=2) ? idxEffList[1] : (idxEffList[0] ?? -1);
+
+  // 有些 4°C 分頁會出現「標準」與「實際」兩組（人數/產能/時/人時性 重複兩次）
+  const idxPeopleStd = (idxPeopleList.length>=2) ? idxPeopleList[0] : -1;
+  const idxCapStd    = (idxCapList.length>=2) ? idxCapList[0] : -1;
+  const idxEffStd    = (idxEffList.length>=2) ? idxEffList[0] : -1;
+
+  const idxPeopleAct = (idxPeopleList.length>=2) ? idxPeopleList[1] : (idxPeopleList[0] ?? -1);
+  const idxCapAct    = (idxCapList.length>=2) ? idxCapList[1] : (idxCapList[0] ?? -1);
+  const idxEffAct    = (idxEffList.length>=2) ? idxEffList[1] : (idxEffList[0] ?? -1);
+
+  // 對外仍以「實際」為主（若只有一組，就等同該組）
+  const idxPeople = idxPeopleAct;
+  const idxCap = idxCapAct;
+  const idxEff = idxEffAct;
 
   const idxProdTime = indexOfHeaderContains(header, "生產時間");
   const idxChange = indexOfHeaderContains(header, "換線/分");
   const idxRun = indexOfHeaderContains(header, "稼動時間/分");
 
-  // 達成率欄位：通常同時包含「人時性達成率」與（4°C）「產能達成率」
+  // 達成率欄位（若有）：通常同時包含「人時性達成率」與（4°C）「產能達成率」
   const _achCols = indexOfAllHeaderContains(header, "達成率");
   const idxHumanAch = _achCols.length ? _achCols[0] : -1;
   const idxCapAch = (temp === "4") ? (_achCols.length ? _achCols[_achCols.length-1] : -1) : -1;
@@ -1167,8 +1248,8 @@ function parseTempSheet(wb, sheetName, temp, dateKey){
       prodEnd: (idxProdTime>=0) ? row[idxProdTime+1] : null,
       changeMin: (idxChange>=0) ? toNumber(row[idxChange]) : NaN,
       runMin: (idxRun>=0) ? toNumber(row[idxRun]) : NaN,
-      humanAch: (idxHumanAch>=0) ? toNumber(row[idxHumanAch]) : NaN,
-      capAch: (idxCapAch>=0) ? toNumber(row[idxCapAch]) : NaN
+      humanAch: (idxHumanAch>=0) ? toNumber(row[idxHumanAch]) : _calcAchFromStdAct(idxEffStd, idxEffAct, row),
+      capAch: (idxCapAch>=0) ? toNumber(row[idxCapAch]) : _calcAchFromStdAct(idxCapStd, idxCapAct, row)
     };
 
     
@@ -1466,6 +1547,10 @@ setDataChip("warn", "自動載入中…");
       fail++;
     }
   }
+
+  // 補齊達成率（避免 18°C 分頁缺少達成率欄位導致「低達成率品項」空白）
+  fillFallbackAchievements();
+
 rebuildAvailableMmdd();
   refreshSelectors();
   setupProdSearch();
