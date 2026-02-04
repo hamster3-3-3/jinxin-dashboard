@@ -1008,11 +1008,21 @@ function rebuildAvailableMmdd(){
 function getAllDatesForTemp(temp){
   const out = [];
   const y = String(state.year);
-  for(const dk of state.availableMmdd){
+
+  // 只取「該溫層」真正有 summary 的日期，避免 18°C/4°C 日期集合混在一起造成：
+  // - 18°C 週別選到但其實那週沒有 18°C 資料（顯示全空）
+  // - 週別下拉無法正常建立（因為過濾後為空）
+  for(const k of state.summaries.keys()){
+    const parts = String(k).split("|"); // temp|YYYYMMDD
+    if(parts.length < 2) continue;
+    const t = parts[0];
+    const dk = parts[1];
+    if(String(t) !== String(temp)) continue;
     if(!String(dk).startsWith(y)) continue;
     const d = dateKeyToDateObj(dk);
     if(d) out.push({mmdd:dk, dateObj:d, dateStr:dateObjToStr(d)});
   }
+
   out.sort((a,b)=>a.dateObj-b.dateObj);
   return out;
 }
