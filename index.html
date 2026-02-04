@@ -77,31 +77,7 @@
         <span id="fileProtoHint" class="block mt-1 text-amber-600 font-bold"></span>
       </div>
 
-      
-      <div id="ghConfigBox" class="mt-3 hidden p-4 rounded-2xl border border-slate-200 bg-white">
-        <div class="font-extrabold text-slate-900">GitHub 來源設定（file:// 或需要指定 repo 時）</div>
-        <div class="hint mt-1">若你是用 GitHub Pages 開啟通常不需要。當以檔案方式（file://）開啟、或需要指定不同 repo/branch 時，請在此填入後按「儲存並重新載入」。</div>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mt-3">
-          <div>
-            <div class="text-slate-600 text-sm font-bold mb-1">Owner</div>
-            <input id="ghOwnerInput" class="select" placeholder="hamster3-3-3" />
-          </div>
-          <div>
-            <div class="text-slate-600 text-sm font-bold mb-1">Repo</div>
-            <input id="ghRepoInput" class="select" placeholder="你的 repo 名稱" />
-          </div>
-          <div>
-            <div class="text-slate-600 text-sm font-bold mb-1">Branch</div>
-            <input id="ghBranchInput" class="select" placeholder="main" />
-          </div>
-        </div>
-        <div class="flex flex-wrap gap-2 mt-3">
-          <button id="ghSaveReloadBtn" class="btn primary" type="button">儲存並重新載入</button>
-          <button id="ghClearCfgBtn" class="btn" type="button">清除設定</button>
-        </div>
-        <div class="hint mt-2">也可直接用網址參數：<span class="font-mono">?owner=...&repo=...&branch=...</span> 或 <span class="font-mono">?gh=owner/repo@branch</span>（branch 可省略）。</div>
-      </div>
-<ul class="mt-3 list-disc ml-5 text-slate-800 font-semibold" id="preloadList"></ul>
+      <ul class="mt-3 list-disc ml-5 text-slate-800 font-semibold" id="preloadList"></ul>
 
       <details class="mt-4">
         <summary class="cursor-pointer font-extrabold text-slate-900">進階：手動匯入追加（平常不需要）</summary>
@@ -549,14 +525,11 @@ function loadScriptOnce(src){
 }
 async function ensureXLSX(){
   if(window.XLSX) return true;
-  const isFile = (location.protocol === "file:" || (new URL(location.href)).origin === "null");
-  const localFirst = !isFile; // file:// 下避免先嘗試本地，減少 ERR_FILE_NOT_FOUND 的誤導
-  const sourcesLocal = ["./xlsx.full.min.js"];
-  const sourcesCdn = [
+  const sources = [
+    "./xlsx.full.min.js",
     "https://cdn.jsdelivr.net/npm/xlsx@0.19.3/dist/xlsx.full.min.js",
     "https://unpkg.com/xlsx@0.19.3/dist/xlsx.full.min.js"
   ];
-  const sources = localFirst ? [...sourcesLocal, ...sourcesCdn] : [...sourcesCdn, ...sourcesLocal];
   for(const src of sources){
     try{
       await loadScriptOnce(src);
@@ -567,14 +540,11 @@ async function ensureXLSX(){
 }
 async function ensureChart(){
   if(window.Chart) return true;
-  const isFile = (location.protocol === "file:" || (new URL(location.href)).origin === "null");
-  const localFirst = !isFile;
-  const sourcesLocal = ["./chart.umd.min.js"];
-  const sourcesCdn = [
+  const sources = [
+    "./chart.umd.min.js",
     "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js",
     "https://unpkg.com/chart.js@4.4.1/dist/chart.umd.min.js"
   ];
-  const sources = localFirst ? [...sourcesLocal, ...sourcesCdn] : [...sourcesCdn, ...sourcesLocal];
   for(const src of sources){
     try{
       await loadScriptOnce(src);
@@ -603,14 +573,6 @@ const PRELOAD_FILES = [
   "115.01.01-05晉欣廠生產日報表.xlsx",
 ];
 
-
-/* =========================
-   Manifest.json 自動載入（推薦｜對應你圖二的方式）
-   - 若 repo 中有 /data/manifest.json（或在網址帶 ?manifest=...），本頁會優先依 manifest.json 的 files 清單載入 Excel
-   - 目的：避免 GitHub Contents API / raw 下載在部分環境下遇到 CORS、rate limit、或路徑編碼問題
-========================= */
-const MANIFEST_AUTOLOAD = true;
-const MANIFEST_CANDIDATES = ["./manifest.json", "./data/manifest.json"];
 /* =========================
    GitHub Repo 自動偵測與檔案清單（建議：不必每次手動改 PRELOAD_FILES）
    - 會先嘗試用 GitHub Contents API 掃描 .xlsx
@@ -625,230 +587,260 @@ const GITHUB_DIR_CANDIDATES = ["", "repo", "data", "excel", "xlsx"];
 
 const DEV_CONFIRM_FILENAME = "2025-2026鮮食開發確認表.xlsx";
 const DEV_CONFIRM_HINT_RE = /鮮食開發確認表/i;
-
-const GH_CFG_STORAGE_KEYS = { owner: "gh_owner", repo: "gh_repo", branch: "gh_branch" };
-
-function _readGhFromQuery(){
-  const p = new URLSearchParams(location.search);
-  const gh = (p.get("gh") || "").trim();
-  if(gh){
-    const m = gh.match(/^([^\/]+)\/([^@]+)(?:@(.+))?$/);
-    if(m){
-      return { owner: (m[1]||"").trim(), repo: (m[2]||"").trim(), branch: (m[3]||"").trim() };
-    }
-  }
-  const owner = (p.get("owner") || "").trim();
-  const repo  = (p.get("repo")  || "").trim();
-  const branch = (p.get("branch") || "").trim();
-  if(owner || repo || branch) return { owner, repo, branch };
-  return null;
-}
-
-function _readGhFromStorage(){
-  try{
-    const owner = (localStorage.getItem(GH_CFG_STORAGE_KEYS.owner) || "").trim();
-    const repo  = (localStorage.getItem(GH_CFG_STORAGE_KEYS.repo)  || "").trim();
-    const branch = (localStorage.getItem(GH_CFG_STORAGE_KEYS.branch) || "").trim();
-    if(owner || repo || branch) return { owner, repo, branch };
-  }catch(_e){}
-  return null;
-}
-
-function _guessRepoFromFilePath(){
-  try{
-    const p = decodeURIComponent(location.pathname || "");
-    const parts = p.split("/").filter(Boolean);
-    if(parts.length >= 2){
-      const candidate = parts[parts.length-2];
-      const low = String(candidate||"").toLowerCase();
-      const bad = new Set(["download","downloads","desktop","documents","document","user","users","d","c","temp","tmp"]);
-      if(bad.has(low)) return "";
-      // repo name tends to be ASCII-ish; if contains CJK/space, treat as unknown
-      if(/[^\w.\-]/.test(candidate)) return "";
-      return candidate;
-    }
-  }catch(_e){}
-  return "";
-}
-
-function getGhConfig(){
-  const q = _readGhFromQuery();
-  const s = _readGhFromStorage();
-  const ownerFallback = "hamster3-3-3";
-  const repoFallback = _guessRepoFromFilePath();
-  const branchFallback = "main";
-
-  const owner = (GITHUB_OWNER_OVERRIDE || (q && q.owner) || (s && s.owner) || "").trim() || ownerFallback;
-  const repo  = (GITHUB_REPO_OVERRIDE  || (q && q.repo)  || (s && s.repo)  || "").trim() || repoFallback;
-  const branch = (GITHUB_BRANCH_OVERRIDE || (q && q.branch) || (s && s.branch) || "").trim() || branchFallback;
-
-  return { owner, repo, branch };
-}
-
 function detectGitHubContext(){
   const host = location.host || "";
-
   // 1) GitHub Pages: https://<owner>.github.io/<repo>/...
   if(host.endsWith("github.io")){
-    const ownerFromHost = host.split(".")[0] || "";
+    const owner = host.split(".")[0] || "";
     const parts = location.pathname.split("/").filter(Boolean);
-    const repoFromPath = (parts[0] || `${ownerFromHost}.github.io`);
-    // On Pages, branch may be unknown; keep empty unless user specified.
-    const cfg = getGhConfig();
-    return { owner: (cfg.owner || ownerFromHost), repo: (cfg.repo || repoFromPath), branch: (GITHUB_BRANCH_OVERRIDE || (cfg.branch||"")) };
+    const repo = (parts[0] || `${owner}.github.io`);
+    return { owner, repo, branch: "main" };
   }
-
   // 2) github.com: https://github.com/<owner>/<repo>/blob/<branch>/...
   if(host === "github.com"){
     const parts = location.pathname.split("/").filter(Boolean);
     if(parts.length >= 2){
       let branch = "main";
       if(parts.length >= 4 && (parts[2] === "blob" || parts[2] === "tree")) branch = parts[3] || "main";
-      const cfg = getGhConfig();
-      return { owner: (cfg.owner || parts[0]), repo: (cfg.repo || parts[1]), branch: (cfg.branch || branch) };
+      return { owner: parts[0], repo: parts[1], branch };
     }
-  }
-
-  // 3) file:// or other hosts: rely on config (query/localStorage/override)
-  const cfg = getGhConfig();
-  if(cfg.owner && cfg.repo){
-    return { owner: cfg.owner, repo: cfg.repo, branch: cfg.branch || "main" };
   }
   return null;
 }
 
-
-
-function setupGhConfigUI(){
-  const box = $("ghConfigBox");
-  if(!box) return;
-
-  const isFile = (location.protocol === "file:" || (new URL(location.href)).origin === "null");
-  const p = new URLSearchParams(location.search);
-  const debug = (p.get("debug") === "1");
-
-  if(isFile || location.host === "github.com" || debug){
-    box.classList.remove("hidden");
-  }
-
-  const ownerInput = $("ghOwnerInput");
-  const repoInput  = $("ghRepoInput");
-  const branchInput = $("ghBranchInput");
-
-  // Prefill: query > localStorage > guess
-  const q = _readGhFromQuery();
-  const s = _readGhFromStorage();
-  const cfg = getGhConfig();
-
-  if(ownerInput) ownerInput.value = (GITHUB_OWNER_OVERRIDE || (q && q.owner) || (s && s.owner) || cfg.owner || "").trim();
-  if(repoInput)  repoInput.value  = (GITHUB_REPO_OVERRIDE  || (q && q.repo)  || (s && s.repo)  || cfg.repo  || "").trim();
-  if(branchInput) branchInput.value = (GITHUB_BRANCH_OVERRIDE || (q && q.branch) || (s && s.branch) || cfg.branch || "main").trim();
-
-  const saveBtn = $("ghSaveReloadBtn");
-  if(saveBtn){
-    saveBtn.addEventListener("click", ()=>{
-      try{
-        const owner = (ownerInput ? ownerInput.value : "").trim();
-        const repo  = (repoInput ? repoInput.value : "").trim();
-        const branch = (branchInput ? branchInput.value : "").trim() || "main";
-        if(owner) localStorage.setItem(GH_CFG_STORAGE_KEYS.owner, owner);
-        if(repo)  localStorage.setItem(GH_CFG_STORAGE_KEYS.repo, repo);
-        if(branch) localStorage.setItem(GH_CFG_STORAGE_KEYS.branch, branch);
-      }catch(_e){}
-      location.reload();
-    });
-  }
-
-  const clearBtn = $("ghClearCfgBtn");
-  if(clearBtn){
-    clearBtn.addEventListener("click", ()=>{
-      try{
-        localStorage.removeItem(GH_CFG_STORAGE_KEYS.owner);
-        localStorage.removeItem(GH_CFG_STORAGE_KEYS.repo);
-        localStorage.removeItem(GH_CFG_STORAGE_KEYS.branch);
-      }catch(_e){}
-      location.reload();
-    });
-  }
-}
-
-
-let __manifestUsed = "";
-
+/* =========================
+   manifest.json 檔案清單（最穩定：不吃 GitHub API / 不吃 raw CORS）
+   支援：
+   - ./manifest.json（與 index.html 同層）
+   - ./data/manifest.json（data 資料夾）
+   manifest 格式：
+   { "files": ["114.xx....xlsx", ...] } 或 { "files":[{"name":"...xlsx"}, ...] }
+========================= */
 async function listXlsxFilesFromManifest(){
-  if(!MANIFEST_AUTOLOAD) return [];
+  const tries = [
+    { url: "./manifest.json", baseDir: "" },
+    { url: "./data/manifest.json", baseDir: "data" },
+  ];
+  for(const t of tries){
+    try{
+      const res = await fetch(t.url, { cache: "no-store" });
+      if(!res.ok) continue;
+      const mf = await res.json();
+      const arr = (mf && mf.files) ? mf.files : [];
+      if(!Array.isArray(arr) || arr.length === 0) continue;
 
-  const params = new URLSearchParams(location.search);
-  const mfParam = (params.get("manifest") || "").trim();
-  const candidates = [];
-  if(mfParam) candidates.push(mfParam);
-  candidates.push(...MANIFEST_CANDIDATES);
-
-  const isAbsUrl = (s) => /^https?:\/\//i.test(String(s||""));
-  const isFile = (location.protocol === "file:" || (new URL(location.href)).origin === "null");
-
-  const gh = getGhConfig();
-  const owner = (gh && gh.owner) ? String(gh.owner).trim() : "";
-  const repo  = (gh && gh.repo)  ? String(gh.repo).trim()  : "";
-  const branch = (gh && gh.branch) ? String(gh.branch).trim() : "main";
-
-  function expandCandidate(mf){
-    const out = [];
-    if(isAbsUrl(mf)){
-      out.push(mf);
-      return out;
-    }
-    const path = String(mf||"").replace(/^\.\//, "").replace(/^\/+/, "");
-    // 同源相對路徑（GitHub Pages / 本機 server）
-    if(!isFile) out.push(mf);
-    // file:// 或 github.com/blob：改用遠端來源（需要 owner/repo）
-    if(owner && repo){
-      out.push(`https://${owner}.github.io/${repo}/${path}`);
-      out.push(`https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`);
-    }
-    return out;
-  }
-
-  for(const mf of candidates){
-    const urls = expandCandidate(mf);
-    for(const url of urls){
-      try{
-        const res = await fetch(url, { cache: "no-store" });
-        if(!res.ok) continue;
-
-        const j = await res.json();
-        const files = j && Array.isArray(j.files) ? j.files : null;
-        if(!files || !files.length) continue;
-
-        // 以 manifest 本身的位置作為 base（可同時支援 root 或 /data/）
-        const mfAbs = new URL(url, location.href);
-        const baseDir = (mfAbs.pathname || "").replace(/[^\/]+$/, ""); // keep trailing slash
-
-        const items = [];
-        for(const entry of files){
-          if(typeof entry !== "string") continue;
-          const p = entry.trim();
-          if(!p) continue;
-          if(!p.toLowerCase().endsWith(".xlsx")) continue;
-
-          // 使用 URL 解析，讓中文/空白自動正確編碼（避免手動 encode 導致 %25...）
-          const u = new URL(p, mfAbs).href;
-          const name = p.split("/").filter(Boolean).pop() || p;
-
-          items.push({ name, url: u, path: u, dir: baseDir });
-        }
-
-        items.sort((a,b) => String(a.name).localeCompare(String(b.name), "zh-Hant", { numeric:true, sensitivity:"base" }));
-        __manifestUsed = url;
-        return items;
-      }catch(e){
-        // continue
+      const out = [];
+      for(const it of arr){
+        const name = typeof it === "string" ? it : (it && typeof it.name === "string" ? it.name : "");
+        if(!name || !/\.xlsx$/i.test(name)) continue;
+        const path = t.baseDir ? `${t.baseDir}/${name}` : name;
+        out.push({ name, url: path, dir: t.baseDir });
       }
+      if(out.length) return out;
+    }catch(e){
+      // ignore and try next
     }
   }
   return [];
 }
 
+async function listXlsxFilesFromGitHub(){
+  if(!GITHUB_AUTOLOAD) return [];
+
+  const auto = detectGitHubContext();
+  const owner = (GITHUB_OWNER_OVERRIDE || (auto && auto.owner) || "").trim();
+  const repo  = (GITHUB_REPO_OVERRIDE  || (auto && auto.repo)  || "").trim();
+  let branch  = (GITHUB_BRANCH_OVERRIDE || (auto && auto.branch) || "main").trim() || "main";
+  if(!owner || !repo) return [];
+
+  const found = new Map(); // name -> {name,url,dir}
+  const dirs = Array.from(new Set(GITHUB_DIR_CANDIDATES.map(d => (d||"").replace(/^\/|\/$/g,""))));
+
+  for(const d of dirs){
+    const pathPart = d ? `${d}` : "";
+    const api = `https://api.github.com/repos/${owner}/${repo}/contents/${pathPart}?ref=${encodeURIComponent(branch)}`;
+    try{
+      const res = await fetch(api, { headers: { "Accept": "application/vnd.github+json" }, cache: "no-store" });
+      if(!res.ok) continue;
+      const data = await res.json();
+      if(!Array.isArray(data)) continue;
+      for(const item of data){
+        if(item && item.type === "file" && typeof item.name === "string" && item.name.toLowerCase().endsWith(".xlsx")){
+          if(item.download_url && !found.has(item.name)){
+            found.set(item.name, { name: item.name, url: item.download_url, dir: d || "" });
+          }
+        }
+      }
+    }catch(e){
+      // ignore single-dir failure
+    }
+  }
+
+  const list = Array.from(found.values());
+  list.sort((a,b) => String(a.name).localeCompare(String(b.name), "zh-Hant", { numeric: true, sensitivity: "base" }));
+  return list;
+}
+
+
+const $ = (id) => document.getElementById(id);
+
+function scrollToElWithSticky(el){
+  if(!el) return;
+  const sticky = $("timeRangeCard");
+  const offset = sticky ? (sticky.getBoundingClientRect().height + 12) : 12;
+  const top = el.getBoundingClientRect().top + window.pageYOffset - offset;
+  window.scrollTo({ top, behavior: "smooth" });
+}
+
+
+function cleanText(v){
+  if(v === null || v === undefined) return "";
+  return String(v).replace(/\u00a0/g," ").replace(/\s+/g," ").trim();
+}
+function cleanKey(v){ return cleanText(v).replace(/\s+/g,""); }
+
+function normalizeProdName(v){
+  if(v === null || v === undefined) return "";
+  return String(v)
+    .replace(/\u00a0/g," ")
+    .replace(/[\u200B-\u200D\uFEFF]/g,"")
+    .replace(/\u3000/g," ")
+    .replace(/\s+/g," ")
+    .trim();
+}
+function isTwoPei(v){
+  const s = normalizeProdName(v);
+  return s.slice(0,2) === "二配";
+}
+
+
+function _inferYearForDevConfirm(month){
+  // Heuristic for 2025-2026 dev confirmation table:
+  // months 1-6 => 2026; months 7-12 => 2025
+  if(!month || month<1 || month>12) return new Date().getFullYear();
+  return (month<=6) ? 2026 : 2025;
+}
+
+function _parseDevConfirmDate(v){
+  if(v === null || v === undefined || v === "") return null;
+  if(v instanceof Date && !isNaN(v)) return v;
+
+  if(typeof v === "number" && isFinite(v)){
+    try{
+      if(window.XLSX && XLSX.SSF && typeof XLSX.SSF.parse_date_code === "function"){
+        const dc = XLSX.SSF.parse_date_code(v);
+        if(dc && dc.y && dc.m && dc.d){
+          return new Date(Date.UTC(dc.y, dc.m-1, dc.d));
+        }
+      }
+      const epoch = Date.UTC(1899, 11, 30);
+      return new Date(epoch + Math.round(v) * 86400000);
+    }catch(_e){
+      return null;
+    }
+  }
+
+  const s = String(v).trim();
+  if(!s) return null;
+  const s2 = s.replace(/[年月]/g, "/").replace(/日/g, "").replace(/-/g, "/").replace(/\s+/g, "");
+  let m = s2.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+  if(m){
+    const y = +m[1], mo = +m[2], d = +m[3];
+    if(mo>=1 && mo<=12 && d>=1 && d<=31) return new Date(Date.UTC(y, mo-1, d));
+    return null;
+  }
+  m = s2.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if(m){
+    const mo = +m[1], d = +m[2];
+    if(mo>=1 && mo<=12 && d>=1 && d<=31){
+      const y = _inferYearForDevConfirm(mo);
+      return new Date(Date.UTC(y, mo-1, d));
+    }
+  }
+  return null;
+}
+
+function _fmtLaunchDate(d){
+  if(!(d instanceof Date) || isNaN(d)) return "";
+  const y = d.getUTCFullYear();
+  const mo = String(d.getUTCMonth()+1).padStart(2,'0');
+  const da = String(d.getUTCDate()).padStart(2,'0');
+  return `${y}/${mo}/${da}`;
+}
+
+function _calcLaunchDays(d){
+  if(!(d instanceof Date) || isNaN(d)) return null;
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const launchUtc = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  return Math.floor((todayUtc - launchUtc)/86400000);
+}
+
+
+function parseDevConfirmWorkbook(wb){
+  if(!wb || !wb.SheetNames || wb.SheetNames.length===0) return;
+
+  const newMap = new Map(); // key => {date: Date, str: string, rawName: string}
+
+  for(const sn of wb.SheetNames){
+    const ws = wb.Sheets[sn];
+    if(!ws) continue;
+
+    const rows = XLSX.utils.sheet_to_json(ws, {header: 1, raw: true, defval: ""});
+    if(!rows || rows.length===0) continue;
+
+    // Default: date at col A, product name at col C
+    for(const row of rows){
+      if(!row) continue;
+      const name = String(row[2] ?? "").trim();
+      if(!name) continue;
+      if(/商品名稱|商品名|品名/i.test(name)) continue;
+
+      const key = cleanKey(name);
+      if(!key) continue;
+
+      const dt = _parseDevConfirmDate(row[0]);
+      if(!dt) continue;
+
+      const prev = newMap.get(key);
+      if(!prev || (prev.date instanceof Date && dt > prev.date)){
+        newMap.set(key, {date: dt, str: _fmtLaunchDate(dt), rawName: name});
+      }
+    }
+  }
+
+  state.devLaunchMap = newMap;
+  state.devLaunchEntries = Array.from(newMap.entries())
+    .map(([k,v])=>({k, v}))
+    .sort((a,b)=> (b.k.length - a.k.length) || ((b.v.date||0) - (a.v.date||0)));
+  state.devConfirmLoaded = true;
+}
+
+function getLaunchDateInfoForProd(prodBaseName){
+  if(!prodBaseName) return {date:null, str:""};
+  const key = cleanKey(prodBaseName);
+  if(!key) return {date:null, str:""};
+
+  const direct = state.devLaunchMap.get(key);
+  if(direct) return {date: direct.date||null, str: direct.str||""};
+
+  // Partial matching (dashboard name may contain extra prefixes). Choose the latest launch date if multiple matches exist.
+  let best=null;
+  for(const ent of state.devLaunchEntries){
+    if(!ent || !ent.k || !ent.v) continue;
+    if(key.includes(ent.k) || ent.k.includes(key)){
+      const v = ent.v;
+      if(!best || (v.date && best.date && v.date > best.date) || (v.date && !best.date)){
+        best = v;
+      }
+    }
+  }
+  return best ? {date: best.date||null, str: best.str||""} : {date:null, str:""};
+}
+
+function getLaunchDateStrForProd(prodName){
+  return getLaunchDateInfoForProd(prodName).str || "";
+}
 
 
 async function parseDevConfirmArrayBuffer(buf){
@@ -988,26 +980,6 @@ function setDataChip(status, text){
     chip.innerHTML = '<span class="dot"></span><span>'+text+'</span>';
   }
 }
-
-// ---- Global error diagnostics (show on top chip) ----
-window.addEventListener("error", (ev)=>{
-  try{
-    const msg = (ev && ev.message) ? String(ev.message) : "Script error";
-    // Avoid overly noisy browser errors
-    if(/ResizeObserver loop limit exceeded/i.test(msg)) return;
-    setDataChip("bad", "程式錯誤：" + msg);
-    console.error("Dashboard error:", ev);
-  }catch(e){}
-});
-window.addEventListener("unhandledrejection", (ev)=>{
-  try{
-    const r = ev && ev.reason;
-    const msg = r ? (r.message || String(r)) : "Promise rejected";
-    setDataChip("bad", "載入失敗：" + msg);
-    console.error("Unhandled rejection:", ev);
-  }catch(e){}
-});
-
 function rebuildAvailableMmdd(){
   state.availableMmdd = new Set();
   for(const k of state.summaries.keys()){
@@ -1029,120 +1001,6 @@ function getAllDatesForTemp(temp){
 
 function sheetToGrid(ws){
   return XLSX.utils.sheet_to_json(ws, {header: 1, defval: null, raw: true});
-}
-
-/* =========================
-   Line Avg (merge-aware) from Daily Sheet
-   - Human avg: leftmost "達成率平均" col
-   - Cap avg: rightmost "達成率平均" col
-   - Values may be stored in merged cells; we read merge top-left.
-========================= */
-function getMergedCellValue(ws, r, c){
-  const addr = XLSX.utils.encode_cell({r, c});
-  const cell = ws[addr];
-  if(cell && cell.v !== undefined && cell.v !== null && cell.v !== "") return cell.v;
-  const merges = ws["!merges"] || [];
-  for(const m of merges){
-    if(r>=m.s.r && r<=m.e.r && c>=m.s.c && c<=m.e.c){
-      const top = XLSX.utils.encode_cell({r:m.s.r, c:m.s.c});
-      const tc = ws[top];
-      return (tc && tc.v !== undefined) ? tc.v : null;
-    }
-  }
-  return null;
-}
-function toPct01(v){
-  if(v === null || v === undefined || v === "") return null;
-  if(typeof v === "string"){
-    const s = v.trim().replace("%","");
-    const n = Number(s);
-    if(!Number.isFinite(n)) return null;
-    return (n>1) ? (n/100) : n;
-  }
-  if(typeof v === "number" && Number.isFinite(v)){
-    return (v>1 && v<=100) ? (v/100) : (v<=1 ? v : null);
-  }
-  return null;
-}
-function findHeaderCols(ws, text){
-  const cols = [];
-  for(const a in ws){
-    if(a[0] === "!") continue;
-    const v = ws[a]?.v;
-    if(typeof v === "string" && v.trim() === text){
-      cols.push(XLSX.utils.decode_cell(a).c);
-    }
-  }
-  cols.sort((a,b)=>a-b);
-  return cols;
-}
-function extractLineAveragesFromSheet(ws){
-  const merges = ws["!merges"] || [];
-  const avgCols = findHeaderCols(ws, "達成率平均");
-  let humanCol = 18; // S fallback
-  let capCol = 29;   // AD fallback
-  if(avgCols.length >= 2){
-    humanCol = avgCols[0];
-    capCol = avgCols[avgCols.length-1];
-  }
-
-  // line groups: merged blocks in column A
-  const groups = [];
-  for(const m of merges){
-    if(m.s.c===0 && m.e.c===0 && (m.e.r-m.s.r)>=1){
-      const rawName = cleanText(getMergedCellValue(ws, m.s.r, 0));
-      if(!rawName) continue;
-      groups.push({ line: displayLineName(rawName), r0: m.s.r, r1: m.e.r });
-    }
-  }
-
-  // fallback: if no merges in col A, scan A col changes
-  if(!groups.length){
-    const ref = XLSX.utils.decode_range(ws["!ref"] || "A1:A1");
-    let cur=null, s=null;
-    for(let r=ref.s.r; r<=ref.e.r; r++){
-      const v = cleanText(getMergedCellValue(ws, r, 0));
-      if(v){
-        if(cur!==null) groups.push({ line: displayLineName(cur), r0:s, r1:r-1 });
-        cur=v; s=r;
-      }
-    }
-    if(cur!==null) groups.push({ line: displayLineName(cur), r0:s, r1:ref.e.r });
-  }
-
-  function findMergedPctInGroup(g, targetCol, colRadius=0, minCol=0){
-    let best=null;
-    for(const m of merges){
-      const h = m.e.r - m.s.r;
-      if(h < 1) continue; // must span rows (average cell)
-      if(m.e.r < g.r0 || m.s.r > g.r1) continue;
-      if(m.s.c < minCol) continue;
-      const colOverlap = (targetCol >= m.s.c && targetCol <= m.e.c) ||
-        (colRadius>0 && (targetCol+colRadius)>=m.s.c && (targetCol-colRadius)<=m.e.c);
-      if(!colOverlap) continue;
-      const v = getMergedCellValue(ws, m.s.r, m.s.c);
-      const p = toPct01(v);
-      if(p === null) continue;
-      if(!best || h > best.h) best = {p, h};
-    }
-    return best ? best.p : null;
-  }
-
-  const out = [];
-  for(const g of groups){
-    const human01 = findMergedPctInGroup(g, humanCol, 0, 0);
-    let cap01 = findMergedPctInGroup(g, capCol, 0, 0);
-    if(human01 !== null && cap01 === null){
-      // expand a bit around expected cap col (merged top-left may shift)
-      cap01 = findMergedPctInGroup(g, capCol, 8, 0);
-    }
-    if(human01 !== null && cap01 === null){
-      // last resort: search merged pct in right-side area (col>=25)
-      cap01 = findMergedPctInGroup(g, capCol, 40, 25);
-    }
-    out.push({ line: g.line, humanAvg: human01, capAvg: cap01 });
-  }
-  return out;
 }
 function findCell(grid, predicate, maxR=200, maxC=60){
   const R = Math.min(grid.length, maxR);
@@ -1195,12 +1053,10 @@ function indexOfAllHeaderContains(headerRow, token){
 function upsert(map, key, value){ map.set(key, value); }
 
 function displayLineName(line){
-  // 線別名稱：將合併儲存格的換行/多空白整理成單一空白，避免下拉選單顯示過醜
-  let s = cleanText(line).replace(/\s+/g," ").trim();
+  let s = cleanText(line).replace(/\s+/g,"");
   if(s.startsWith("二配") && !s.startsWith("二配 ")){ s = s.replace(/^二配/, "二配 "); }
   return s;
 }
-
 
 /* =========================
    Parse workbook buffer
@@ -1297,28 +1153,46 @@ if(cat && cleanKey(cat) !== "0" && prod && !/(平均|合計|小計|總計)/.test
 const key = `${temp}|${dateKey}|${cleanKey(currentLine)}|${cleanKey(cat)}|${cleanKey(prod)}`;
     upsert(state.records, key, rec);
 
+    // 4°C: average rows for line-level achievement averages
+    if(temp === "4" && prod.includes("平均")){
+      const lineName = cleanText(row[2]);
+      if(lineName){
+        const allAvg = indexOfAllHeaderContains(header, "達成率平均");
+        const humanAvgCol = allAvg.length ? allAvg[0] : -1;
+        const capAvgCol = allAvg.length ? allAvg[allAvg.length-1] : -1;
+        const lk = `${temp}|${dateKey}|${cleanKey(displayLineName(lineName))}`;
+        upsert(state.lineAvgFromSheets, lk, { mmdd:dateKey, temp, line: displayLineName(lineName),
+          humanAvg: (humanAvgCol>=0) ? toNumber(row[humanAvgCol]) : NaN,
+          capAvg: (capAvgCol>=0) ? toNumber(row[capAvgCol]) : NaN,
+        });
+      }
+    }
+  }
+
   // 4°C：線別達成率平均（人時性/產能）
-  // 來源：晉欣4度C分頁右側區塊（合併儲存格：需 merge-aware 讀值）
-  // - 人時性差異分析：達成率平均（左側 "達成率平均" 欄）
-  // - 產能差異分析：達成率平均（右側 "達成率平均" 欄）
-  // 線別達成率平均（人時性/產能）：來自溫層分頁右側「達成率平均」欄位（合併儲存格，merge-aware）
-  // - 人時性：S 欄（或第一個「達成率平均」欄）
-  // - 產能：AD 欄（或最後一個「達成率平均」欄；18°C 若無則為 NaN）
-  {
-    const arr = extractLineAveragesFromSheet(ws);
-    for(const it of arr){
-      if(!it || !it.line) continue;
-      const humanAvg = (it.humanAvg === null || it.humanAvg === undefined) ? NaN : it.humanAvg;
-      const capAvg   = (it.capAvg   === null || it.capAvg   === undefined) ? NaN : it.capAvg;
+  // 來源：晉欣4度C分頁右側區塊
+  // - 人時性差異分析：S欄（達成率平均）
+  // - 產能差異分析：AD欄（達成率平均）
+  if(temp === "4"){
+    const MAX_SCAN = Math.min(grid.length, 260);
+    for(let rr=0; rr<MAX_SCAN; rr++){
+      const row = grid[rr] || [];
+      const lineCell = cleanText(row[0]);
+      if(!lineCell) continue;
+
+      // S=19欄(1-based) => 0-based index 18
+      // AD=30欄(1-based) => 0-based index 29
+      const humanAvg = toNumber(row[18]);
+      const capAvg = toNumber(row[29]);
 
       if(!Number.isFinite(humanAvg) && !Number.isFinite(capAvg)) continue;
 
-      const lk = `${temp}|${dateKey}|${cleanKey(it.line)}`;
-      upsert(state.lineAvgFromSheets, lk, { mmdd: dateKey, temp, line: it.line, humanAvg, capAvg });
+      const line = displayLineName(lineCell);
+      const lk = `4|${dateKey}|${cleanKey(line)}`;
+      upsert(state.lineAvgFromSheets, lk, { mmdd: dateKey, temp:"4", line, humanAvg, capAvg });
     }
   }
 }
-
 
 function parseDailySummarySheet(wb, sheetName, dateKey){
   const ws = wb.Sheets[sheetName];
@@ -1403,6 +1277,8 @@ async function parseWorkbookArrayBuffer(buf, filename){
 
 
 async function fetchArrayBufferSmart(fileName){
+
+
   // 若已是完整 URL，直接 fetch
   if(/^https?:\/\//i.test(fileName)){
     const res = await fetch(fileName, {cache:"no-store"});
@@ -1411,11 +1287,14 @@ async function fetchArrayBufferSmart(fileName){
   }
 
   // 目標：可同時支援
-  // 1) GitHub Pages（與 HTML 同層，或放在 /repo/、../repo/ 等上層資料夾）
+  // 1) GitHub Pages（與 HTML 同層，或放在 /repo/ 子資料夾）
   // 2) 使用者誤在 github.com/blob 頁面開啟時，改用 raw.githubusercontent.com 讀取
   // 3) 透過 ?dataDir=xxx 或 ?data=https://.../ 指定資料來源目錄/URL（優先嘗試）
 
   const encoded = encodeURIComponent(fileName).replace(/%2F/g, "/");
+
+  const href = location.href;
+  const dir = href.endsWith("/") ? href : href.replace(/\/[^\/]*$/, "/");
 
   const params = new URLSearchParams(location.search);
   const dataDirParam = (params.get("dataDir") || params.get("data") || "").trim();
@@ -1428,44 +1307,8 @@ async function fetchArrayBufferSmart(fileName){
     if(p && !prefixes.includes(p)) prefixes.unshift(p); // user-specified first
   }
 
-  // Base URLs to try (include ancestors to be robust for subfolders like /docs/)
-  const here = new URL(location.href);
-  const pathDir = here.pathname.endsWith("/") ? here.pathname : here.pathname.replace(/\/[^\/]*$/, "/");
-
-  // Build ancestor directories: current dir -> parent -> ... -> /
-  // - Normal (https/http): use origin + path
-  // - file://: origin is "null", so use file URL directories instead to avoid Invalid URL errors
-  const baseUrls = [];
-  const seen = new Set();
-  function pushBaseUrl(u){
-    if(u && !seen.has(u)){ seen.add(u); baseUrls.push(u); }
-  }
-
-  const isFileOrigin = (here.origin === "null" || location.protocol === "file:");
-  if(!isFileOrigin){
-    let p = pathDir;
-    while(true){
-      pushBaseUrl(here.origin + p);
-      if(p === "/") break;
-      p = p.replace(/[^\/]+\/$/, "");
-      if(!p.endsWith("/")) p += "/";
-      if(!p) p = "/";
-    }
-  }else{
-    // file:// current directory and its ancestors
-    let u = here.href.endsWith("/") ? here.href : here.href.replace(/\/[^\/]*$/, "/");
-    // Normalize: ensure trailing slash
-    if(!u.endsWith("/")) u += "/";
-    for(let i=0; i<50; i++){
-      pushBaseUrl(u);
-      // stop at file root
-      if(u === "file:///" || u === "file:/") break;
-      const u2 = u.replace(/[^\/]+\/$/, "");
-      if(!u2 || u2 === u) break;
-      u = u2;
-      if(!u.endsWith("/")) u += "/";
-    }
-  }
+  // Base URLs to try
+  const baseUrls = [dir];
 
   // If user supplies a full URL, treat it as a base URL (highest priority)
   if(dataDirParam && /^https?:\/\//i.test(dataDirParam)){
@@ -1510,7 +1353,6 @@ async function fetchArrayBufferSmart(fileName){
   throw lastErr || new Error("fetch failed");
 }
 
-
 async function preload(){
   // show list
   const _preloadList = $("preloadList");
@@ -1521,63 +1363,50 @@ async function preload(){
     const _p = new URLSearchParams(location.search);
     if(_p.get("debug") === "1") _dataCard.classList.remove("hidden");
   }
-  const __isFile = (location.protocol === "file:" || (new URL(location.href)).origin === "null");
-  if(__isFile){
+if(location.protocol === "file:"){
     const _h = $("fileProtoHint");
-    if(_h){ _h.textContent = "偵測到 file:// 開啟：瀏覽器會阻擋讀取本機相對檔案（manifest/xlsx）造成 CORS。此模式下會改用 GitHub（manifest/raw/API）方式自動載入；若無法自動判斷 repo，請在下方「GitHub 來源設定」填入 owner/repo/branch 後按「儲存並重新載入」。"; }
-    const _card = $("dataSourceCard"); if(_card) _card.classList.remove("hidden");
-    const _cfg = $("ghConfigBox"); if(_cfg) _cfg.classList.remove("hidden");
-    setDataChip("warn", "偵測到 file://：請設定 GitHub 來源才能自動載入，或改用手動匯入。");
+    if(_h){ _h.textContent = "你目前用 file:// 開啟，瀏覽器通常會擋自動載入（fetch）。請改用 GitHub Pages 或本機 local server。"; }
   }
   if(location.host === "github.com"){
     const _h = $("fileProtoHint");
     if(_h){ _h.textContent = "偵測到你在 github.com/blob 頁面開啟。本頁會自動改用 raw.githubusercontent.com 嘗試載入，但仍建議改用 GitHub Pages 以避免瀏覽器/權限限制。"; }
   }
 setDataChip("warn", "自動載入中…");
-
   let fileItems = [];
-  let srcLabel = "預設清單";
 
-  // 先載入「鮮食開發確認表」（若存在）
-  await loadDevConfirmFromRepo();
-
-  // 0) 優先：manifest.json（圖二方式）
+  // 0) 優先：manifest.json（最穩）
   try{
     const mfList = await listXlsxFilesFromManifest();
-    if(mfList && mfList.length){
-      fileItems = mfList;
-      srcLabel = "manifest.json";
-    }
+    if(mfList && mfList.length) fileItems = mfList;
   }catch(e){
-    console.warn("Manifest list failed:", e);
+    console.warn("manifest list failed:", e);
   }
 
-  // 1) fallback：GitHub Contents API 掃描 repo 內的 .xlsx
+  // 1) 次要：GitHub Contents API 掃描（避免 Pages 沒把 Excel publish / 或 Excel 在子資料夾）
+  await loadDevConfirmFromRepo();
   if(!fileItems.length){
     try{
       const ghList = await listXlsxFilesFromGitHub();
       if(ghList && ghList.length){
-        fileItems = ghList;
-        srcLabel = "GitHub 清單";
+        // 轉成「同源優先」：若 ghList.dir 有值，先用相對路徑抓
+        fileItems = ghList.map(it=>{
+          const d = (it.dir||"").replace(/^\/|\/$/g,"");
+          const rel = d ? `${d}/${it.name}` : it.name;
+          return { name: it.name, url: rel, dir: d, raw: it.url };
+        });
       }
     }catch(e){
       console.warn("GitHub list failed:", e);
     }
   }
 
-  // 2) fallback：手動清單
+  // 2) 最後回退：手動清單（假設 Excel 與 HTML 同層）
   if(!fileItems.length){
-    if(!__isFile){
-      fileItems = PRELOAD_FILES.map(name => ({ name, url: name, path: name, dir: "" }));
-      srcLabel = "預設清單";
-    }else{
-      // file:// 不能依賴本機相對路徑，避免讓使用者誤以為檔案應該放在同目錄
-      srcLabel = "需要設定 GitHub 來源";
-    }
+    fileItems = PRELOAD_FILES.map(name => ({ name, url: name, dir: "" }));
   }
 
   // 顯示清單（debug=1 才會顯示整卡）
-  const _srcLabel = (srcLabel === "manifest.json" && __manifestUsed) ? `manifest.json（${__manifestUsed}）` : srcLabel;
+  const _srcLabel = (fileItems[0] && fileItems[0].url && /^https?:\/\//i.test(fileItems[0].url)) ? "GitHub 清單" : "預設清單";
   if(_preloadList){
     _preloadList.innerHTML = fileItems.map(it => {
       const d = (it.dir||"").trim();
@@ -1588,18 +1417,13 @@ setDataChip("warn", "自動載入中…");
   let ok = 0, fail = 0;
   for(const it of fileItems){
     try{
-      let buf = null;
-      // Prefer same-origin/relative path first (works best on GitHub Pages),
-      // then fall back to raw/download URL if provided.
+      let buf;
       try{
-        buf = await fetchArrayBufferSmart(it.path || it.name || it.url);
+        buf = await fetchArrayBufferSmart(it.url || it.name);
       }catch(e1){
-        const primary = (it.path || it.name || "").trim();
-        if(it.url && it.url !== primary){
-          buf = await fetchArrayBufferSmart(it.url);
-        }else{
-          throw e1;
-        }
+        if(it.raw){
+          buf = await fetchArrayBufferSmart(it.raw);
+        }else{ throw e1; }
       }
       if((it.name && (DEV_CONFIRM_HINT_RE.test(it.name) || it.name === DEV_CONFIRM_FILENAME))){
         if(!state.devConfirmLoaded){
@@ -1626,7 +1450,7 @@ rebuildAvailableMmdd();
     setDataChip("ok", `已載入 ${ok} 份檔案｜共 ${days} 日｜來源 ${_srcLabel}` + (fail?`（${fail} 份載入失敗）`:""));
   }else{
     const _card2 = $("dataSourceCard"); if(_card2) _card2.classList.remove("hidden");
-    setDataChip("bad", "自動載入失敗：請確認（1）目前是用 http/https 開啟（不可 file://）；（2）manifest.json 與 xlsx 是否在同一資料夾（manifest 內若只寫檔名，會以 manifest 所在資料夾為基準）；（3）xlsx.full.min.js / chart.umd.min.js 是否可載入（本版會 CDN↔本地自動回退）。必要時可用 ?manifest=https://.../manifest.json 指定 manifest 完整網址。");
+    setDataChip("bad", "自動載入失敗：請確認 Excel 檔案是否可被 fetch 讀取。若 Excel 放在 repo/ 子資料夾，請確認路徑為 /repo/檔名.xlsx（本版本已自動嘗試同層與 repo/）。也可用網址參數 ?dataDir=repo 或 ?data=https://.../ 指定資料來源。");
   }
 }
 
@@ -1790,17 +1614,13 @@ function refreshSelectors(){
   const _prevLineVal = lineSel.value || "";
   lineSel.innerHTML = "";
   const lines = new Map();
-
-  // 線別來源：以溫層分頁（晉欣4度Cxxxx / 晉欣18度Cxxxx）A欄合併儲存格為主，
-  // 避免誤抓到日報總表/明細 C 欄的短名稱（如：4度二組A、綜合一組…）。
-  for(const v of state.lineAvgFromSheets.values()){
-    if(v.temp !== state.temp) continue;
-    lines.set(cleanKey(v.line), v.line);
-  }
-  // 明細補齊（若某些線別只出現在品項列）
   for(const rec of state.records.values()){
     if(rec.temp !== state.temp) continue;
     lines.set(cleanKey(rec.line), rec.line);
+  }
+  for(const v of state.lineHumanDaily.values()){
+    if(v.temp !== state.temp) continue;
+    lines.set(cleanKey(v.line), v.line);
   }
   const arr = Array.from(lines.entries()).map(([k,v])=>[k, displayLineName(v)])
     .sort((a,b)=>a[1].localeCompare(b[1],"zh-Hant"));
@@ -3054,8 +2874,8 @@ function getDateSetInSelection(){
   return new Set(items.map(x=>x.mmdd));
 }
 function calcLineHumanAvg(lineKey){
-  // 達成率平均：以溫層分頁右側「達成率平均」欄位為唯一資料來源（merge-aware）
-  // 依使用者選取範圍（年/月/週/日/指定）取平均
+  // 以「達成率平均」為主（lineAvgFromSheets），確保與右側平均卡片一致；
+  // 若缺資料，才回退使用 daily summary 的「達成率」（lineHumanDaily）。
   const mmddSet = getDateSetInSelection();
   const vals = [];
   for(const mmdd of mmddSet){
@@ -3063,6 +2883,11 @@ function calcLineHumanAvg(lineKey){
     const recAvg = state.lineAvgFromSheets.get(key);
     if(recAvg && Number.isFinite(toNumber(recAvg.humanAvg))){
       vals.push(toNumber(recAvg.humanAvg));
+      continue;
+    }
+    const recRate = state.lineHumanDaily.get(key);
+    if(recRate && Number.isFinite(toNumber(recRate.rate))){
+      vals.push(toNumber(recRate.rate));
     }
   }
   return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : NaN;
@@ -4159,7 +3984,6 @@ $("lineSelect").value = "";
 (async function init(){
   // 確保解析/圖表套件可用（本地檔或 CDN fallback）
   setDataChip("warn", "載入解析套件…");
-  try{ setupGhConfigUI(); }catch(e){}
   const okLibs = await ensureLibs();
   if(!okLibs){
     setDataChip("bad", "載入解析套件失敗：請確認網路可存取 CDN，或在同資料夾放置 xlsx.full.min.js / chart.umd.min.js");
