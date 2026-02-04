@@ -698,6 +698,24 @@ function cleanText(v){
   return String(v).replace(/\u00a0/g," ").replace(/\s+/g," ").trim();
 }
 function cleanKey(v){ return cleanText(v).replace(/\s+/g,""); }
+// === 線別白名單（只顯示以下線別；其餘移除） ===
+const LINE_WHITELIST = [
+  "四度一組 (ET-600)",
+  "四度二組A 熱麵 固定線 (ET-55)",
+  "四度二組 (ET-55)",
+  "四度二組 (烤飯糰/八爪機)",
+  "四度二組 (烤飯糰/十爪機)",
+  "四度三組 (ET-55)",
+  "四度四組 (ET-55)",
+  "四度五組 (ET-55)",
+  "綜合一組 (ET-55)",
+  "綜合二組 (ET-55)",
+  "綜合三組 (ET-55)",
+  "綜合四組",
+  "便當組 大口 固定線 (伺服包裝機)",
+];
+const LINE_WHITELIST_KEYS = new Set(LINE_WHITELIST.map(s=>cleanKey(s)));
+
 
 function normalizeProdName(v){
   if(v === null || v === undefined) return "";
@@ -1622,8 +1640,13 @@ function refreshSelectors(){
     if(v.temp !== state.temp) continue;
     lines.set(cleanKey(v.line), v.line);
   }
-  const arr = Array.from(lines.entries()).map(([k,v])=>[k, displayLineName(v)])
-    .sort((a,b)=>a[1].localeCompare(b[1],"zh-Hant"));
+  // 建立線別清單（先收集，再依白名單順序輸出）
+  const arrAll = Array.from(lines.entries()).map(([k,v])=>[k, displayLineName(v)]);
+  const dispMap = new Map(arrAll); // k -> display
+  const arr = LINE_WHITELIST
+    .map(name=>cleanKey(name))
+    .filter(k=>dispMap.has(k))
+    .map(k=>[k, dispMap.get(k)]);
   if(arr.length){
     const opt0 = document.createElement("option");
     opt0.value = "";
