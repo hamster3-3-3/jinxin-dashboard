@@ -311,6 +311,8 @@
           <select id="lowestRateMode" class="select" style="max-width: 18rem;">
             <option value="human">最低人時達成率（前六）</option>
             <option value="cap">最低產能達成率（前六）</option>
+            <option value="drop">生產量下滑數（高→低）</option>
+          
           </select>
         </div>
       </div>
@@ -3587,6 +3589,33 @@ function buildProdIndex(){
   hideProdSuggest();
 }
 
+function refreshLowestRateModeOptions(){
+  const sel = $("lowestRateMode");
+  if(!sel) return;
+  const current = sel.value || "human";
+
+  const opts = [];
+  // 4°C：保留達成率兩種排序，並新增「生產量下滑數」
+  if(String(state.temp) === "4"){
+    opts.push(["human","最低人時達成率（前六）"]);
+    opts.push(["cap","最低產能達成率（前六）"]);
+  }
+  // 18°C：移除最低人時/產能達成率，僅保留「生產量下滑數」
+  opts.push(["drop","生產量下滑數（高→低）"]);
+
+  sel.innerHTML = "";
+  for(const [v,t] of opts){
+    const o = document.createElement("option");
+    o.value = v;
+    o.textContent = t;
+    sel.appendChild(o);
+  }
+  const allowed = opts.map(x=>x[0]);
+  sel.value = allowed.includes(current) ? current : opts[0][0];
+}
+
+
+
 function hideProdSuggest(){
   const box = $("prodSuggest");
   if(!box) return;
@@ -3766,6 +3795,209 @@ if(pairFilter === "two"){
   return out.slice(0, 6);
 }
 
+/* ===== 生產量下滑數（高→低）：依視圖與上一期比較（平均以「有資料天數」為分母） ===== */
+const _dropDatesCacheAny = new Map();
+const _dropDatesCacheYear = new Map();
+
+function _getAllDatesForTempAny(temp){
+  if(_dropDatesCacheAny.has(temp)) return _dropDatesCacheAny.get(temp);
+  const out = [];
+  for(const k of state.summaries.keys()){
+    const parts = String(k).split("|"); // temp|YYYYMMDD
+    if(parts.length < 2) continue;
+    const t = parts[0], dk = parts[1];
+    if(String(t) !== String(temp)) continue;
+    const d = dateKeyToDateObj(dk);
+    if(d) out.push({mmdd: dk, dateObj: d});
+  }
+  out.sort((a,b)=>a.dateObj - b.dateObj);
+  _dropDatesCacheAny.set(temp, out);
+  return out;
+}
+
+function _getAllDatesForTempYearAny(temp, year){
+  const key = `${temp}|${year}`;
+  if(_dropDatesCacheYear.has(key)) return _dropDatesCacheYear.get(key);
+  const y = String(year);
+  const out = _getAllDatesForTempAny(temp).filter(o => String(o.mmdd).startsWith(y));
+  _dropDatesCacheYear.set(key, out);
+  return out;
+}
+
+function _daysInclusiveUTC(start, end){
+  const ms = 86400000;
+  return Math.max(1, Math.round((end - start) / ms) + 1);
+}
+
+function _buildSetFromRange(temp, start, end){
+  const s = new Set();
+  for(const o of _getAllDatesForTempAny(temp)){
+    if(o.dateObj >= start && o.dateObj <= end) s.add(o.mmdd);
+  }
+  return s;
+}
+
+function _dateObjToKey(d){
+  return String(dateObjToStr(d)).replace(/-/g,""); // YYYYMMDD
+}
+
+// 取得「上一期」的日期集合：年/月/週/日/指定範圍
+function _getPrevMmddSetForDrop(){
+  const temp = state.temp;
+  const dr = getActiveDayRange();
+  if(dr){
+    const len = _daysInclusiveUTC(dr.start, dr.end);
+    const ps = addDaysUTC(dr.start, -len);
+    const pe = addDaysUTC(dr.end, -len);
+    return _buildSetFromRange(temp, ps, pe);
+  }
+
+  if(state.rangeMode === "year"){
+    const py = Number(state.year) - 1;
+    return new Set(_getAllDatesForTempYearAny(temp, py).map(o=>o.mmdd));
+  }
+
+  if(state.rangeMode === "month"){
+    let py = Number(state.year);
+    let pm = Number(state.month) - 1;
+    if(pm <= 0){ pm = 12; py = py - 1; }
+    const all = _getAllDatesForTempYearAny(temp, py);
+    const s = new Set();
+    for(const o of all){
+      if((getWeekStartUTC(o.dateObj).getUTCMonth()+1) === pm) s.add(o.mmdd);
+    }
+    return s;
+  }
+
+  if(state.rangeMode === "week"){
+    if(!state.weekStartStr) return new Set();
+    const ws = new Date(state.weekStartStr + "T00:00:00Z");
+    const pws = addDaysUTC(ws, -7);
+    const pwe = addDaysUTC(pws, 6);
+    return _buildSetFromRange(temp, pws, pwe);
+  }
+
+  // day
+  if(state.dayStr){
+    const d = new Date(state.dayStr + "T00:00:00Z");
+    const pd = addDaysUTC(d, -1);
+    const key = _dateObjToKey(pd);
+    return state.summaries.has(`${temp}|${key}`) ? new Set([key]) : new Set();
+  }
+
+  return new Set();
+}
+
+function _isSummaryRowProdName(prod){
+  const p = cleanText(prod || "");
+  return !p || /(平均|合計|小計|總計)/.test(p);
+}
+
+// mode=drop：回傳下滑數最高的前 6 名（drop = prevAvgQtyDay - curAvgQtyDay, 僅列 drop>0）
+function _prodDropAgg(pairFilter){
+  const curSet = getDateSetInSelection();
+  const prevSet = _getPrevMmddSetForDrop();
+
+  const curDays = Math.max(1, (curSet && curSet.size) ? curSet.size : 0);
+  const prevDays = Math.max(1, (prevSet && prevSet.size) ? prevSet.size : 0);
+
+  const curMap = new Map();
+  const prevMap = new Map();
+
+  function acc(map, rec){
+    const lineKey = cleanKey(rec.line);
+    const catKey  = cleanKey(rec.category || "");
+    const prodKey = cleanKey(rec.product);
+
+    if(!lineKey || !catKey || !prodKey) return;
+    if(_isSummaryRowProdName(rec.product)) return;
+
+    // 配別篩選：以品名前二字是否為「二配」判定
+    if(pairFilter === "two"){
+      if(!isTwoPei(rec.product)) return;
+    }else if(pairFilter === "nonTwo"){
+      if(isTwoPei(rec.product)) return;
+    }
+
+    const key = `${lineKey}||${catKey}||${prodKey}`;
+    if(!map.has(key)){
+      map.set(key, {
+        key,
+        lineKey, catKey, prodKey,
+        line: displayLineName(rec.line),
+        cat: cleanText(rec.category || ""),
+        prod: cleanText(rec.product),
+        qtySum: 0, qtyCnt: 0,
+        peopleSum: 0, peopleCnt: 0,
+        effSum: 0, effCnt: 0,
+        capSum: 0, capCnt: 0
+      });
+    }
+    const it = map.get(key);
+
+    const q = _safeNum(rec.qty);
+    if(Number.isFinite(q)){ it.qtySum += q; it.qtyCnt++; }
+
+    const p = _safeNum(rec.people);
+    if(Number.isFinite(p)){ it.peopleSum += p; it.peopleCnt++; }
+
+    const e = _safeNum(rec.eff);
+    if(Number.isFinite(e)){ it.effSum += e; it.effCnt++; }
+
+    const c = _safeNum(rec.cap);
+    if(Number.isFinite(c)){ it.capSum += c; it.capCnt++; }
+  }
+
+  for(const rec of state.records.values()){
+    if(rec.temp !== state.temp) continue;
+    if(curSet.has(rec.mmdd))  acc(curMap, rec);
+    if(prevSet.has(rec.mmdd)) acc(prevMap, rec);
+  }
+
+  const allKeys = new Set([...curMap.keys(), ...prevMap.keys()]);
+  const out = [];
+
+  for(const key of allKeys){
+    const cur = curMap.get(key);
+    const prev = prevMap.get(key);
+
+    const meta = cur || prev;
+    if(!meta) continue;
+
+    const curQtySum = cur ? cur.qtySum : 0;
+    const prevQtySum = prev ? prev.qtySum : 0;
+
+    const curAvg = curQtySum / curDays;
+    const prevAvg = prevQtySum / prevDays;
+
+    const drop = prevAvg - curAvg;
+    if(!(drop > 0)) continue;
+
+    const li = getLaunchDateInfoForProd(meta.prod);
+    const launchStr = (li && li.str) ? li.str : "";
+    const launchDays = _calcLaunchDays(li ? li.date : null);
+
+    out.push({
+      lineKey: meta.lineKey, catKey: meta.catKey, prodKey: meta.prodKey,
+      line: meta.line, cat: meta.cat, prod: meta.prod,
+      launchStr, launchDays,
+      // current-period metrics (used in cards + click pick)
+      totalQty: cur ? cur.qtySum : 0,
+      avgQtyDay: curAvg,
+      prevAvgQtyDay: prevAvg,
+      dropQty: drop,
+      avgPeople: (cur && cur.peopleCnt>0) ? (cur.peopleSum/cur.peopleCnt) : NaN,
+      avgEff: (cur && cur.effCnt>0) ? (cur.effSum/cur.effCnt) : NaN,
+      avgCap: (cur && cur.capCnt>0) ? (cur.capSum/cur.capCnt) : NaN
+    });
+  }
+
+  out.sort((a,b)=> (b.dropQty - a.dropQty) || (b.avgQtyDay - a.avgQtyDay));
+  return out.slice(0, 6);
+}
+
+
+
 function renderLowestRatePanel(){
   const sel = $("lowestRateMode");
   const box = $("lowestRateList");
@@ -3776,7 +4008,15 @@ function renderLowestRatePanel(){
   const pair = (pf && pf.value) ? pf.value : "all";
 
   const mode = sel.value || "human";
-  const list = _lowestRateAgg(mode, pair);
+
+  let list = [];
+  if(mode === "drop"){
+    list = _prodDropAgg(pair);
+    empty.textContent = "目前範圍內未取得可比較的上一期生產量資料。";
+  }else{
+    list = _lowestRateAgg(mode, pair);
+    empty.textContent = "目前範圍內未取得達成率資料。";
+  }
 
   box.innerHTML = "";
   if(!list.length){
@@ -3785,7 +4025,9 @@ function renderLowestRatePanel(){
   }
   empty.classList.add("hidden");
 
-  const label = (mode === "cap") ? "產能達成率" : "人時達成率";
+  const label = (mode === "drop")
+    ? "生產量下滑數"
+    : ((mode === "cap") ? "產能達成率" : "人時達成率");
 
   for(let i=0;i<list.length;i++){
     const it = list[i];
@@ -3796,64 +4038,59 @@ function renderLowestRatePanel(){
     btn.type = "button";
     btn.className = "w-full flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left hover:bg-white";
 
-const rateText = fmtPct(it.avgAch);
-const sub = `${it.cat || "—"} ｜ ${it.line || "—"}`;
+    const isDrop = (mode === "drop");
+    const rateText = isDrop ? fmtInt(it.dropQty) : fmtPct(it.avgAch);
+    const sub = `${it.cat || "—"} ｜ ${it.line || "—"}`;
 
-const qtyText = fmtInt(it.totalQty);
-const peopleText = fmtDec(it.avgPeople, 2);
-const avgQtyDayText = fmtInt(it.avgQtyDay);
-const effText = fmtDec(it.avgEff, 2);
-const capText = fmtDec(it.avgCap, 2);
-const launchDaysText = (it.launchDays===null || it.launchDays===undefined) ? "—" : String(it.launchDays);
+    const qtyText = fmtInt(it.totalQty);
+    const peopleText = fmtDec(it.avgPeople, 2);
+    const avgQtyDayText = fmtInt(it.avgQtyDay);
+    const effText = fmtDec(it.avgEff, 2);
+    const capText = fmtDec(it.avgCap, 2);
+    const launchDaysText = (it.launchDays===null || it.launchDays===undefined) ? "—" : String(it.launchDays);
 
-const thirdLabel = (mode === "cap") ? "產能" : "人時性";
-const thirdVal = (mode === "cap") ? capText : effText;
+    const thirdLabel = isDrop ? "前期→本期" : ((mode === "cap") ? "產能" : "人時性");
+    const thirdVal = isDrop ? `${fmtInt(it.prevAvgQtyDay)} → ${fmtInt(it.avgQtyDay)}` : ((mode === "cap") ? capText : effText);
 
-btn.innerHTML = `
-  <div class="min-w-0 flex-[2]">
-    <div class="font-extrabold ${_titleCls} truncate">${i+1}. ${escapeHtml(it.prod)}</div>
-    <div class="mt-1 text-xs font-bold text-slate-500">${escapeHtml(sub)}</div>
-  </div>
+    btn.innerHTML = `
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-2">
+          <div class="truncate text-sm font-extrabold ${_titleCls}">${it.prod || "—"}</div>
+          <div class="shrink-0 text-xs font-bold text-slate-400">(${label})</div>
+        </div>
+        <div class="mt-1 truncate text-xs text-slate-500">${sub}</div>
 
-  <div class="flex-[3] grid grid-cols-6 gap-3 items-center">
-    <div class="text-center">
-      <div class="text-[11px] font-bold text-slate-500">上市日期</div>
-      <div class="mt-0.5 text-sm font-extrabold text-slate-900 mono">${escapeHtml(it.launchStr || "—")}</div>
-    </div>
-    <div class="text-center">
-      <div class="text-[11px] font-bold text-slate-500">上市天數</div>
-      <div class="mt-0.5 text-sm font-extrabold text-slate-900 mono">${escapeHtml(launchDaysText)}</div>
-    </div>
-    <div class="text-center">
-      <div class="text-[11px] font-bold text-slate-500">生產量</div>
-      <div class="mt-0.5 text-sm font-extrabold text-slate-900 mono">${escapeHtml(qtyText)}</div>
-    </div>
-    <div class="text-center">
-      <div class="text-[11px] font-bold text-slate-500">平均生產量(日)</div>
-      <div class="mt-0.5 text-sm font-extrabold text-slate-900 mono">${escapeHtml(avgQtyDayText)}</div>
-    </div>
-    <div class="text-center">
-      <div class="text-[11px] font-bold text-slate-500">人數</div>
-      <div class="mt-0.5 text-sm font-extrabold text-slate-900 mono">${escapeHtml(peopleText)}</div>
-    </div>
-    <div class="text-center">
-      <div class="text-[11px] font-bold text-slate-500">${thirdLabel}</div>
-      <div class="mt-0.5 text-sm font-extrabold text-slate-900 mono">${escapeHtml(thirdVal)}</div>
-    </div>
-  </div>
+        <div class="mt-2 grid grid-cols-3 gap-2 text-xs">
+          <div class="rounded-lg bg-white border border-slate-200 px-2 py-1">
+            <div class="text-slate-500">生產量</div>
+            <div class="mono font-bold text-slate-900">${qtyText}</div>
+          </div>
+          <div class="rounded-lg bg-white border border-slate-200 px-2 py-1">
+            <div class="text-slate-500">日均量</div>
+            <div class="mono font-bold text-slate-900">${avgQtyDayText}</div>
+          </div>
+          <div class="rounded-lg bg-white border border-slate-200 px-2 py-1">
+            <div class="text-slate-500">${thirdLabel}</div>
+            <div class="mono font-bold text-slate-900">${thirdVal}</div>
+          </div>
+        </div>
 
-  <div class="shrink-0 text-right">
-    <div class="text-xs font-bold text-slate-900">${label}</div>
-    <div class="text-lg font-extrabold ${_rateCls} mono">${rateText}</div>
-  </div>
-`;
+        <div class="mt-1 text-[11px] text-slate-400">
+          平均人數 ${peopleText} ｜ 人時性 ${effText} ｜ 產能 ${capText} ｜ 上市後天數 ${launchDaysText}
+        </div>
+      </div>
+
+      <div class="shrink-0 text-right">
+        <div class="text-xs font-bold text-slate-500">前六名</div>
+        <div class="mono text-2xl font-black ${_rateCls}">${rateText}</div>
+      </div>
+    `;
+
     btn.addEventListener("click", ()=>{
-      // 點選低達成率品項：直接跳轉到『線別 / 品類 / 品名』區塊並帶入選項
       if(typeof applyProdPick === "function"){
         applyProdPick(it);
         requestAnimationFrame(()=>{ scrollToElWithSticky($("lineSelect")); });
       }else{
-        // Fallback: fill search box only
         const inp = $("prodSearch");
         if(inp){ inp.value = it.prod; }
       }
@@ -3888,6 +4125,7 @@ function refreshAll(){
   refreshKpiCards();
   refreshLineSection();
   buildProdIndex();
+  refreshLowestRateModeOptions();
   renderLowestRatePanel();
 }
 
@@ -4038,7 +4276,8 @@ if(_fileInput){
 
 $("clearBtn").addEventListener("click", ()=>{
   state.summaries.clear();
-  state.records.clear();
+  _dropDatesCacheAny.clear(); _dropDatesCacheYear.clear();
+state.records.clear();
   state.itemCountDaily.clear();
   state.lineHumanDaily.clear();
   state.lineAvgFromSheets.clear();
