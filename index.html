@@ -1985,28 +1985,24 @@ function refreshActiveRangeText(){
 }
 
 
-// ===== 新品（當月新品數）計算 =====
+// ===== 新品（整體品群卡片）計算（依時間範圍）=====
+// 仍保留「anchor month-end」介面做向下相容（某些下拉選單會傳入 anchor；目前僅用於呼叫端相容）
 function getNewProductAnchorMonthEndUTC(){
-  // 依你定義：以「選擇的時間範圍所屬月份」的最後一天作為基準日
-  // - 月別：直接用 state.year/state.month
-  // - 週別/日別/指定範圍：取目前範圍的『結束日』所在月份，計算該月月底
+  // 舊版邏輯：以「選擇的時間範圍所屬月份」的最後一天作為基準日
+  // - 年別：該年 12/31
+  // - 月別：該月月底
+  // - 週別/日別/指定範圍：取目前範圍的『結束日』所在月份月底
   const mode = state.rangeMode;
   const dr = getActiveDayRange();
 
-  // 年別：用該年 12/31
   if(mode === 'year'){
     return new Date(Date.UTC(state.year, 12, 0));
   }
-
-  // 若月別本身
   if(mode === 'month'){
     return new Date(Date.UTC(state.year, state.month, 0));
   }
 
-  // 其餘：以範圍結束日的月份月底
   let end = null;
-
-  // 若有指定範圍（不論在哪個視圖），以指定範圍的 end 為準
   if(dr && dr.endStr){
     end = new Date(dr.endStr + 'T00:00:00Z');
   }else if(mode === 'week' && state.weekStartStr){
@@ -2017,18 +2013,12 @@ function getNewProductAnchorMonthEndUTC(){
   }
 
   if(!(end instanceof Date) || isNaN(end)){
-    // fallback：仍以 state.year/state.month
     return new Date(Date.UTC(state.year, state.month, 0));
   }
 
   const y = end.getUTCFullYear();
   const m = end.getUTCMonth() + 1;
   return new Date(Date.UTC(y, m, 0));
-}
-
-function countMonthlyNewProducts(prodSet){
-  // Backward-compatible: counts new products vs current anchor month-end
-  return countNewProductsByAnchor(prodSet, getNewProductAnchorMonthEndUTC());
 }
 
 function getPrevNewProductAnchorMonthEndUTC(){
@@ -2040,30 +2030,106 @@ function getPrevNewProductAnchorMonthEndUTC(){
   return new Date(Date.UTC(y, m-1, 0));
 }
 
-function isNewProductByAnchor(prodName, anchor){
-  if(!prodName) return false;
-  if(!(anchor instanceof Date) || isNaN(anchor)) return false;
-  const info = getLaunchDateInfoForProd(prodName);
-  if(!info || !(info.date instanceof Date) || isNaN(info.date)) return false;
-
-  const anchorUtc = Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), anchor.getUTCDate());
-  const launchUtc = Date.UTC(info.date.getUTCFullYear(), info.date.getUTCMonth(), info.date.getUTCDate());
-  const diff = Math.floor((anchorUtc - launchUtc) / 86400000);
-  return (diff >= 0 && diff < 30);
+function _dateUTCFromYMDStr(ymdStr){
+  if(!ymdStr) return null;
+  const d = new Date(ymdStr + 'T00:00:00Z');
+  return (d instanceof Date && !isNaN(d)) ? d : null;
+}
+function _utcDay(d){
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+function _isWithinUTC(d, start, end){
+  if(!d || !start || !end) return false;
+  const t = _utcDay(d), s = _utcDay(start), e = _utcDay(end);
+  return (t >= s && t <= e);
 }
 
-function countNewProductsByAnchor(prodSet, anchor){
+// 依使用者需求：
+// - 年別：當年新品（上市年分==所選年）/ 前年新品
+// - 月別：當月新品（上市年月==所選年月）/ 前月新品
+// - 週別：當週新品（上市日落在所選週別）/ 前週新品
+// - 日別：僅顯示「當週新品」（以上市日落在該日所屬週別）
+// ※ 若未選到週/日，則新品數會顯示 0
+function getNewProductBadgeInfo(){
+  const mode = state.rangeMode || 'day';
+  let labelCur = '當月新品';
+  let labelPrev = '前月新品';
+  let showPrev = true;
+
+  let curStart = null, curEnd = null;
+  let prevStart = null, prevEnd = null;
+
+  if(mode === 'year'){
+    const y = Number(state.year);
+    labelCur = '當年新品';
+    labelPrev = '前年新品';
+    if(Number.isFinite(y)){
+      curStart = new Date(Date.UTC(y, 0, 1));
+      curEnd   = new Date(Date.UTC(y, 11, 31));
+      prevStart = new Date(Date.UTC(y-1, 0, 1));
+      prevEnd   = new Date(Date.UTC(y-1, 11, 31));
+    }
+  }else if(mode === 'month'){
+    const y = Number(state.year);
+    const m = Number(state.month);
+    labelCur = '當月新品';
+    labelPrev = '前月新品';
+    if(Number.isFinite(y) && Number.isFinite(m) && m>=1 && m<=12){
+      curStart = new Date(Date.UTC(y, m-1, 1));
+      curEnd   = new Date(Date.UTC(y, m, 0));
+      let py = y, pm = m-1;
+      if(pm <= 0){ pm = 12; py = y-1; }
+      prevStart = new Date(Date.UTC(py, pm-1, 1));
+      prevEnd   = new Date(Date.UTC(py, pm, 0));
+    }
+  }else if(mode === 'week'){
+    labelCur = '當週新品';
+    labelPrev = '前週新品';
+    const ws = _dateUTCFromYMDStr(state.weekStartStr);
+    if(ws){
+      curStart = ws;
+      curEnd   = addDaysUTC(ws, 6);
+      prevStart = addDaysUTC(ws, -7);
+      prevEnd   = addDaysUTC(ws, -1);
+    }
+  }else{ // day
+    labelCur = '當週新品';
+    labelPrev = '前週新品';
+    showPrev = false; // 日別只顯示當週新品
+    const d = _dateUTCFromYMDStr(state.dayStr);
+    if(d){
+      const ws = getWeekStartUTC(d);
+      curStart = ws;
+      curEnd   = addDaysUTC(ws, 6);
+      // prev range still computed for internal use if needed
+      prevStart = addDaysUTC(ws, -7);
+      prevEnd   = addDaysUTC(ws, -1);
+    }
+  }
+
+  return { mode, labelCur, labelPrev, showPrev, curStart, curEnd, prevStart, prevEnd };
+}
+
+function isNewProductInRange(prodName, start, end){
+  if(!prodName) return false;
+  if(!(start instanceof Date) || isNaN(start) || !(end instanceof Date) || isNaN(end)) return false;
+  const info = getLaunchDateInfoForProd(prodName);
+  if(!info || !(info.date instanceof Date) || isNaN(info.date)) return false;
+  return _isWithinUTC(info.date, start, end);
+}
+
+function countNewProductsByRange(prodSet, start, end){
   if(!prodSet || !prodSet.forEach) return 0;
-  if(!(anchor instanceof Date) || isNaN(anchor)) return 0;
+  if(!(start instanceof Date) || isNaN(start) || !(end instanceof Date) || isNaN(end)) return 0;
   let n = 0;
-  prodSet.forEach((prodName)=>{ if(isNewProductByAnchor(prodName, anchor)) n += 1; });
+  prodSet.forEach((prodName)=>{ if(isNewProductInRange(prodName, start, end)) n += 1; });
   return n;
 }
 
-function markOptionAsNew(optEl, prodName, anchor){
+function markOptionAsNew(optEl, prodName /* , anchorIgnored */){
   if(!optEl) return;
-  const a = anchor || getNewProductAnchorMonthEndUTC();
-  if(isNewProductByAnchor(prodName, a)){
+  const p = getNewProductBadgeInfo();
+  if(isNewProductInRange(prodName, p.curStart, p.curEnd)){
     optEl.style.color = "#dc2626"; // red-600
     optEl.style.fontWeight = "800";
   }
@@ -2138,24 +2204,35 @@ function refreshActiveCatCounts(){
   }
 
   // Render each category as a mini card (clickable)
-  const __anchorCur = getNewProductAnchorMonthEndUTC();
-  const __anchorPrev = getPrevNewProductAnchorMonthEndUTC();
+  const __badge = getNewProductBadgeInfo();
   const frag = document.createDocumentFragment();
   for(const x of arr){
     const d = document.createElement("div");
-    const __newCnt = countNewProductsByAnchor(map.get(x.cat), __anchorCur);
-    const __prevNewCnt = countNewProductsByAnchor(map.get(x.cat), __anchorPrev);
+    const __newCnt = countNewProductsByRange(map.get(x.cat), __badge.curStart, __badge.curEnd);
+    const __prevNewCnt = __badge.showPrev ? countNewProductsByRange(map.get(x.cat), __badge.prevStart, __badge.prevEnd) : 0;
 
-    d.className = "relative rounded-2xl border border-slate-200 bg-white p-3 shadow-sm hover:bg-slate-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500";
+    const __badgeHtml = __badge.showPrev
+      ? `
+        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5">${__badge.labelCur} <span class="text-slate-900">${__newCnt}</span></div>
+        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5">${__badge.labelPrev} <span class="text-slate-900">${__prevNewCnt}</span></div>
+      `
+      : `
+        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5">${__badge.labelCur} <span class="text-slate-900">${__newCnt}</span></div>
+      `;
+
+    d.className = "relative group cursor-pointer select-none w-full sm:w-[220px] bg-white border border-slate-200 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-slate-300 transition focus:outline-none focus:ring-2 focus:ring-indigo-300";
     d.tabIndex = 0;
     d.setAttribute("role","button");
-    d.setAttribute("aria-label", `選擇品群：${x.cat}`);
+    d.setAttribute("aria-label", `選擇品群 ${x.cat}`);
     d.innerHTML = `
-      <div class="text-slate-900 font-extrabold truncate pr-16">${escapeHtml(x.cat)}</div>
-      <div class="text-slate-500 text-sm font-bold mt-1">${x.n} 種</div>
+      <div class="flex items-start justify-between gap-2">
+        <div class="min-w-0">
+          <div class="text-base font-extrabold text-slate-900 truncate">${escapeHtml(x.cat)}</div>
+          <div class="mt-1 text-sm font-semibold text-slate-500">${x.n} 種</div>
+        </div>
+      </div>
       <div class="absolute bottom-2 right-2 flex flex-col items-end gap-1">
-        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5">當月新品 <span class="text-slate-900">${__newCnt}</span></div>
-        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5">前月新品 <span class="text-slate-900">${__prevNewCnt}</span></div>
+        ${__badgeHtml}
       </div>
     `;
     const onPick = ()=> selectActiveGroup(x.cat);
@@ -3895,15 +3972,14 @@ function _isSummaryRowProdName(prod){
 
 // mode=drop：回傳下滑數最高的前 6 名（drop = prevAvgQtyDay - curAvgQtyDay, 僅列 drop>0）
 function _prodDropAgg(pairFilter){
-  // 生產量下滑數：以「品項」為彙總單位（不依線別），避免品項跨週/跨期換線導致本期為 0 的假下滑
   const curSet = getDateSetInSelection();
   const prevSet = _getPrevMmddSetForDrop();
 
   const curDays = Math.max(1, (curSet && curSet.size) ? curSet.size : 0);
   const prevDays = Math.max(1, (prevSet && prevSet.size) ? prevSet.size : 0);
 
-  const curMap = new Map();   // key = prodKey
-  const prevMap = new Map();  // key = prodKey
+  const curMap = new Map();
+  const prevMap = new Map();
 
   function acc(map, rec){
     const lineKey = cleanKey(rec.line);
@@ -3920,37 +3996,24 @@ function _prodDropAgg(pairFilter){
       if(isTwoPei(rec.product)) return;
     }
 
-    const key = prodKey; // ✅ 不再納入 lineKey，避免換線造成誤判
+    const key = `${lineKey}||${catKey}||${prodKey}`;
     if(!map.has(key)){
       map.set(key, {
         key,
-        prodKey,
+        lineKey, catKey, prodKey,
+        line: displayLineName(rec.line),
+        cat: cleanText(rec.category || ""),
         prod: cleanText(rec.product),
         qtySum: 0, qtyCnt: 0,
         peopleSum: 0, peopleCnt: 0,
         effSum: 0, effCnt: 0,
-        capSum: 0, capCnt: 0,
-        // 用於點選跳轉：挑出「目前期」最主要的 (line, category, product) 組合
-        comboQty: Object.create(null),
-        comboMeta: Object.create(null),
+        capSum: 0, capCnt: 0
       });
     }
     const it = map.get(key);
 
     const q = _safeNum(rec.qty);
-    if(Number.isFinite(q)){
-      it.qtySum += q; it.qtyCnt++;
-      const comboKey = `${lineKey}||${catKey}`;
-      it.comboQty[comboKey] = (it.comboQty[comboKey] || 0) + q;
-      if(!it.comboMeta[comboKey]){
-        it.comboMeta[comboKey] = {
-          lineKey,
-          catKey,
-          line: displayLineName(rec.line),
-          cat: cleanText(rec.category || ""),
-        };
-      }
-    }
+    if(Number.isFinite(q)){ it.qtySum += q; it.qtyCnt++; }
 
     const p = _safeNum(rec.people);
     if(Number.isFinite(p)){ it.peopleSum += p; it.peopleCnt++; }
@@ -3971,31 +4034,6 @@ function _prodDropAgg(pairFilter){
   const allKeys = new Set([...curMap.keys(), ...prevMap.keys()]);
   const out = [];
 
-  function pickRepresentative(cur, prev){
-    // 優先使用「本期」出現且產量最高的組合；若本期無資料則用前期
-    const src = (cur && cur.comboQty && Object.keys(cur.comboQty).length) ? cur
-              : (prev && prev.comboQty && Object.keys(prev.comboQty).length) ? prev
-              : null;
-    if(!src) return { lineKey: "", catKey: "", line: "—", cat: "—" };
-
-    let bestKey = null;
-    let bestVal = -Infinity;
-    for(const k in src.comboQty){
-      const v = src.comboQty[k] || 0;
-      if(v > bestVal){
-        bestVal = v;
-        bestKey = k;
-      }
-    }
-    if(bestKey && src.comboMeta && src.comboMeta[bestKey]) return src.comboMeta[bestKey];
-
-    // fallback：任取一個 meta
-    if(src.comboMeta){
-      for(const k in src.comboMeta) return src.comboMeta[k];
-    }
-    return { lineKey: "", catKey: "", line: "—", cat: "—" };
-  }
-
   for(const key of allKeys){
     const cur = curMap.get(key);
     const prev = prevMap.get(key);
@@ -4012,20 +4050,18 @@ function _prodDropAgg(pairFilter){
     const drop = prevAvg - curAvg;
     if(!(drop > 0)) continue;
 
-    const rep = pickRepresentative(cur, prev);
-
     const li = getLaunchDateInfoForProd(meta.prod);
     const launchStr = (li && li.str) ? li.str : "";
     const launchDays = _calcLaunchDays(li ? li.date : null);
 
     out.push({
-      lineKey: rep.lineKey, catKey: rep.catKey, prodKey: meta.prodKey,
-      line: rep.line, cat: rep.cat, prod: meta.prod,
+      lineKey: meta.lineKey, catKey: meta.catKey, prodKey: meta.prodKey,
+      line: meta.line, cat: meta.cat, prod: meta.prod,
       launchStr, launchDays,
-      // current-period metrics (cards)
-      totalQty: cur ? cur.qtySum : 0,           // ✅ 本期：跨線別彙總
-      avgQtyDay: curAvg,                        // ✅ 本期日均：跨線別彙總
-      prevAvgQtyDay: prevAvg,                   // ✅ 前期日均：跨線別彙總
+      // current-period metrics (used in cards + click pick)
+      totalQty: cur ? cur.qtySum : 0,
+      avgQtyDay: curAvg,
+      prevAvgQtyDay: prevAvg,
       dropQty: drop,
       avgPeople: (cur && cur.peopleCnt>0) ? (cur.peopleSum/cur.peopleCnt) : NaN,
       avgEff: (cur && cur.effCnt>0) ? (cur.effSum/cur.effCnt) : NaN,
@@ -4036,6 +4072,9 @@ function _prodDropAgg(pairFilter){
   out.sort((a,b)=> (b.dropQty - a.dropQty) || (b.avgQtyDay - a.avgQtyDay));
   return out.slice(0, 6);
 }
+
+
+
 function renderLowestRatePanel(){
   const sel = $("lowestRateMode");
   const box = $("lowestRateList");
