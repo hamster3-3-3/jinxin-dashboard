@@ -309,10 +309,12 @@
         <div class="flex items-center gap-2">
           <div class="text-slate-500 text-sm font-bold whitespace-nowrap shrink-0 leading-none">排序依據</div>
           <select id="lowestRateMode" class="select" style="max-width: 18rem;">
+
             <option value="human">最低人時達成率（前六）</option>
             <option value="cap">最低產能達成率（前六）</option>
-            <option value="drop">生產量下滑數（高→低）</option>
-          
+            <option value="drop_qty">生產量下滑數（高→低）</option>
+            <option value="drop_cap">產能下滑數（高→低）</option>
+            <option value="drop_eff">人時性下滑數（高→低）</option>
           </select>
         </div>
       </div>
@@ -3669,16 +3671,21 @@ function buildProdIndex(){
 function refreshLowestRateModeOptions(){
   const sel = $("lowestRateMode");
   if(!sel) return;
-  const current = sel.value || "human";
+
+  // Backward compatible: older builds might store "drop"
+  const currentRaw = sel.value || "human";
+  const current = (currentRaw === "drop") ? "drop_qty" : currentRaw;
 
   const opts = [];
-  // 4°C：保留達成率兩種排序，並新增「生產量下滑數」
+  // 4°C：保留達成率兩種排序
   if(String(state.temp) === "4"){
     opts.push(["human","最低人時達成率（前六）"]);
     opts.push(["cap","最低產能達成率（前六）"]);
   }
-  // 18°C：移除最低人時/產能達成率，僅保留「生產量下滑數」
-  opts.push(["drop","生產量下滑數（高→低）"]);
+  // 下滑類：兩個溫層都可用
+  opts.push(["drop_qty","生產量下滑數（高→低）"]);
+  opts.push(["drop_cap","產能下滑數（高→低）"]);
+  opts.push(["drop_eff","人時性下滑數（高→低）"]);
 
   sel.innerHTML = "";
   for(const [v,t] of opts){
@@ -3687,6 +3694,7 @@ function refreshLowestRateModeOptions(){
     o.textContent = t;
     sel.appendChild(o);
   }
+
   const allowed = opts.map(x=>x[0]);
   sel.value = allowed.includes(current) ? current : opts[0][0];
 }
@@ -3965,13 +3973,8 @@ function _getPrevMmddSetForDrop(){
   return new Set();
 }
 
-function _isSummaryRowProdName(prod){
-  const p = cleanText(prod || "");
-  return !p || /(平均|合計|小計|總計)/.test(p);
-}
-
-// mode=drop：回傳下滑數最高的前 6 名（drop = prevAvgQtyDay - curAvgQtyDay, 僅列 drop>0）
-function _prodDropAgg(pairFilter){
+funcfunction _metricDropAgg(metric, pairFilter){
+  // metric: "qty" | "cap" | "eff"
   const curSet = getDateSetInSelection();
   const prevSet = _getPrevMmddSetForDrop();
 
@@ -3981,39 +3984,52 @@ function _prodDropAgg(pairFilter){
   const curMap = new Map();
   const prevMap = new Map();
 
-  function acc(map, rec){
-    const lineKey = cleanKey(rec.line);
+  function ensure(map, rec){
     const catKey  = cleanKey(rec.category || "");
     const prodKey = cleanKey(rec.product);
-
-    if(!lineKey || !catKey || !prodKey) return;
-    if(_isSummaryRowProdName(rec.product)) return;
+    if(!catKey || !prodKey) return null;
+    if(catKey === "0") return null;
+    if(_isSummaryRowProdName(rec.product)) return null;
 
     // 配別篩選：以品名前二字是否為「二配」判定
     if(pairFilter === "two"){
-      if(!isTwoPei(rec.product)) return;
+      if(!isTwoPei(rec.product)) return null;
     }else if(pairFilter === "nonTwo"){
-      if(isTwoPei(rec.product)) return;
+      if(isTwoPei(rec.product)) return null;
     }
 
-    const key = `${lineKey}||${catKey}||${prodKey}`;
+    const key = `${catKey}||${prodKey}`; // ✅ 不含線別：同品項跨線合併
     if(!map.has(key)){
       map.set(key, {
         key,
-        lineKey, catKey, prodKey,
-        line: displayLineName(rec.line),
+        catKey, prodKey,
         cat: cleanText(rec.category || ""),
         prod: cleanText(rec.product),
+        // for picking a representative line (for click-to-drilldown)
+        linePick: new Map(),  // lineKey -> qtySum
+        lineName: new Map(),  // lineKey -> display line
         qtySum: 0, qtyCnt: 0,
         peopleSum: 0, peopleCnt: 0,
         effSum: 0, effCnt: 0,
         capSum: 0, capCnt: 0
       });
     }
-    const it = map.get(key);
+    return map.get(key);
+  }
+
+  function acc(map, rec){
+    const it = ensure(map, rec);
+    if(!it) return;
 
     const q = _safeNum(rec.qty);
-    if(Number.isFinite(q)){ it.qtySum += q; it.qtyCnt++; }
+    if(Number.isFinite(q)){
+      it.qtySum += q; it.qtyCnt++;
+      const lk = cleanKey(rec.line);
+      if(lk){
+        it.linePick.set(lk, (it.linePick.get(lk) || 0) + q);
+        if(!it.lineName.has(lk)) it.lineName.set(lk, displayLineName(rec.line));
+      }
+    }
 
     const p = _safeNum(rec.people);
     if(Number.isFinite(p)){ it.peopleSum += p; it.peopleCnt++; }
@@ -4037,34 +4053,94 @@ function _prodDropAgg(pairFilter){
   for(const key of allKeys){
     const cur = curMap.get(key);
     const prev = prevMap.get(key);
-
     const meta = cur || prev;
     if(!meta) continue;
 
-    const curQtySum = cur ? cur.qtySum : 0;
+    const curQtySum  = cur ? cur.qtySum  : 0;
     const prevQtySum = prev ? prev.qtySum : 0;
 
-    const curAvg = curQtySum / curDays;
-    const prevAvg = prevQtySum / prevDays;
+    const curAvgQtyDay  = curQtySum / curDays;
+    const prevAvgQtyDay = prevQtySum / prevDays;
 
-    const drop = prevAvg - curAvg;
-    if(!(drop > 0)) continue;
+    const curAvgEff  = (cur && cur.effCnt>0) ? (cur.effSum/cur.effCnt) : NaN;
+    const prevAvgEff = (prev && prev.effCnt>0) ? (prev.effSum/prev.effCnt) : NaN;
+
+    const curAvgCap  = (cur && cur.capCnt>0) ? (cur.capSum/cur.capCnt) : NaN;
+    const prevAvgCap = (prev && prev.capCnt>0) ? (prev.capSum/prev.capCnt) : NaN;
+
+    let curVal, prevVal;
+    if(metric === "qty"){
+      curVal = curAvgQtyDay;
+      prevVal = prevAvgQtyDay;
+    }else if(metric === "cap"){
+      curVal = curAvgCap;
+      prevVal = prevAvgCap;
+    }else{
+      curVal = curAvgEff;
+      prevVal = prevAvgEff;
+    }
+
+    // cap/eff 需要兩期都有效；qty 可接受 0
+    if(metric !== "qty"){
+      if(!Number.isFinite(curVal) || !Number.isFinite(prevVal)) continue;
+    }
+
+    const dropVal = prevVal - curVal;
+    if(!(dropVal > 0)) continue;
+
+    // choose a representative line for drilldown
+    const pickFrom = (cur && cur.linePick && cur.linePick.size) ? cur : prev;
+    let lineKey = "";
+    let line = "—";
+    if(pickFrom && pickFrom.linePick && pickFrom.linePick.size){
+      let best = -Infinity;
+      for(const [lk, qs] of pickFrom.linePick.entries()){
+        if(qs > best){ best = qs; lineKey = lk; }
+      }
+      if(lineKey){
+        line = pickFrom.lineName.get(lineKey) || displayLineName(lineKey);
+      }
+    }
 
     const li = getLaunchDateInfoForProd(meta.prod);
     const launchStr = (li && li.str) ? li.str : "";
     const launchDays = _calcLaunchDays(li ? li.date : null);
 
     out.push({
-      lineKey: meta.lineKey, catKey: meta.catKey, prodKey: meta.prodKey,
-      line: meta.line, cat: meta.cat, prod: meta.prod,
-      launchStr, launchDays,
-      // current-period metrics (used in cards + click pick)
-      totalQty: cur ? cur.qtySum : 0,
-      avgQtyDay: curAvg,
-      prevAvgQtyDay: prevAvg,
-      dropQty: drop,
+      metric,
+      lineKey,
+      line,
+      catKey: meta.catKey,
+      prodKey: meta.prodKey,
+      cat: meta.cat,
+      prod: meta.prod,
+      launchStr,
+      launchDays,
+
+      // current-period metrics (for display)
+      totalQty: curQtySum,
+      avgQtyDay: curAvgQtyDay,
+
       avgPeople: (cur && cur.peopleCnt>0) ? (cur.peopleSum/cur.peopleCnt) : NaN,
-      avgEff: (cur && cur.effCnt>0) ? (cur.effSum/cur.effCnt) : NaN,
+      avgEff: curAvgEff,
+      avgCap: curAvgCap,
+
+      // prev/current values for the chosen metric
+      prevVal,
+      curVal,
+      dropVal
+    });
+  }
+
+  out.sort((a,b)=> (b.dropVal - a.dropVal) || (b.avgQtyDay - a.avgQtyDay));
+  return out.slice(0, 6);
+}
+
+// backward compatible wrapper (older code uses _prodDropAgg + mode "drop")
+function _prodDropAgg(pairFilter){
+  return _metricDropAgg("qty", pairFilter);
+}
+,
       avgCap: (cur && cur.capCnt>0) ? (cur.capSum/cur.capCnt) : NaN
     });
   }
@@ -4084,15 +4160,24 @@ function renderLowestRatePanel(){
   const pf = $("pairFilter");
   const pair = (pf && pf.value) ? pf.value : "all";
 
-  const mode = sel.value || "human";
+  // backward compatible: allow "drop" to behave as "drop_qty"
+  const modeRaw = sel.value || "human";
+  const mode = (modeRaw === "drop") ? "drop_qty" : modeRaw;
 
   let list = [];
-  if(mode === "drop"){
-    list = _prodDropAgg(pair);
-    empty.textContent = "目前範圍內未取得可比較的上一期生產量資料。";
-  }else{
+  let label = "";
+  let isDrop = false;
+
+  if(mode === "human" || mode === "cap"){
     list = _lowestRateAgg(mode, pair);
+    label = (mode === "cap") ? "產能達成率" : "人時達成率";
     empty.textContent = "目前範圍內未取得達成率資料。";
+  }else{
+    isDrop = true;
+    const metric = (mode === "drop_cap") ? "cap" : ((mode === "drop_eff") ? "eff" : "qty");
+    list = _metricDropAgg(metric, pair);
+    label = (metric === "cap") ? "產能下滑數" : ((metric === "eff") ? "人時性下滑數" : "生產量下滑數");
+    empty.textContent = "目前範圍內未取得可比較的上一期資料。";
   }
 
   box.innerHTML = "";
@@ -4102,32 +4187,35 @@ function renderLowestRatePanel(){
   }
   empty.classList.add("hidden");
 
-  const label = (mode === "drop")
-    ? "生產量下滑數"
-    : ((mode === "cap") ? "產能達成率" : "人時達成率");
-
   for(let i=0;i<list.length;i++){
     const it = list[i];
     const btn = document.createElement("button");
     const _isTop6 = i < 6;
     const _titleCls = _isTop6 ? "text-red-700" : "text-slate-900";
-    const _rateCls  = _isTop6 ? "text-red-600" : "text-slate-900";
+    const _metricCls  = _isTop6 ? "text-red-600" : "text-slate-900";
     btn.type = "button";
     btn.className = "w-full flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left hover:bg-white";
 
-    const isDrop = (mode === "drop");
-    const rateText = isDrop ? fmtInt(it.dropQty) : fmtPct(it.avgAch);
     const sub = `${it.cat || "—"} ｜ ${it.line || "—"}`;
 
-    const qtyText = fmtInt(it.totalQty);
+    const launchDaysText = (it.launchDays===null || it.launchDays===undefined) ? "—" : String(it.launchDays);
     const peopleText = fmtDec(it.avgPeople, 2);
     const avgQtyDayText = fmtInt(it.avgQtyDay);
+
     const effText = fmtDec(it.avgEff, 2);
     const capText = fmtDec(it.avgCap, 2);
-    const launchDaysText = (it.launchDays===null || it.launchDays===undefined) ? "—" : String(it.launchDays);
 
-    const thirdLabel = isDrop ? "前期→本期" : ((mode === "cap") ? "產能" : "人時性");
-    const thirdVal = isDrop ? `${fmtInt(it.prevAvgQtyDay)} → ${fmtInt(it.avgQtyDay)}` : ((mode === "cap") ? capText : effText);
+    const metricText = isDrop
+      ? ((it.metric === "qty") ? fmtInt(it.dropVal) : fmtDec(it.dropVal, 1))
+      : fmtPct(it.avgAch);
+
+    const deltaHint = isDrop
+      ? ((it.metric === "qty")
+          ? `${fmtInt(it.prevVal)} → ${fmtInt(it.curVal)}`
+          : `${fmtDec(it.prevVal, 1)} → ${fmtDec(it.curVal, 1)}`)
+      : ((mode === "cap") ? capText : effText);
+
+    const deltaLabel = isDrop ? "前期→本期" : ((mode === "cap") ? "產能" : "人時性");
 
     btn.innerHTML = `
       <div class="min-w-0 flex-1">
@@ -4139,27 +4227,27 @@ function renderLowestRatePanel(){
 
         <div class="mt-2 grid grid-cols-3 gap-2 text-xs">
           <div class="rounded-lg bg-white border border-slate-200 px-2 py-1">
-            <div class="text-slate-500">生產量</div>
-            <div class="mono font-bold text-slate-900">${qtyText}</div>
+            <div class="text-slate-500">上市天數</div>
+            <div class="mono font-bold text-slate-900">${launchDaysText}</div>
           </div>
           <div class="rounded-lg bg-white border border-slate-200 px-2 py-1">
-            <div class="text-slate-500">日均量</div>
+            <div class="text-slate-500">平均人數</div>
+            <div class="mono font-bold text-slate-900">${peopleText}</div>
+          </div>
+          <div class="rounded-lg bg-white border border-slate-200 px-2 py-1">
+            <div class="text-slate-500">日均生產量</div>
             <div class="mono font-bold text-slate-900">${avgQtyDayText}</div>
-          </div>
-          <div class="rounded-lg bg-white border border-slate-200 px-2 py-1">
-            <div class="text-slate-500">${thirdLabel}</div>
-            <div class="mono font-bold text-slate-900">${thirdVal}</div>
           </div>
         </div>
 
         <div class="mt-1 text-[11px] text-slate-400">
-          平均人數 ${peopleText} ｜ 人時性 ${effText} ｜ 產能 ${capText} ｜ 上市後天數 ${launchDaysText}
+          生產量 ${fmtInt(it.totalQty)} ｜ ${deltaLabel} ${deltaHint}
         </div>
       </div>
 
       <div class="shrink-0 text-right">
         <div class="text-xs font-bold text-slate-500">前六名</div>
-        <div class="mono text-2xl font-black ${_rateCls}">${rateText}</div>
+        <div class="mono text-2xl font-black ${_metricCls}">${metricText}</div>
       </div>
     `;
 
