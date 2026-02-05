@@ -3895,14 +3895,15 @@ function _isSummaryRowProdName(prod){
 
 // mode=drop：回傳下滑數最高的前 6 名（drop = prevAvgQtyDay - curAvgQtyDay, 僅列 drop>0）
 function _prodDropAgg(pairFilter){
+  // 生產量下滑數：以「品項」為彙總單位（不依線別），避免品項跨週/跨期換線導致本期為 0 的假下滑
   const curSet = getDateSetInSelection();
   const prevSet = _getPrevMmddSetForDrop();
 
   const curDays = Math.max(1, (curSet && curSet.size) ? curSet.size : 0);
   const prevDays = Math.max(1, (prevSet && prevSet.size) ? prevSet.size : 0);
 
-  const curMap = new Map();
-  const prevMap = new Map();
+  const curMap = new Map();   // key = prodKey
+  const prevMap = new Map();  // key = prodKey
 
   function acc(map, rec){
     const lineKey = cleanKey(rec.line);
@@ -3919,24 +3920,37 @@ function _prodDropAgg(pairFilter){
       if(isTwoPei(rec.product)) return;
     }
 
-    const key = `${lineKey}||${catKey}||${prodKey}`;
+    const key = prodKey; // ✅ 不再納入 lineKey，避免換線造成誤判
     if(!map.has(key)){
       map.set(key, {
         key,
-        lineKey, catKey, prodKey,
-        line: displayLineName(rec.line),
-        cat: cleanText(rec.category || ""),
+        prodKey,
         prod: cleanText(rec.product),
         qtySum: 0, qtyCnt: 0,
         peopleSum: 0, peopleCnt: 0,
         effSum: 0, effCnt: 0,
-        capSum: 0, capCnt: 0
+        capSum: 0, capCnt: 0,
+        // 用於點選跳轉：挑出「目前期」最主要的 (line, category, product) 組合
+        comboQty: Object.create(null),
+        comboMeta: Object.create(null),
       });
     }
     const it = map.get(key);
 
     const q = _safeNum(rec.qty);
-    if(Number.isFinite(q)){ it.qtySum += q; it.qtyCnt++; }
+    if(Number.isFinite(q)){
+      it.qtySum += q; it.qtyCnt++;
+      const comboKey = `${lineKey}||${catKey}`;
+      it.comboQty[comboKey] = (it.comboQty[comboKey] || 0) + q;
+      if(!it.comboMeta[comboKey]){
+        it.comboMeta[comboKey] = {
+          lineKey,
+          catKey,
+          line: displayLineName(rec.line),
+          cat: cleanText(rec.category || ""),
+        };
+      }
+    }
 
     const p = _safeNum(rec.people);
     if(Number.isFinite(p)){ it.peopleSum += p; it.peopleCnt++; }
@@ -3957,6 +3971,31 @@ function _prodDropAgg(pairFilter){
   const allKeys = new Set([...curMap.keys(), ...prevMap.keys()]);
   const out = [];
 
+  function pickRepresentative(cur, prev){
+    // 優先使用「本期」出現且產量最高的組合；若本期無資料則用前期
+    const src = (cur && cur.comboQty && Object.keys(cur.comboQty).length) ? cur
+              : (prev && prev.comboQty && Object.keys(prev.comboQty).length) ? prev
+              : null;
+    if(!src) return { lineKey: "", catKey: "", line: "—", cat: "—" };
+
+    let bestKey = null;
+    let bestVal = -Infinity;
+    for(const k in src.comboQty){
+      const v = src.comboQty[k] || 0;
+      if(v > bestVal){
+        bestVal = v;
+        bestKey = k;
+      }
+    }
+    if(bestKey && src.comboMeta && src.comboMeta[bestKey]) return src.comboMeta[bestKey];
+
+    // fallback：任取一個 meta
+    if(src.comboMeta){
+      for(const k in src.comboMeta) return src.comboMeta[k];
+    }
+    return { lineKey: "", catKey: "", line: "—", cat: "—" };
+  }
+
   for(const key of allKeys){
     const cur = curMap.get(key);
     const prev = prevMap.get(key);
@@ -3973,18 +4012,20 @@ function _prodDropAgg(pairFilter){
     const drop = prevAvg - curAvg;
     if(!(drop > 0)) continue;
 
+    const rep = pickRepresentative(cur, prev);
+
     const li = getLaunchDateInfoForProd(meta.prod);
     const launchStr = (li && li.str) ? li.str : "";
     const launchDays = _calcLaunchDays(li ? li.date : null);
 
     out.push({
-      lineKey: meta.lineKey, catKey: meta.catKey, prodKey: meta.prodKey,
-      line: meta.line, cat: meta.cat, prod: meta.prod,
+      lineKey: rep.lineKey, catKey: rep.catKey, prodKey: meta.prodKey,
+      line: rep.line, cat: rep.cat, prod: meta.prod,
       launchStr, launchDays,
-      // current-period metrics (used in cards + click pick)
-      totalQty: cur ? cur.qtySum : 0,
-      avgQtyDay: curAvg,
-      prevAvgQtyDay: prevAvg,
+      // current-period metrics (cards)
+      totalQty: cur ? cur.qtySum : 0,           // ✅ 本期：跨線別彙總
+      avgQtyDay: curAvg,                        // ✅ 本期日均：跨線別彙總
+      prevAvgQtyDay: prevAvg,                   // ✅ 前期日均：跨線別彙總
       dropQty: drop,
       avgPeople: (cur && cur.peopleCnt>0) ? (cur.peopleSum/cur.peopleCnt) : NaN,
       avgEff: (cur && cur.effCnt>0) ? (cur.effSum/cur.effCnt) : NaN,
@@ -3995,9 +4036,6 @@ function _prodDropAgg(pairFilter){
   out.sort((a,b)=> (b.dropQty - a.dropQty) || (b.avgQtyDay - a.avgQtyDay));
   return out.slice(0, 6);
 }
-
-
-
 function renderLowestRatePanel(){
   const sel = $("lowestRateMode");
   const box = $("lowestRateList");
