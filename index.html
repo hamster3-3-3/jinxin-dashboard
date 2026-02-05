@@ -309,12 +309,10 @@
         <div class="flex items-center gap-2">
           <div class="text-slate-500 text-sm font-bold whitespace-nowrap shrink-0 leading-none">排序依據</div>
           <select id="lowestRateMode" class="select" style="max-width: 18rem;">
-
             <option value="human">最低人時達成率（前六）</option>
             <option value="cap">最低產能達成率（前六）</option>
-            <option value="drop_qty">生產量下滑數（高→低）</option>
-            <option value="drop_cap">產能下滑數（高→低）</option>
-            <option value="drop_eff">人時性下滑數（高→低）</option>
+            <option value="drop">生產量下滑數（高→低）</option>
+          
           </select>
         </div>
       </div>
@@ -3672,17 +3670,16 @@ function refreshLowestRateModeOptions(){
   const sel = $("lowestRateMode");
   if(!sel) return;
 
-  // Backward compatible: older builds might store "drop"
-  const currentRaw = sel.value || "human";
-  const current = (currentRaw === "drop") ? "drop_qty" : currentRaw;
-
+  const current = sel.value || (String(state.temp) === "4" ? "human" : "drop_qty");
   const opts = [];
+
   // 4°C：保留達成率兩種排序
   if(String(state.temp) === "4"){
     opts.push(["human","最低人時達成率（前六）"]);
     opts.push(["cap","最低產能達成率（前六）"]);
   }
-  // 下滑類：兩個溫層都可用
+
+  // 下滑數（跨線別彙總，以品名為主鍵）
   opts.push(["drop_qty","生產量下滑數（高→低）"]);
   opts.push(["drop_cap","產能下滑數（高→低）"]);
   opts.push(["drop_eff","人時性下滑數（高→低）"]);
@@ -3695,8 +3692,8 @@ function refreshLowestRateModeOptions(){
     sel.appendChild(o);
   }
 
-  const allowed = opts.map(x=>x[0]);
-  sel.value = allowed.includes(current) ? current : opts[0][0];
+  const allowed = new Set(opts.map(x=>x[0]));
+  sel.value = allowed.has(current) ? current : opts[0][0];
 }
 
 
@@ -3973,7 +3970,13 @@ function _getPrevMmddSetForDrop(){
   return new Set();
 }
 
-funcfunction _metricDropAgg(metric, pairFilter){
+function _isSummaryRowProdName(prod){
+  const p = cleanText(prod || "");
+  return !p || /(平均|合計|小計|總計)/.test(p);
+}
+
+// mode=drop：回傳下滑數最高的前 6 名（drop = prevAvgQtyDay - curAvgQtyDay, 僅列 drop>0）
+function _metricDropAgg(metric, pairFilter){
   // metric: "qty" | "cap" | "eff"
   const curSet = getDateSetInSelection();
   const prevSet = _getPrevMmddSetForDrop();
@@ -3985,10 +3988,8 @@ funcfunction _metricDropAgg(metric, pairFilter){
   const prevMap = new Map();
 
   function ensure(map, rec){
-    const catKey  = cleanKey(rec.category || "");
     const prodKey = cleanKey(rec.product);
-    if(!catKey || !prodKey) return null;
-    if(catKey === "0") return null;
+    if(!prodKey) return null;
     if(_isSummaryRowProdName(rec.product)) return null;
 
     // 配別篩選：以品名前二字是否為「二配」判定
@@ -3998,23 +3999,22 @@ funcfunction _metricDropAgg(metric, pairFilter){
       if(isTwoPei(rec.product)) return null;
     }
 
-    const key = `${catKey}||${prodKey}`; // ✅ 不含線別：同品項跨線合併
-    if(!map.has(key)){
-      map.set(key, {
-        key,
-        catKey, prodKey,
-        cat: cleanText(rec.category || ""),
+    if(!map.has(prodKey)){
+      map.set(prodKey, {
+        prodKey,
         prod: cleanText(rec.product),
-        // for picking a representative line (for click-to-drilldown)
-        linePick: new Map(),  // lineKey -> qtySum
-        lineName: new Map(),  // lineKey -> display line
+        // 統計
         qtySum: 0, qtyCnt: 0,
         peopleSum: 0, peopleCnt: 0,
         effSum: 0, effCnt: 0,
-        capSum: 0, capCnt: 0
+        capSum: 0, capCnt: 0,
+        // 代表線別/品群（用產量加權挑最大的）
+        lineQty: Object.create(null),
+        catQty: Object.create(null),
+        catKeyBy: Object.create(null),
       });
     }
-    return map.get(key);
+    return map.get(prodKey);
   }
 
   function acc(map, rec){
@@ -4026,8 +4026,13 @@ funcfunction _metricDropAgg(metric, pairFilter){
       it.qtySum += q; it.qtyCnt++;
       const lk = cleanKey(rec.line);
       if(lk){
-        it.linePick.set(lk, (it.linePick.get(lk) || 0) + q);
-        if(!it.lineName.has(lk)) it.lineName.set(lk, displayLineName(rec.line));
+        it.lineQty[lk] = (it.lineQty[lk] || 0) + q;
+      }
+      const ck = cleanKey(rec.category || "");
+      if(ck){
+        it.catQty[ck] = (it.catQty[ck] || 0) + q;
+        // preserve display text
+        it.catKeyBy[ck] = cleanText(rec.category || "");
       }
     }
 
@@ -4047,85 +4052,90 @@ funcfunction _metricDropAgg(metric, pairFilter){
     if(prevSet.has(rec.mmdd)) acc(prevMap, rec);
   }
 
+  function pickTop(obj){
+    let bestK = "";
+    let bestV = -Infinity;
+    for(const k in obj){
+      const v = obj[k];
+      if(v > bestV){
+        bestV = v; bestK = k;
+      }
+    }
+    return bestK || "";
+  }
+
   const allKeys = new Set([...curMap.keys(), ...prevMap.keys()]);
   const out = [];
 
-  for(const key of allKeys){
-    const cur = curMap.get(key);
-    const prev = prevMap.get(key);
+  for(const prodKey of allKeys){
+    const cur = curMap.get(prodKey);
+    const prev = prevMap.get(prodKey);
     const meta = cur || prev;
     if(!meta) continue;
 
-    const curQtySum  = cur ? cur.qtySum  : 0;
+    // representative line/category: prefer current period, fallback previous
+    const repLineKey = pickTop((cur && cur.lineQty) ? cur.lineQty : (prev ? prev.lineQty : {}));
+    const repCatKey  = pickTop((cur && cur.catQty) ? cur.catQty : (prev ? prev.catQty : {}));
+
+    const repLineName = repLineKey ? displayLineName(repLineKey) : "—";
+    const repCatName  = repCatKey ? (meta.catKeyBy && meta.catKeyBy[repCatKey] ? meta.catKeyBy[repCatKey] : "—") : "—";
+
+    const curQtySum = cur ? cur.qtySum : 0;
     const prevQtySum = prev ? prev.qtySum : 0;
 
-    const curAvgQtyDay  = curQtySum / curDays;
+    const curAvgQtyDay = curQtySum / curDays;
     const prevAvgQtyDay = prevQtySum / prevDays;
 
-    const curAvgEff  = (cur && cur.effCnt>0) ? (cur.effSum/cur.effCnt) : NaN;
-    const prevAvgEff = (prev && prev.effCnt>0) ? (prev.effSum/prev.effCnt) : NaN;
+    const curAvgPeople = (cur && cur.peopleCnt>0) ? (cur.peopleSum/cur.peopleCnt) : NaN;
+    const curAvgEff = (cur && cur.effCnt>0) ? (cur.effSum/cur.effCnt) : NaN;
+    const curAvgCap = (cur && cur.capCnt>0) ? (cur.capSum/cur.capCnt) : NaN;
 
-    const curAvgCap  = (cur && cur.capCnt>0) ? (cur.capSum/cur.capCnt) : NaN;
+    const prevAvgEff = (prev && prev.effCnt>0) ? (prev.effSum/prev.effCnt) : NaN;
     const prevAvgCap = (prev && prev.capCnt>0) ? (prev.capSum/prev.capCnt) : NaN;
 
-    let curVal, prevVal;
+    let prevVal = NaN, curVal = NaN, dropVal = NaN;
     if(metric === "qty"){
-      curVal = curAvgQtyDay;
       prevVal = prevAvgQtyDay;
+      curVal = curAvgQtyDay;
+      dropVal = prevVal - curVal;
     }else if(metric === "cap"){
-      curVal = curAvgCap;
       prevVal = prevAvgCap;
-    }else{
-      curVal = curAvgEff;
+      curVal = curAvgCap;
+      dropVal = prevVal - curVal;
+    }else if(metric === "eff"){
       prevVal = prevAvgEff;
+      curVal = curAvgEff;
+      dropVal = prevVal - curVal;
+    }else{
+      continue;
     }
 
-    // cap/eff 需要兩期都有效；qty 可接受 0
-    if(metric !== "qty"){
-      if(!Number.isFinite(curVal) || !Number.isFinite(prevVal)) continue;
-    }
-
-    const dropVal = prevVal - curVal;
-    if(!(dropVal > 0)) continue;
-
-    // choose a representative line for drilldown
-    const pickFrom = (cur && cur.linePick && cur.linePick.size) ? cur : prev;
-    let lineKey = "";
-    let line = "—";
-    if(pickFrom && pickFrom.linePick && pickFrom.linePick.size){
-      let best = -Infinity;
-      for(const [lk, qs] of pickFrom.linePick.entries()){
-        if(qs > best){ best = qs; lineKey = lk; }
-      }
-      if(lineKey){
-        line = pickFrom.lineName.get(lineKey) || displayLineName(lineKey);
-      }
-    }
+    if(!(dropVal > 0) || !Number.isFinite(dropVal)) continue;
 
     const li = getLaunchDateInfoForProd(meta.prod);
     const launchStr = (li && li.str) ? li.str : "";
     const launchDays = _calcLaunchDays(li ? li.date : null);
 
     out.push({
-      metric,
-      lineKey,
-      line,
-      catKey: meta.catKey,
-      prodKey: meta.prodKey,
-      cat: meta.cat,
+      // pick payload for click
+      lineKey: repLineKey || "",
+      catKey: repCatKey || "",
+      prodKey: meta.prodKey || prodKey,
+      line: repLineName,
+      cat: repCatName,
       prod: meta.prod,
-      launchStr,
-      launchDays,
 
-      // current-period metrics (for display)
+      launchStr, launchDays,
+
+      // current-period metrics (cards)
       totalQty: curQtySum,
       avgQtyDay: curAvgQtyDay,
-
-      avgPeople: (cur && cur.peopleCnt>0) ? (cur.peopleSum/cur.peopleCnt) : NaN,
+      avgPeople: curAvgPeople,
       avgEff: curAvgEff,
       avgCap: curAvgCap,
 
-      // prev/current values for the chosen metric
+      // drop info
+      metric,
       prevVal,
       curVal,
       dropVal
@@ -4136,17 +4146,9 @@ funcfunction _metricDropAgg(metric, pairFilter){
   return out.slice(0, 6);
 }
 
-// backward compatible wrapper (older code uses _prodDropAgg + mode "drop")
 function _prodDropAgg(pairFilter){
+  // backward compatible wrapper (older code may use mode "drop")
   return _metricDropAgg("qty", pairFilter);
-}
-,
-      avgCap: (cur && cur.capCnt>0) ? (cur.capSum/cur.capCnt) : NaN
-    });
-  }
-
-  out.sort((a,b)=> (b.dropQty - a.dropQty) || (b.avgQtyDay - a.avgQtyDay));
-  return out.slice(0, 6);
 }
 
 
@@ -4160,24 +4162,17 @@ function renderLowestRatePanel(){
   const pf = $("pairFilter");
   const pair = (pf && pf.value) ? pf.value : "all";
 
-  // backward compatible: allow "drop" to behave as "drop_qty"
-  const modeRaw = sel.value || "human";
-  const mode = (modeRaw === "drop") ? "drop_qty" : modeRaw;
+  const mode = sel.value || (String(state.temp) === "4" ? "human" : "drop_qty");
 
   let list = [];
-  let label = "";
-  let isDrop = false;
-
-  if(mode === "human" || mode === "cap"){
-    list = _lowestRateAgg(mode, pair);
-    label = (mode === "cap") ? "產能達成率" : "人時達成率";
-    empty.textContent = "目前範圍內未取得達成率資料。";
-  }else{
-    isDrop = true;
-    const metric = (mode === "drop_cap") ? "cap" : ((mode === "drop_eff") ? "eff" : "qty");
+  const isDropMode = mode.startsWith("drop_") || mode === "drop";
+  if(isDropMode){
+    const metric = (mode === "drop_cap") ? "cap" : (mode === "drop_eff") ? "eff" : "qty";
     list = _metricDropAgg(metric, pair);
-    label = (metric === "cap") ? "產能下滑數" : ((metric === "eff") ? "人時性下滑數" : "生產量下滑數");
     empty.textContent = "目前範圍內未取得可比較的上一期資料。";
+  }else{
+    list = _lowestRateAgg(mode, pair);
+    empty.textContent = "目前範圍內未取得達成率資料。";
   }
 
   box.innerHTML = "";
@@ -4187,67 +4182,82 @@ function renderLowestRatePanel(){
   }
   empty.classList.add("hidden");
 
+  const labelMap = {
+    human: "人時達成率",
+    cap: "產能達成率",
+    drop: "生產量下滑數",
+    drop_qty: "生產量下滑數",
+    drop_cap: "產能下滑數",
+    drop_eff: "人時性下滑數"
+  };
+  const label = labelMap[mode] || "—";
+
   for(let i=0;i<list.length;i++){
     const it = list[i];
     const btn = document.createElement("button");
     const _isTop6 = i < 6;
     const _titleCls = _isTop6 ? "text-red-700" : "text-slate-900";
-    const _metricCls  = _isTop6 ? "text-red-600" : "text-slate-900";
+    const _metricCls = _isTop6 ? "text-red-600" : "text-slate-900";
+
     btn.type = "button";
-    btn.className = "w-full flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left hover:bg-white";
+    btn.className = "w-full rounded-2xl border border-slate-200 bg-white px-5 py-4 text-left hover:border-slate-300 hover:shadow-sm transition";
 
-    const sub = `${it.cat || "—"} ｜ ${it.line || "—"}`;
+    // subtitle
+    const sub = isDropMode
+      ? `${it.cat || "—"} ｜ 代表線別：${it.line || "—"}（跨線別彙總）`
+      : `${it.cat || "—"} ｜ ${it.line || "—"}`;
 
+    // fixed fields
     const launchDaysText = (it.launchDays===null || it.launchDays===undefined) ? "—" : String(it.launchDays);
     const peopleText = fmtDec(it.avgPeople, 2);
     const avgQtyDayText = fmtInt(it.avgQtyDay);
 
-    const effText = fmtDec(it.avgEff, 2);
-    const capText = fmtDec(it.avgCap, 2);
-
-    const metricText = isDrop
-      ? ((it.metric === "qty") ? fmtInt(it.dropVal) : fmtDec(it.dropVal, 1))
-      : fmtPct(it.avgAch);
-
-    const deltaHint = isDrop
-      ? ((it.metric === "qty")
-          ? `${fmtInt(it.prevVal)} → ${fmtInt(it.curVal)}`
-          : `${fmtDec(it.prevVal, 1)} → ${fmtDec(it.curVal, 1)}`)
-      : ((mode === "cap") ? capText : effText);
-
-    const deltaLabel = isDrop ? "前期→本期" : ((mode === "cap") ? "產能" : "人時性");
+    // right metric
+    let metricText = "—";
+    let metricSub = "";
+    if(isDropMode){
+      if(it.metric === "qty"){
+        metricText = fmtInt(it.dropVal);
+        metricSub = `${fmtInt(it.prevVal)} → ${fmtInt(it.curVal)}`;
+      }else{
+        metricText = fmtDec(it.dropVal, 2);
+        metricSub = `${fmtDec(it.prevVal, 2)} → ${fmtDec(it.curVal, 2)}`;
+      }
+    }else{
+      metricText = fmtPct(it.avgAch);
+      metricSub = (mode === "cap") ? `產能 ${fmtDec(it.avgCap,2)}` : `人時性 ${fmtDec(it.avgEff,2)}`;
+    }
 
     btn.innerHTML = `
-      <div class="min-w-0 flex-1">
-        <div class="flex items-center gap-2">
-          <div class="truncate text-sm font-extrabold ${_titleCls}">${it.prod || "—"}</div>
-          <div class="shrink-0 text-xs font-bold text-slate-400">(${label})</div>
-        </div>
-        <div class="mt-1 truncate text-xs text-slate-500">${sub}</div>
-
-        <div class="mt-2 grid grid-cols-3 gap-2 text-xs">
-          <div class="rounded-lg bg-white border border-slate-200 px-2 py-1">
-            <div class="text-slate-500">上市天數</div>
-            <div class="mono font-bold text-slate-900">${launchDaysText}</div>
+      <div class="flex items-start justify-between gap-4">
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2">
+            <div class="truncate text-base font-extrabold ${_titleCls}">${it.prod || "—"}</div>
+            <span class="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-bold text-slate-500">${label}</span>
           </div>
-          <div class="rounded-lg bg-white border border-slate-200 px-2 py-1">
-            <div class="text-slate-500">平均人數</div>
-            <div class="mono font-bold text-slate-900">${peopleText}</div>
-          </div>
-          <div class="rounded-lg bg-white border border-slate-200 px-2 py-1">
-            <div class="text-slate-500">日均生產量</div>
-            <div class="mono font-bold text-slate-900">${avgQtyDayText}</div>
+          <div class="mt-1 truncate text-xs text-slate-500">${sub}</div>
+
+          <div class="mt-3 grid grid-cols-3 gap-2">
+            <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+              <div class="text-[11px] font-bold text-slate-500">上市天數</div>
+              <div class="mono text-sm font-extrabold text-slate-900">${launchDaysText}</div>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+              <div class="text-[11px] font-bold text-slate-500">平均人數</div>
+              <div class="mono text-sm font-extrabold text-slate-900">${peopleText}</div>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+              <div class="text-[11px] font-bold text-slate-500">日均生產量</div>
+              <div class="mono text-sm font-extrabold text-slate-900">${avgQtyDayText}</div>
+            </div>
           </div>
         </div>
 
-        <div class="mt-1 text-[11px] text-slate-400">
-          生產量 ${fmtInt(it.totalQty)} ｜ ${deltaLabel} ${deltaHint}
+        <div class="shrink-0 text-right">
+          <div class="text-xs font-bold text-slate-500">前六名</div>
+          <div class="mono text-3xl font-black ${_metricCls}">${metricText}</div>
+          <div class="mono mt-0.5 text-[11px] font-bold text-slate-400">${metricSub}</div>
         </div>
-      </div>
-
-      <div class="shrink-0 text-right">
-        <div class="text-xs font-bold text-slate-500">前六名</div>
-        <div class="mono text-2xl font-black ${_metricCls}">${metricText}</div>
       </div>
     `;
 
