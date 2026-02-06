@@ -901,13 +901,17 @@ async function loadDevConfirmFromRepo(){
 
 
 function escapeHtml(s){
-  return cleanText(s).replace(/[&<>"']/g, (c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}
-
+  return cleanText(s).replace(/[&<>"']/g, (c)=>({
+    "&":"&amp;",
+    "<":"&lt;",
+    ">":"&gt;",
+    '"':"&quot;",
+    "'":"&#39;"
+  }[c]));
+}
 // alias: some modules call escapeHTML
 function escapeHTML(s){
   return escapeHtml(s);
-}
-[c]));
 }
 
 function toNumber(v){
