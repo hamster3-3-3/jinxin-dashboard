@@ -2562,6 +2562,14 @@ function buildProductSeries(rows, metric){
   let title = "週別（全年｜每週平均）";
   let focus = items;
 
+  // 格式化：MM/DD（用於「月別＝每週平均」的 X 軸顯示週範圍）
+  const md = (d)=>{
+    if(!(d instanceof Date)) return "";
+    const m = String(d.getUTCMonth()+1).padStart(2,"0");
+    const day = String(d.getUTCDate()).padStart(2,"0");
+    return `${m}/${day}`;
+  };
+
   if(mode === "month"){
     // 以週起始日（週二）歸屬月份
     focus = items.filter(it => (getWeekStartUTC(it.dateObj).getUTCMonth()+1) === state.month);
@@ -2577,7 +2585,10 @@ function buildProductSeries(rows, metric){
   const weeks = Array.from(byWeek.entries()).sort((a,b)=>a[0].localeCompare(b[0]));
   const labels=[], values=[];
   for(const [wsStr, arr] of weeks){
-    labels.push(wsStr.slice(5));
+    // 月別視圖：原本只顯示週起始日，改成顯示週範圍（週二～週一）
+    const ws = new Date(wsStr + "T00:00:00Z");
+    const we = addDaysUTC(ws, 6);
+    labels.push(`${md(ws)}～${md(we)}`);
     values.push(agg(arr.map(x => x.rec[metric])));
   }
   return {title, labels, values};
