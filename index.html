@@ -4209,26 +4209,30 @@ function renderLowestRatePanel(){
 
     // fixed fields
     const launchDaysText = (it.launchDays===null || it.launchDays===undefined) ? "—" : String(it.launchDays);
+    const launchDateText = (it.launchStr===null || it.launchStr===undefined || it.launchStr==="") ? "—" : String(it.launchStr);
     const peopleText = fmtDec(it.avgPeople, 2);
     const avgQtyDayText = fmtInt(it.avgQtyDay);
 
     // right metric
     let metricText = "—";
-    let metricSub = "";
+    let detailLabel = "—";
+    let detailValue = "—";
     if(isDropMode){
+      detailLabel = "前→現";
       if(it.metric === "qty"){
         metricText = fmtInt(it.dropVal);
-        metricSub = `${fmtInt(it.prevVal)} → ${fmtInt(it.curVal)}`;
+        detailValue = `${fmtInt(it.prevVal)} → ${fmtInt(it.curVal)}`;
       }else{
         metricText = fmtDec(it.dropVal, 2);
-        metricSub = `${fmtDec(it.prevVal, 2)} → ${fmtDec(it.curVal, 2)}`;
+        detailValue = `${fmtDec(it.prevVal, 2)} → ${fmtDec(it.curVal, 2)}`;
       }
     }else{
       metricText = fmtPct(it.avgAch);
-      metricSub = (mode === "cap") ? `產能 ${fmtDec(it.avgCap,2)}` : `人時性 ${fmtDec(it.avgEff,2)}`;
+      detailLabel = (mode === "cap") ? "產能" : "人時性";
+      detailValue = (mode === "cap") ? fmtDec(it.avgCap,2) : fmtDec(it.avgEff,2);
     }
 
-    btn.innerHTML = `
+        btn.innerHTML = `
       <div class="flex items-start justify-between gap-4">
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2">
@@ -4237,10 +4241,11 @@ function renderLowestRatePanel(){
           </div>
           <div class="mt-1 truncate text-xs text-slate-500">${sub}</div>
 
-          <div class="mt-3 grid grid-cols-3 gap-2">
-            <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+          <div class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div class="relative rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
               <div class="text-[11px] font-bold text-slate-500">上市天數</div>
               <div class="mono text-sm font-extrabold text-slate-900">${launchDaysText}</div>
+              <div class="absolute bottom-2 right-3 mono text-[10px] font-bold text-slate-400">${launchDateText}</div>
             </div>
             <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
               <div class="text-[11px] font-bold text-slate-500">平均人數</div>
@@ -4250,13 +4255,16 @@ function renderLowestRatePanel(){
               <div class="text-[11px] font-bold text-slate-500">日均生產量</div>
               <div class="mono text-sm font-extrabold text-slate-900">${avgQtyDayText}</div>
             </div>
+            <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+              <div class="text-[11px] font-bold text-slate-500">${detailLabel}</div>
+              <div class="mono text-sm font-extrabold text-slate-900">${detailValue}</div>
+            </div>
           </div>
         </div>
 
         <div class="shrink-0 text-right">
           <div class="text-xs font-bold text-slate-500">前六名</div>
           <div class="mono text-3xl font-black ${_metricCls}">${metricText}</div>
-          <div class="mono mt-0.5 text-[11px] font-bold text-slate-400">${metricSub}</div>
         </div>
       </div>
     `;
