@@ -1236,7 +1236,7 @@ function parseTempSheet(wb, sheetName, temp, dateKey){
   const idxCat = indexOfHeaderContains(header, "品類");
   const idxProd = indexOfHeaderContains(header, "品名");
   const idxQty = indexOfHeaderContains(header, "生產量");
-  const idxRev = indexOfHeaderContains(header, "營收");
+  const idxRev = (indexOfHeaderContains(header, "營業額")>=0) ? indexOfHeaderContains(header, "營業額") : indexOfHeaderContains(header, "營收");
   const idxMulti = indexOfHeaderContains(header, "多次");
   const idxPeopleList = indexOfAllHeaderContains(header, "人數");
   const idxCapList = indexOfAllHeaderContains(header, "產能/時");
@@ -2246,26 +2246,26 @@ function refreshActiveCatCounts(){
 
     const __badgeHtml = __badge.showPrev
       ? `
-        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5">${__badge.labelCur} <span class="text-slate-900">${__newCnt}</span></div>
-        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5">${__badge.labelPrev} <span class="text-slate-900">${__prevNewCnt}</span></div>
+        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__badge.labelCur} <span class="text-slate-900">${__newCnt}</span></div>
+        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__badge.labelPrev} <span class="text-slate-900">${__prevNewCnt}</span></div>
       `
       : `
-        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5">${__badge.labelCur} <span class="text-slate-900">${__newCnt}</span></div>
+        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__badge.labelCur} <span class="text-slate-900">${__newCnt}</span></div>
       `;
 
-    d.className = "relative group cursor-pointer select-none w-full sm:w-[220px] bg-white border border-slate-200 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-slate-300 transition focus:outline-none focus:ring-2 focus:ring-indigo-300";
+    d.className = "relative group cursor-pointer select-none w-full bg-white border border-slate-200 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-slate-300 transition focus:outline-none focus:ring-2 focus:ring-indigo-300";
     d.tabIndex = 0;
     d.setAttribute("role","button");
     d.setAttribute("aria-label", `選擇品群 ${x.cat}`);
     d.innerHTML = `
-      <div class="flex items-start justify-between gap-2">
+      <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="text-base font-extrabold text-slate-900 truncate">${escapeHtml(x.cat)}</div>
           <div class="mt-1 text-sm font-semibold text-slate-500">${x.n} 種</div>
         </div>
-      </div>
-      <div class="absolute bottom-2 right-2 flex flex-col items-end gap-1">
-        ${__badgeHtml}
+        <div class="flex flex-col items-end gap-1 shrink-0" style="max-width: 7.5rem;">
+          ${__badgeHtml}
+        </div>
       </div>
     `;
     const onPick = ()=> selectActiveGroup(x.cat);
@@ -3628,7 +3628,7 @@ function buildGroupRowsForCat(catName){
 
     if(cleanKey(cleanText(rec.category || "")) !== catKey) continue;
 
-    const dObj = mmddToDateObj(state.year, rec.mmdd);
+    const dObj = dateKeyToDateObj(rec.mmdd) || mmddToDateObj(state.year, rec.mmdd);
     if(!dObj) continue;
     const dateStr = dateObjToStr(dObj);
 
