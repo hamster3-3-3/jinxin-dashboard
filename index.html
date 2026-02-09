@@ -216,10 +216,21 @@
   <div id="chartDirtyHint" class="hint mt-3 hidden text-amber-600 font-bold">條件已變更，請按「更新趨勢圖」。</div>
 
       <div id="chartArea" class="mt-5 hidden">
-        <div>
-          <div id="dailyChartTitle" class="label mb-2">日別（日平均）</div>
-          <div class="chartWrap">
-            <canvas id="dailyChart"></canvas>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <!-- 平均 -->
+          <div>
+            <div id="dailyChartTitle" class="label mb-2">日別（日平均）</div>
+            <div class="chartWrap">
+              <canvas id="dailyChart"></canvas>
+            </div>
+          </div>
+
+          <!-- 加總 -->
+          <div>
+            <div id="dailyChartSumTitle" class="label mb-2">日別（加總）</div>
+            <div class="chartWrap">
+              <canvas id="dailyChartSum"></canvas>
+            </div>
           </div>
         </div>
       </div>
@@ -317,8 +328,19 @@
 
         <div class="mt-4">
           <div id="groupChartTitle" class="text-slate-600 text-sm font-bold mb-2"></div>
-          <div class="relative w-full" style="height: 360px;">
-            <canvas id="groupTrendCanvas"></canvas>
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <div>
+              <div class="text-slate-600 text-sm font-bold mb-2">平均</div>
+              <div class="relative w-full" style="height: 360px;">
+                <canvas id="groupTrendCanvas"></canvas>
+              </div>
+            </div>
+            <div>
+              <div class="text-slate-600 text-sm font-bold mb-2">加總</div>
+              <div class="relative w-full" style="height: 360px;">
+                <canvas id="groupTrendCanvasSum"></canvas>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -2315,6 +2337,7 @@ function refreshKpiCards(){
    趨勢圖：延後生成 + 手動更新
 ========================= */
 let dailyChart = null;
+let dailySumChart = null;
 let cumChart = null;
 let prodChart = null;
 // Safety: older parsing referenced idxBreak (break time column index). We no longer use break columns,
@@ -2544,6 +2567,7 @@ function buildWeeklyOrDailySeries(kpi = state.chartKpi){
 
 function destroyCharts(){
   if(dailyChart){ dailyChart.destroy(); dailyChart = null; }
+  if(dailySumChart){ dailySumChart.destroy(); dailySumChart = null; }
   if(cumChart){ cumChart.destroy(); cumChart = null; }
 }
 
@@ -2763,6 +2787,8 @@ function renderCharts(){
   if(!dailyList.length){
     destroyCharts();
     $("dailyChartTitle").textContent = "日別（日平均）";
+    const _sumTitleEl0 = document.getElementById("dailyChartSumTitle");
+    if(_sumTitleEl0) _sumTitleEl0.textContent = "日別（加總）";
     const _cumTitleEl2 = document.getElementById("cumChartTitle");
     if(_cumTitleEl2) _cumTitleEl2.textContent = "累計";
     state.chartsDirty = false;
@@ -2774,6 +2800,8 @@ function renderCharts(){
   const groupMode = (state.rangeMode === "year") ? "month" : ((state.rangeMode === "month") ? "week" : "day");
   const axisLabel = (groupMode === "month") ? "月別" : ((groupMode === "week") ? "週別" : "日別");
   $("dailyChartTitle").textContent = `${axisLabel}（日平均）`;
+  const sumTitleEl = document.getElementById("dailyChartSumTitle");
+  if(sumTitleEl) sumTitleEl.textContent = `${axisLabel}（加總）`;
 
   const pad2 = (n)=>String(n).padStart(2,"0");
   const fmtMMDDSlash = (d)=>`${pad2(d.getMonth()+1)}/${pad2(d.getDate())}`;
@@ -2931,6 +2959,55 @@ function renderCharts(){
     return buckets.map(b=>bucketDailyAvg(kpi, b));
   };
 
+  // 「加總」系列：用於右側趨勢圖
+  // 注意：部分指標（人時性/平均廠價）本質為比率，無法直接加總，採 bucket 內加權/加權平均。
+  const getSumSeries = (kpi)=>{
+    if(kpi === "avgPrice"){
+      return buckets.map(b=>{
+        let sumRev = 0, sumQty = 0;
+        let any = false;
+        for(const o of b.items){
+          const s = (o && o.summary) ? o.summary : {};
+          const q = toNumber(s.totalQty);
+          const r = toNumber(s.revenue);
+          if(Number.isFinite(r)){ sumRev += r; any = true; }
+          if(Number.isFinite(q) && q > 0){ sumQty += q; any = true; }
+        }
+        return (any && sumQty > 0) ? (sumRev / sumQty) : null;
+      });
+    }
+    if(kpi === "efficiency"){
+      return buckets.map(b=>{
+        let wSum = 0, w = 0;
+        let any = false;
+        for(const o of b.items){
+          const s = (o && o.summary) ? o.summary : {};
+          const e = toNumber(s.efficiency);
+          if(!Number.isFinite(e)) continue;
+          let wt = toNumber(s.attendance);
+          if(!Number.isFinite(wt) || wt <= 0) wt = 1;
+          wSum += e * wt;
+          w += wt;
+          any = true;
+        }
+        return (any && w > 0) ? (wSum / w) : null;
+      });
+    }
+    if(kpi === "itemCount"){
+      return buckets.map(b=>{
+        const set = new Set();
+        for(const o of b.items){
+          const dk = o.mmdd;
+          const s = prodSetByDate.get(dk);
+          if(s){ for(const p of s) set.add(p); }
+        }
+        return set.size;
+      });
+    }
+    // Sum types
+    return buckets.map(b=>bucketSum(kpi, b));
+  };
+
   // 累計規則（與原版一致，但改以 bucket 為 X 單位）：
   // - 產量/營收/多次生產：逐 bucket 加總（bucket 內為日加總）
   // - 出勤人數：A（逐 bucket 加總）
@@ -3002,6 +3079,8 @@ function renderCharts(){
 
   const daily1 = getDailySeries(kpi1);
   const daily2 = kpi2 ? getDailySeries(kpi2) : null;
+  const sum1 = getSumSeries(kpi1);
+  const sum2 = kpi2 ? getSumSeries(kpi2) : null;
   const cum1   = getCumulativeSeries(kpi1);
   const cum2   = kpi2 ? getCumulativeSeries(kpi2) : null;
 
@@ -3066,6 +3145,7 @@ function renderCharts(){
   destroyCharts();
 
   const dctx = $("dailyChart").getContext("2d");
+  const dctxSum = $("dailyChartSum") ? $("dailyChartSum").getContext("2d") : null;
   const cumCanvasEl = document.getElementById("cumChart");
   const cctx = cumCanvasEl ? cumCanvasEl.getContext("2d") : null;
 
@@ -3097,6 +3177,36 @@ function renderCharts(){
     data: { labels, datasets: dailyDatasets },
     options: makeOptions(kpi1, kpi2 || "")
   });
+
+  if(dctxSum){
+    const sumDatasets = [{
+      label: `${kpiLabel(kpi1)}（${axisLabel}加總）`,
+      data: sum1,
+      yAxisID: "y",
+      _kpi: kpi1,
+      spanGaps: true,
+      tension: 0.25,
+      pointRadius: (labels.length > 35) ? 0 : 3,
+      pointHoverRadius: 5
+    }];
+    if(sum2){
+      sumDatasets.push({
+        label: `${kpiLabel(kpi2)}（右軸｜${axisLabel}加總）`,
+        data: sum2,
+        yAxisID: "y1",
+        _kpi: kpi2,
+        spanGaps: true,
+        tension: 0.25,
+        pointRadius: (labels.length > 35) ? 0 : 3,
+        pointHoverRadius: 5
+      });
+    }
+    dailySumChart = new Chart(dctxSum, {
+      type: "line",
+      data: { labels, datasets: sumDatasets },
+      options: makeOptions(kpi1, kpi2 || "")
+    });
+  }
 
   if(cctx){
   const cumDatasets = [{
@@ -3602,8 +3712,10 @@ function refreshProductSelect(){
    品群趨勢圖（整體品群）
 ========================= */
 let groupChart = null;
+let groupChartSum = null;
 function destroyGroupChart(){
   if(groupChart){ groupChart.destroy(); groupChart = null; }
+  if(groupChartSum){ groupChartSum.destroy(); groupChartSum = null; }
 }
 
 function buildGroupRowsForCat(catName){
@@ -3673,7 +3785,7 @@ function buildGroupRowsForCat(catName){
   return rows;
 }
 
-function buildGroupSeries(rows, metric){
+function buildGroupSeries(rows, metric, viewMode="avg"){
   const mode = state.rangeMode;
   const items = rows.map(x => {
     const d = new Date(x.dateStr + "T00:00:00Z");
@@ -3682,12 +3794,41 @@ function buildGroupSeries(rows, metric){
 
   if(!items.length) return {title:"趨勢", labels:[], values:[]};
 
-  // 品群彙總：qty/revenue/people/runMin 使用加總；cap 使用平均（或維持單日值）
-  const isSum = (metric === "qty" || metric === "revenue" || metric === "people" || metric === "runMin");
-  const agg = (vals)=>{
-    const nums = vals.map(toNumber).filter(v => Number.isFinite(v));
+  const isAdditive = (metric === "qty" || metric === "revenue" || metric === "people" || metric === "runMin");
+
+  // bucket 聚合：
+  // - avg：以日值平均（符合你目前「平均」圖的定義）
+  // - sum：以日值加總（右側「加總」圖）
+  // - cap：avg=日 cap 平均；sum=以 bucket 的「總產量 ÷ 總稼動(小時)」推算（無稼動則用總人數近似）
+  const aggBucket = (arr)=>{
+    if(metric === "cap"){
+      if(viewMode === "sum"){
+        let q = 0, run = 0, ppl = 0;
+        let any = false;
+        for(const it of arr){
+          const qq = toNumber(it.rec.qty);
+          const rr = toNumber(it.rec.runMin);
+          const pp = toNumber(it.rec.people);
+          if(Number.isFinite(qq)){ q += qq; any = true; }
+          if(Number.isFinite(rr)){ run += rr; any = true; }
+          if(Number.isFinite(pp)){ ppl += pp; any = true; }
+        }
+        if(!any) return null;
+        if(run > 0) return q / (run/60);
+        if(ppl > 0) return q / ppl;
+        return null;
+      }
+      // avg
+      const nums = arr.map(it=>toNumber(it.rec.cap)).filter(v=>Number.isFinite(v));
+      if(!nums.length) return null;
+      return nums.reduce((a,b)=>a+b,0)/nums.length;
+    }
+
+    const nums = arr.map(it=>toNumber(it.rec[metric])).filter(v=>Number.isFinite(v));
     if(!nums.length) return null;
-    if(isSum) return nums.reduce((a,b)=>a+b,0);
+    if(viewMode === "sum") return nums.reduce((a,b)=>a+b,0);
+    // avg
+    if(isAdditive) return nums.reduce((a,b)=>a+b,0)/nums.length;
     return nums.reduce((a,b)=>a+b,0)/nums.length;
   };
 
@@ -3695,8 +3836,8 @@ function buildGroupSeries(rows, metric){
     const labels=[], values=[];
     for(let m=1; m<=12; m++){
       labels.push(String(m).padStart(2,"0"));
-      const bucket = items.filter(it => (it.dateObj.getUTCMonth()+1)===m).map(it => it.rec[metric]);
-      values.push(agg(bucket));
+      const bucket = items.filter(it => (it.dateObj.getUTCMonth()+1)===m);
+      values.push(aggBucket(bucket));
     }
     return {title:`月別（全年｜${state.year}）`, labels, values};
   }
@@ -3726,10 +3867,9 @@ function buildGroupSeries(rows, metric){
   }
 
   const byWeek = new Map();
-  let title = "週別（全年｜每週平均）";
+  let title = (viewMode === "sum") ? "週別（每週加總）" : "週別（每週平均）";
   let focus = items;
 
-  // 格式化：MM/DD（用於「月別＝每週平均」的 X 軸顯示週範圍）
   const md = (d)=>{
     if(!(d instanceof Date)) return "";
     const m = String(d.getUTCMonth()+1).padStart(2,"0");
@@ -3738,9 +3878,10 @@ function buildGroupSeries(rows, metric){
   };
 
   if(mode === "month"){
-    // 以週起始日（週二）歸屬月份
     focus = items.filter(it => (getWeekStartUTC(it.dateObj).getUTCMonth()+1) === state.month);
-    title = `週別（${String(state.month).padStart(2,"0")} 月｜每週平均）`;
+    title = (viewMode === "sum")
+      ? `週別（${String(state.month).padStart(2,"0")} 月｜每週加總）`
+      : `週別（${String(state.month).padStart(2,"0")} 月｜每週平均）`;
   }
 
   for(const it of focus){
@@ -3755,7 +3896,7 @@ function buildGroupSeries(rows, metric){
     const ws = new Date(wsStr + "T00:00:00Z");
     const we = addDaysUTC(ws, 6);
     labels.push(`${md(ws)}～${md(we)}`);
-    values.push(agg(arr.map(x => x.rec[metric])));
+    values.push(aggBucket(arr));
   }
   return {title, labels, values};
 }
@@ -3775,10 +3916,12 @@ function renderGroupTrend(catName){
     if(sel2) sel2.value = "";
   }
 
-  const s1 = buildGroupSeries(rows, metric1);
-  const s2 = metric2 ? buildGroupSeries(rows, metric2) : null;
+  const sAvg1 = buildGroupSeries(rows, metric1, "avg");
+  const sAvg2 = metric2 ? buildGroupSeries(rows, metric2, "avg") : null;
+  const sSum1 = buildGroupSeries(rows, metric1, "sum");
+  const sSum2 = metric2 ? buildGroupSeries(rows, metric2, "sum") : null;
 
-  const labels = s1.labels || [];
+  const labels = sAvg1.labels || [];
   const alignValues = (s)=>{
     const map = new Map();
     for(let i=0;i<(s.labels||[]).length;i++){
@@ -3787,8 +3930,10 @@ function renderGroupTrend(catName){
     return labels.map(l => map.has(l) ? map.get(l) : null);
   };
 
-  const values1 = (s1.values||[]).slice();
-  const values2 = s2 ? alignValues(s2) : null;
+  const avgValues1 = (sAvg1.values||[]).slice();
+  const avgValues2 = sAvg2 ? alignValues(sAvg2) : null;
+  const sumValues1 = sSum1 ? alignValues(sSum1) : null;
+  const sumValues2 = sSum2 ? alignValues(sSum2) : null;
 
   const metricName = (k)=>{
     if(k==="qty") return "生產量";
@@ -3799,7 +3944,7 @@ function renderGroupTrend(catName){
     return k;
   };
 
-  $("groupChartTitle").textContent = `${catName || "品群"}｜${s1.title || "趨勢"}`;
+  $("groupChartTitle").textContent = `${catName || "品群"}｜${sAvg1.title || "趨勢"}`;
   const hintEl = $("groupChartHint");
   if(hintEl){
     hintEl.textContent = `彙總規則：符合該品群的日別明細加總（產能/時以「總產量 ÷ 總稼動(小時)」推算）。`;
@@ -3822,9 +3967,9 @@ function renderGroupTrend(catName){
     return num.toFixed(2);
   };
 
-  const datasets = [{
+  const datasetsAvg = [{
     label: metricName(metric1),
-    data: values1,
+    data: avgValues1,
     tension: 0.25,
     pointRadius: 3,
     pointHoverRadius: 5,
@@ -3833,10 +3978,33 @@ function renderGroupTrend(catName){
     _metricKey: metric1
   }];
 
-  if(metric2 && values2){
-    datasets.push({
+  if(metric2 && avgValues2){
+    datasetsAvg.push({
       label: metricName(metric2),
-      data: values2,
+      data: avgValues2,
+      tension: 0.25,
+      pointRadius: 3,
+      pointHoverRadius: 5,
+      spanGaps: true,
+      yAxisID: "y1",
+      _metricKey: metric2
+    });
+  }
+
+  const datasetsSum = [{
+    label: metricName(metric1),
+    data: sumValues1,
+    tension: 0.25,
+    pointRadius: 3,
+    pointHoverRadius: 5,
+    spanGaps: true,
+    yAxisID: "y",
+    _metricKey: metric1
+  }];
+  if(metric2 && sumValues2){
+    datasetsSum.push({
+      label: metricName(metric2),
+      data: sumValues2,
       tension: 0.25,
       pointRadius: 3,
       pointHoverRadius: 5,
@@ -3849,7 +4017,7 @@ function renderGroupTrend(catName){
   const ctx = $("groupTrendCanvas").getContext("2d");
   groupChart = new Chart(ctx, {
     type: "line",
-    data: { labels, datasets },
+    data: { labels, datasets: datasetsAvg },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -3884,6 +4052,47 @@ function renderGroupTrend(catName){
       })()
     }
   });
+
+  const ctxSum = $("groupTrendCanvasSum") ? $("groupTrendCanvasSum").getContext("2d") : null;
+  if(ctxSum){
+    groupChartSum = new Chart(ctxSum, {
+      type: "line",
+      data: { labels, datasets: datasetsSum },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true },
+          valueLabels: { enabled: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx)=>{
+                const k = ctx.dataset._metricKey || metric1;
+                return `${ctx.dataset.label}: ${formatValue(k, ctx.parsed.y)}`;
+              }
+            }
+          }
+        },
+        scales: (function(){
+          const scales = {
+            y: {
+              beginAtZero: true,
+              ticks: { callback: (v)=>formatTick(metric1, v) }
+            }
+          };
+          if(metric2){
+            scales.y1 = {
+              beginAtZero: true,
+              position: "right",
+              grid: { drawOnChartArea: false },
+              ticks: { callback: (v)=>formatTick(metric2, v) }
+            };
+          }
+          return scales;
+        })()
+      }
+    });
+  }
 }
 
 function refreshActiveGroupTrend(){
