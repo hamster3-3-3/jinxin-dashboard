@@ -723,27 +723,51 @@ async function listXlsxFilesFromGitHub(){
   let branch  = (GITHUB_BRANCH_OVERRIDE || (auto && auto.branch) || "main").trim() || "main";
   if(!owner || !repo) return [];
 
-  const found = new Map(); // name -> {name,url,dir}
+  const found = new Map(); // key -> {name,url,dir}
+  const seenDirs = new Set();
   const dirs = Array.from(new Set(GITHUB_DIR_CANDIDATES.map(d => (d||"").replace(/^\/|\/$/g,""))));
 
-  for(const d of dirs){
-    const pathPart = d ? `${d}` : "";
-    const api = `https://api.github.com/repos/${owner}/${repo}/contents/${pathPart}?ref=${encodeURIComponent(branch)}`;
+  async function scanDir(dirPath, depth){
+    const norm = (dirPath||"").replace(/^\/|\/$/g,"");
+    const key = `${norm}|${depth}`;
+    if(seenDirs.has(key)) return;
+    seenDirs.add(key);
+
+    const api = `https://api.github.com/repos/${owner}/${repo}/contents/${norm}?ref=${encodeURIComponent(branch)}`;
+    const apiRoot = `https://api.github.com/repos/${owner}/${repo}/contents?ref=${encodeURIComponent(branch)}`;
+    const url = norm ? api : apiRoot;
+
     try{
-      const res = await fetch(api, { headers: { "Accept": "application/vnd.github+json" }, cache: "no-store" });
-      if(!res.ok) continue;
+      const res = await fetch(url, { headers: { "Accept": "application/vnd.github+json" }, cache: "no-store" });
+      if(!res.ok) return;
       const data = await res.json();
-      if(!Array.isArray(data)) continue;
+      if(!Array.isArray(data)) return;
+
       for(const item of data){
-        if(item && item.type === "file" && typeof item.name === "string" && item.name.toLowerCase().endsWith(".xlsx")){
-          if(item.download_url && !found.has(item.name)){
-            found.set(item.name, { name: item.name, url: item.download_url, dir: d || "" });
-          }
+        if(!item || typeof item.type !== "string") continue;
+
+        if(item.type === "file" && typeof item.name === "string" && item.name.toLowerCase().endsWith(".xlsx")){
+          // 以「檔名」為主要 key（避免同檔名重複）；url 優先用 download_url（raw）
+          const name = item.name;
+          const relDir = norm || "";
+          const relPath = relDir ? `${relDir}/${name}` : name;
+          const url = item.download_url || relPath;
+          if(!found.has(name)) found.set(name, { name, url, dir: relDir });
+        }
+
+        // 遞迴掃描子資料夾（最多 2 層；避免 GitHub API 請求過多）
+        if(item.type === "dir" && depth < 2 && typeof item.name === "string"){
+          const child = norm ? `${norm}/${item.name}` : item.name;
+          await scanDir(child, depth + 1);
         }
       }
     }catch(e){
       // ignore single-dir failure
     }
+  }
+
+  for(const d of dirs){
+    await scanDir(d, 0);
   }
 
   const list = Array.from(found.values());
