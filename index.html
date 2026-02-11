@@ -841,8 +841,10 @@ function normalizeProdName(v){
     .trim();
 }
 function isTwoPei(v){
-  const s = normalizeBaseName(v);
-  return /^[\s\(（]*二配/u.test(s);
+  // 配別判斷：以原始品名是否以「二配」開頭（允許前面有括號標記，如「(隨)」）
+  const s0 = String(v || "").trim();
+  const s = s0.replace(/^\s*[\(（][^\)）]*[\)）]\s*/u, ""); // 去掉前置括號標記
+  return /^二配/u.test(s);
 }
 
 
@@ -2465,11 +2467,12 @@ function refreshActiveCatCounts(){
   const temp = state.temp;
   const all = getAllDatesForTemp(temp);
 
-  // 月別：以日曆月統計（1~31）；其他：以目前選取範圍統計
+  // 月別：以「週歸屬」統計（週一~週日），只要該週的週一落在所選月份，就把整週（含跨月）納入
+  // 其他：以目前選取範圍統計
   let mmddSet = new Set();
   if(state.rangeMode === "month"){
     const m = state.month;
-    all.filter(o => (o.dateObj.getUTCMonth()+1) === m).forEach(o => mmddSet.add(o.mmdd));
+    all.filter(o => (getWeekStartUTC(o.dateObj).getUTCMonth()+1) === m).forEach(o => mmddSet.add(o.mmdd));
   }else{
     mmddSet = getDateSetInSelection();
   }
@@ -4015,11 +4018,12 @@ function buildGroupRowsForCat(catName){
   const temp = state.temp;
   const all = getAllDatesForTemp(temp);
 
-  // 月別：以日曆月統計（1~31）；其他：以目前選取範圍統計
+  // 月別：以「週歸屬」統計（週一~週日），只要該週的週一落在所選月份，就把整週（含跨月）納入
+  // 其他：以目前選取範圍統計
   let mmddSet = new Set();
   if(state.rangeMode === "month"){
     const m = state.month;
-    all.filter(o => (o.dateObj.getUTCMonth()+1) === m).forEach(o => mmddSet.add(o.mmdd));
+    all.filter(o => (getWeekStartUTC(o.dateObj).getUTCMonth()+1) === m).forEach(o => mmddSet.add(o.mmdd));
   }else{
     mmddSet = getDateSetInSelection();
   }
