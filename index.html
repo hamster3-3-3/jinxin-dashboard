@@ -2078,7 +2078,6 @@ function summariesInRange(){
 function calcKpis(){
   const list = summariesInRange();
   const mode = state.rangeMode;
-  const _aggMode = (aggMode === "sum") ? "sum" : "avg";
   const dr = getActiveDayRange();
 
   function kpiFromDays(days){
