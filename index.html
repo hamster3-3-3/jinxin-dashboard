@@ -1084,6 +1084,135 @@ const state = {
   prodIndex: [],
 
 };
+/* =========================
+   成本資料（材料率/毛利率/廠價）— 由 Repo 讀取
+   ========================= */
+const COST_XLSX_PATHS = [
+  "2025-2026全品項材料率、毛利率.xlsx",
+  "data/2025-2026全品項材料率、毛利率.xlsx"
+];
+
+const costDB = {
+  loaded: false,
+  byName: new Map(), // key: cleanKey(productName) -> { mat:0~1, gross:0~1, price:number }
+  srcPath: ""
+};
+
+async function loadCostDB(){
+  if(costDB.loaded) return true;
+  if(typeof XLSX === "undefined") return false;
+
+  let ab = null;
+  let used = "";
+  for(const p of COST_XLSX_PATHS){
+    try{
+      const r = await fetch(p, {cache: "no-store"});
+      if(!r.ok) continue;
+      ab = await r.arrayBuffer();
+      used = p;
+      break;
+    }catch(e){ /* ignore */ }
+  }
+  if(!ab) return false;
+
+  try{
+    const wb = XLSX.read(ab, {type:"array"});
+    const map = new Map();
+
+    for(const sn of (wb.SheetNames || [])){
+      const ws = wb.Sheets[sn];
+      if(!ws) continue;
+
+      // 多數分頁第 2 列才是欄名：商品名稱/材料率/毛利率/廠價
+      const rows = XLSX.utils.sheet_to_json(ws, {header: 1, defval: ""});
+      if(!rows || rows.length < 2) continue;
+
+      // 找到「商品名稱」那一列當作 header（通常在第 2 列）
+      let headerRowIdx = -1;
+      for(let i=0;i<Math.min(rows.length, 5);i++){
+        const r = rows[i].map(x=> String(x||"").trim());
+        if(r.includes("商品名稱") && r.includes("材料率") && r.includes("毛利率") && r.includes("廠價")){
+          headerRowIdx = i;
+          break;
+        }
+      }
+      if(headerRowIdx < 0) continue;
+
+      const header = rows[headerRowIdx].map(x=> String(x||"").trim());
+      const idxName = header.indexOf("商品名稱");
+      const idxMat = header.indexOf("材料率");
+      const idxGross = header.indexOf("毛利率");
+      const idxPrice = header.indexOf("廠價");
+      if(idxName < 0) continue;
+
+      for(let i=headerRowIdx+1;i<rows.length;i++){
+        const r = rows[i];
+        const name = cleanText(r[idxName] || "");
+        if(!name) continue;
+
+        const key = cleanKey(name);
+        const mat = Number(r[idxMat]);
+        const gross = Number(r[idxGross]);
+        const price = Number(r[idxPrice]);
+
+        // 允許其中某些欄位缺值
+        const obj = {
+          mat: Number.isFinite(mat) ? mat : null,
+          gross: Number.isFinite(gross) ? gross : null,
+          price: Number.isFinite(price) ? price : null
+        };
+        map.set(key, obj);
+      }
+    }
+
+    costDB.byName = map;
+    costDB.loaded = true;
+    costDB.srcPath = used;
+    return true;
+  }catch(e){
+    return false;
+  }
+}
+
+function getCostOfProduct(prodName){
+  if(!costDB.loaded) return null;
+  const key = cleanKey(cleanText(prodName||""));
+  if(!key) return null;
+  return costDB.byName.get(key) || null;
+}
+
+function avgCostOfProducts(prodSet){
+  if(!costDB.loaded || !prodSet || !prodSet.size) return null;
+
+  let nMat=0, sMat=0;
+  let nGross=0, sGross=0;
+  let nPrice=0, sPrice=0;
+
+  for(const p of prodSet){
+    const c = getCostOfProduct(p);
+    if(!c) continue;
+    if(Number.isFinite(c.mat)){ sMat += c.mat; nMat++; }
+    if(Number.isFinite(c.gross)){ sGross += c.gross; nGross++; }
+    if(Number.isFinite(c.price)){ sPrice += c.price; nPrice++; }
+  }
+  if(nMat===0 && nGross===0 && nPrice===0) return null;
+
+  return {
+    mat: nMat? (sMat/nMat) : null,
+    gross: nGross? (sGross/nGross) : null,
+    price: nPrice? (sPrice/nPrice) : null,
+    nMat, nGross, nPrice
+  };
+}
+
+function fmtCostLine(cost){
+  if(!cost) return "材料率 — ｜毛利率 — ｜廠價 —";
+  const m = Number.isFinite(cost.mat) ? fmtPct(cost.mat) : "—";
+  const g = Number.isFinite(cost.gross) ? fmtPct(cost.gross) : "—";
+  const p = Number.isFinite(cost.price) ? fmtDec(cost.price, 2) : "—";
+  return `材料率 ${m} ｜ 毛利率 ${g} ｜ 廠價 ${p}`;
+}
+
 
 function setDataChip(status, text){
   const chip = $("dataChip");
@@ -2289,6 +2418,9 @@ function refreshActiveCatCounts(){
         <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__badge.labelCur} <span class="text-slate-900">${__newCnt}</span></div>
       `;
 
+    const __cost = avgCostOfProducts(map.get(x.cat));
+    const __costLine = fmtCostLine(__cost);
+
     d.className = "relative group cursor-pointer select-none w-full bg-white border border-slate-200 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-slate-300 transition focus:outline-none focus:ring-2 focus:ring-indigo-300";
     d.tabIndex = 0;
     d.setAttribute("role","button");
@@ -2298,6 +2430,7 @@ function refreshActiveCatCounts(){
         <div class="min-w-0">
           <div class="text-base font-extrabold text-slate-900 truncate">${escapeHtml(x.cat)}</div>
           <div class="mt-1 text-sm font-semibold text-slate-500">${x.n} 種</div>
+          <div class="mt-2 text-xs font-bold text-slate-500"><span class="mono text-slate-700">${escapeHtml(__costLine)}</span></div>
         </div>
         <div class="flex flex-col items-end gap-1 shrink-0" style="max-width: 7.5rem;">
           ${__badgeHtml}
@@ -2600,8 +2733,11 @@ function buildProductSeriesMode(rows, metric, aggMode){
 
   if(!items.length) return {title:"趨勢", labels:[], values:[]};
 
-  const sumMetrics = (_aggMode === "sum") ? new Set(["qty","revenue","people","runMin"]) : new Set(["qty","revenue"]);
+  // aggMode = "avg" / "sum"
+  // 對「加總」圖：qty / revenue / people / runMin 用加總，其餘（比率/單價/效率）以平均避免意義不清
+  const sumMetrics = (aggMode === "sum") ? new Set(["qty","revenue","people","runMin"]) : new Set(["qty","revenue"]);
   const isSum = sumMetrics.has(metric);
+
   const agg = (vals)=>{
     const nums = vals.map(toNumber).filter(v => Number.isFinite(v));
     if(!nums.length) return null;
@@ -2616,7 +2752,7 @@ function buildProductSeriesMode(rows, metric, aggMode){
       const bucket = items.filter(it => (it.dateObj.getUTCMonth()+1)===m).map(it => it.rec[metric]);
       values.push(agg(bucket));
     }
-    return {title:`月別（全年｜${state.year}｜月${_aggMode==="sum"?"加總":"平均"}）`, labels, values};
+    return {title:`月別（全年｜${state.year}｜月${aggMode==="sum"?"加總":"平均"}）`, labels, values};
   }
 
   if(mode === "week"){
@@ -2644,10 +2780,10 @@ function buildProductSeriesMode(rows, metric, aggMode){
   }
 
   const byWeek = new Map();
-  let title = `週別（全年｜每週${_aggMode==="sum"?"加總":"平均"}）`;
+  let title = `週別（全年｜每週${aggMode==="sum"?"加總":"平均"}）`;
   let focus = items;
 
-  // 格式化：MM/DD（用於「月別＝每週平均」的 X 軸顯示週範圍）
+  // 格式化：MM/DD（用於 X 軸顯示週範圍）
   const md = (d)=>{
     if(!(d instanceof Date)) return "";
     const m = String(d.getUTCMonth()+1).padStart(2,"0");
@@ -2658,7 +2794,7 @@ function buildProductSeriesMode(rows, metric, aggMode){
   if(mode === "month"){
     // 以週起始日（週二）歸屬月份
     focus = items.filter(it => (getWeekStartUTC(it.dateObj).getUTCMonth()+1) === state.month);
-    title = `週別（${String(state.month).padStart(2,"0")} 月｜每週${_aggMode==="sum"?"加總":"平均"}）`;
+    title = `週別（${String(state.month).padStart(2,"0")} 月｜每週${aggMode==="sum"?"加總":"平均"}）`;
   }
 
   for(const it of focus){
@@ -2667,9 +2803,24 @@ function buildProductSeriesMode(rows, metric, aggMode){
     if(!byWeek.has(wsStr)) byWeek.set(wsStr, []);
     byWeek.get(wsStr).push(it);
   }
+
   const weeks = Array.from(byWeek.entries()).sort((a,b)=>a[0].localeCompare(b[0]));
   const labels=[], values=[];
-  for(const [wsStr, arr] of weeksfunction renderProductTrend(rows){
+  for(const [wsStr, arr] of weeks){
+    const ws = new Date(wsStr + "T00:00:00Z");
+    const we = addDaysUTC(ws, 6);
+    if(mode === "month"){
+      labels.push(`${md(ws)}～${md(we)}`);
+    }else{
+      labels.push(wsStr.slice(5));
+    }
+    values.push(agg(arr.map(it => it.rec[metric])));
+  }
+
+  return {title, labels, values};
+}
+
+function renderProductTrend(rows){
   if(!$("prodTrendCanvas")) return;
 
   const sel1 = $("prodChartMetric");
@@ -2796,19 +2947,6 @@ function buildProductSeriesMode(rows, metric, aggMode){
   if($("prodTrendCanvasSum")){
     prodSumChart = makeChart("prodTrendCanvasSum", "prodChartSumTitle", s1Sum, s2Sum);
   }
-}
-
-es.y1 = {
-            position: "right",
-            beginAtZero: false,
-            grid: { drawOnChartArea: false },
-            ticks: { callback: (v)=>formatTick(metric2, v) }
-          };
-        }
-        return scales;
-      })()
-    }
-  });
 }
 
 
@@ -4815,6 +4953,10 @@ function renderLowestRatePanel(){
     const launchDateText = (it.launchStr===null || it.launchStr===undefined || it.launchStr==="") ? "—" : String(it.launchStr);
     const peopleText = fmtDec(it.avgPeople, 2);
     const avgQtyDayText = fmtInt(it.avgQtyDay);
+    // cost
+    const __costObj = getCostOfProduct(it.prod);
+    const __costLine = fmtCostLine(__costObj);
+
 
     // right metric
     let metricText = "—";
@@ -4843,6 +4985,8 @@ function renderLowestRatePanel(){
             <span class="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-bold text-slate-500">${label}</span>
           </div>
           <div class="mt-1 truncate text-xs text-slate-500">${sub}</div>
+
+          <div class="mt-2 text-xs font-bold text-slate-600"><span class="mono text-slate-800">${escapeHtml(__costLine)}</span></div>
 
           <div class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div class="relative rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
@@ -5162,7 +5306,9 @@ $("lineSelect").value = "";
     setDataChip("bad", "載入解析套件失敗：請確認網路可存取 CDN，或在同資料夾放置 xlsx.full.min.js / chart.umd.min.js");
     return;
   }
-setActiveSeg("range", state.rangeMode);
+  // 讀取材料率/毛利率/廠價（若未放檔案則略過）
+  try{ await loadCostDB(); }catch(e){}
+  setActiveSeg("range", state.rangeMode);
   setActiveSeg("temp", state.temp);
   refreshSelectors();
 
