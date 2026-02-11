@@ -531,9 +531,22 @@
             </div>
 
             <div class="mt-4">
-              <div id="prodChartTitle" class="text-slate-600 text-sm font-bold mb-2"></div>
-              <div class="relative w-full" style="height: 420px;">
-                <canvas id="prodTrendCanvas"></canvas>
+              <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                <!-- 平均 -->
+                <div>
+                  <div id="prodChartTitle" class="text-slate-600 text-sm font-bold mb-2"></div>
+                  <div class="relative w-full" style="height: 420px;">
+                    <canvas id="prodTrendCanvas"></canvas>
+                  </div>
+                </div>
+
+                <!-- 加總 -->
+                <div>
+                  <div id="prodChartSumTitle" class="text-slate-600 text-sm font-bold mb-2"></div>
+                  <div class="relative w-full" style="height: 420px;">
+                    <canvas id="prodTrendCanvasSum"></canvas>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1936,6 +1949,7 @@ function summariesInRange(){
 function calcKpis(){
   const list = summariesInRange();
   const mode = state.rangeMode;
+  const _aggMode = (aggMode === "sum") ? "sum" : "avg";
   const dr = getActiveDayRange();
 
   function kpiFromDays(days){
@@ -2340,6 +2354,7 @@ let dailyChart = null;
 let dailySumChart = null;
 let cumChart = null;
 let prodChart = null;
+let prodSumChart = null;
 // Safety: older parsing referenced idxBreak (break time column index). We no longer use break columns,
 // but keep this to prevent runtime ReferenceError if any legacy path still touches it.
 let idxBreak = -1;
@@ -2573,9 +2588,10 @@ function destroyCharts(){
 
 function destroyProdChart(){
   if(prodChart){ prodChart.destroy(); prodChart = null; }
+  if(prodSumChart){ prodSumChart.destroy(); prodSumChart = null; }
 }
 
-function buildProductSeries(rows, metric){
+function buildProductSeriesMode(rows, metric, aggMode){
   const mode = state.rangeMode;
   const items = rows.map(x => {
     const d = new Date(x.dateStr + "T00:00:00Z");
@@ -2584,7 +2600,8 @@ function buildProductSeries(rows, metric){
 
   if(!items.length) return {title:"趨勢", labels:[], values:[]};
 
-  const isSum = (metric === "qty" || metric === "revenue");
+  const sumMetrics = (_aggMode === "sum") ? new Set(["qty","revenue","people","runMin"]) : new Set(["qty","revenue"]);
+  const isSum = sumMetrics.has(metric);
   const agg = (vals)=>{
     const nums = vals.map(toNumber).filter(v => Number.isFinite(v));
     if(!nums.length) return null;
@@ -2599,7 +2616,7 @@ function buildProductSeries(rows, metric){
       const bucket = items.filter(it => (it.dateObj.getUTCMonth()+1)===m).map(it => it.rec[metric]);
       values.push(agg(bucket));
     }
-    return {title:`月別（全年｜${state.year}）`, labels, values};
+    return {title:`月別（全年｜${state.year}｜月${_aggMode==="sum"?"加總":"平均"}）`, labels, values};
   }
 
   if(mode === "week"){
@@ -2627,7 +2644,7 @@ function buildProductSeries(rows, metric){
   }
 
   const byWeek = new Map();
-  let title = "週別（全年｜每週平均）";
+  let title = `週別（全年｜每週${_aggMode==="sum"?"加總":"平均"}）`;
   let focus = items;
 
   // 格式化：MM/DD（用於「月別＝每週平均」的 X 軸顯示週範圍）
@@ -2641,7 +2658,7 @@ function buildProductSeries(rows, metric){
   if(mode === "month"){
     // 以週起始日（週二）歸屬月份
     focus = items.filter(it => (getWeekStartUTC(it.dateObj).getUTCMonth()+1) === state.month);
-    title = `週別（${String(state.month).padStart(2,"0")} 月｜每週平均）`;
+    title = `週別（${String(state.month).padStart(2,"0")} 月｜每週${_aggMode==="sum"?"加總":"平均"}）`;
   }
 
   for(const it of focus){
@@ -2652,17 +2669,7 @@ function buildProductSeries(rows, metric){
   }
   const weeks = Array.from(byWeek.entries()).sort((a,b)=>a[0].localeCompare(b[0]));
   const labels=[], values=[];
-  for(const [wsStr, arr] of weeks){
-    // 月別視圖：原本只顯示週起始日，改成顯示週範圍（週二～週一）
-    const ws = new Date(wsStr + "T00:00:00Z");
-    const we = addDaysUTC(ws, 6);
-    labels.push(`${md(ws)}～${md(we)}`);
-    values.push(agg(arr.map(x => x.rec[metric])));
-  }
-  return {title, labels, values};
-}
-
-function renderProductTrend(rows){
+  for(const [wsStr, arr] of weeksfunction renderProductTrend(rows){
   if(!$("prodTrendCanvas")) return;
 
   const sel1 = $("prodChartMetric");
@@ -2675,22 +2682,14 @@ function renderProductTrend(rows){
     if(sel2) sel2.value = "";
   }
 
-  const s1 = buildProductSeries(rows, metric1);
-  const s2 = metric2 ? buildProductSeries(rows, metric2) : null;
+  // 平均（左）
+  const s1Avg = buildProductSeriesMode(rows, metric1, "avg");
+  const s2Avg = metric2 ? buildProductSeriesMode(rows, metric2, "avg") : null;
 
-  const labels = s1.labels || [];
-  const alignValues = (s)=>{
-    const map = new Map();
-    for(let i=0;i<(s.labels||[]).length;i++){
-      map.set(s.labels[i], (s.values||[])[i]);
-    }
-    return labels.map(l => map.has(l) ? map.get(l) : null);
-  };
+  // 加總（右）－對「qty/revenue/people/runMin」用加總，其餘維持平均（避免比率指標失真）
+  const s1Sum = buildProductSeriesMode(rows, metric1, "sum");
+  const s2Sum = metric2 ? buildProductSeriesMode(rows, metric2, "sum") : null;
 
-  const values1 = (s1.values||[]).slice();
-  const values2 = s2 ? alignValues(s2) : null;
-
-  $("prodChartTitle").textContent = s1.title || "趨勢";
   destroyProdChart();
 
   const formatTick = (k, v)=>{
@@ -2711,59 +2710,95 @@ function renderProductTrend(rows){
   const label1 = sel1 ? sel1.selectedOptions[0].textContent : "指標1";
   const label2 = (metric2 && sel2) ? sel2.selectedOptions[0].textContent : "";
 
-  const datasets = [{
-    label: label1,
-    data: values1,
-    tension: 0.25,
-    pointRadius: 3,
-    pointHoverRadius: 5,
-    spanGaps: true,
-    yAxisID: "y",
-    _metricKey: metric1
-  }];
+  function makeChart(canvasId, titleElId, s1, s2){
+    const labels = (s1 && s1.labels) ? s1.labels : [];
+    const alignValues = (s)=>{
+      const map = new Map();
+      for(let i=0;i<(s.labels||[]).length;i++){
+        map.set(s.labels[i], (s.values||[])[i]);
+      }
+      return labels.map(l => map.has(l) ? map.get(l) : null);
+    };
 
-  if(metric2 && values2){
-    datasets.push({
-      label: label2,
-      data: values2,
+    const values1 = (s1 && s1.values) ? (s1.values||[]).slice() : [];
+    const values2 = (s2 && s2.values) ? alignValues(s2) : null;
+
+    if($(titleElId)) $(titleElId).textContent = (s1 && s1.title) ? s1.title : "趨勢";
+
+    const datasets = [{
+      label: label1,
+      data: values1,
       tension: 0.25,
       pointRadius: 3,
       pointHoverRadius: 5,
       spanGaps: true,
-      yAxisID: "y1",
-      _metricKey: metric2
+      yAxisID: "y",
+      _metricKey: metric1
+    }];
+
+    if(metric2 && values2){
+      datasets.push({
+        label: label2,
+        data: values2,
+        tension: 0.25,
+        pointRadius: 3,
+        pointHoverRadius: 5,
+        spanGaps: true,
+        yAxisID: "y1",
+        _metricKey: metric2
+      });
+    }
+
+    const ctx = $(canvasId).getContext("2d");
+    return new Chart(ctx, {
+      type: "line",
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true },
+          valueLabels: { enabled: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx)=>{
+                const k = ctx.dataset._metricKey || metric1;
+                return `${ctx.dataset.label}: ${formatValue(k, ctx.parsed.y)}`;
+              }
+            }
+          }
+        },
+        scales: (function(){
+          const scales = {
+            y: {
+              position: "left",
+              beginAtZero: false,
+              ticks: { callback: (v)=>formatTick(metric1, v) }
+            }
+          };
+          if(metric2){
+            scales.y1 = {
+              position: "right",
+              beginAtZero: false,
+              grid: { drawOnChartArea: false },
+              ticks: { callback: (v)=>formatTick(metric2, v) }
+            };
+          }
+          return scales;
+        })()
+      }
     });
   }
 
-  const ctx = $("prodTrendCanvas").getContext("2d");
-  prodChart = new Chart(ctx, {
-    type: "line",
-    data: { labels, datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: true },
-        valueLabels: { enabled: false },
-        tooltip: {
-          callbacks: {
-            label: (ctx)=>{
-              const k = ctx.dataset._metricKey || metric1;
-              return `${ctx.dataset.label}: ${formatValue(k, ctx.parsed.y)}`;
-            }
-          }
-        }
-      },
-      scales: (function(){
-        const scales = {
-          y: {
-            position: "left",
-            beginAtZero: false,
-            ticks: { callback: (v)=>formatTick(metric1, v) }
-          }
-        };
-        if(metric2){
-          scales.y1 = {
+  // 左：平均
+  prodChart = makeChart("prodTrendCanvas", "prodChartTitle", s1Avg, s2Avg);
+  // 右：加總
+  if($("prodTrendCanvasSum")){
+    prodSumChart = makeChart("prodTrendCanvasSum", "prodChartSumTitle", s1Sum, s2Sum);
+  }
+}
+
+es.y1 = {
             position: "right",
             beginAtZero: false,
             grid: { drawOnChartArea: false },
@@ -4249,7 +4284,7 @@ function refreshLowestRateModeOptions(){
   // 下滑數（跨線別彙總，以品名為主鍵）
   opts.push(["drop_qty","生產量下滑數（高→低）"]);
   opts.push(["drop_cap","產能下滑數（高→低）"]);
-  opts.push(["drop_eff","人時性下滑數（高→低）"]);
+  opts.push(["drop_eff","人時性下滑數(平均)（高→低）"]);
 
   sel.innerHTML = "";
   for(const [v,t] of opts){
@@ -4662,8 +4697,9 @@ function _metricDropAgg(metric, pairFilter){
 
     let prevVal = NaN, curVal = NaN, dropVal = NaN;
     if(metric === "qty"){
-      prevVal = prevAvgQtyDay;
-      curVal = curAvgQtyDay;
+      // 生產量下滑數：以「期間加總」比較（非平均）
+      prevVal = prevQtySum;
+      curVal = curQtySum;
       dropVal = prevVal - curVal;
     }else if(metric === "cap"){
       prevVal = prevAvgCap;
@@ -4755,7 +4791,7 @@ function renderLowestRatePanel(){
     drop: "生產量下滑數",
     drop_qty: "生產量下滑數",
     drop_cap: "產能下滑數",
-    drop_eff: "人時性下滑數"
+    drop_eff: "人時性下滑數(平均)"
   };
   const label = labelMap[mode] || "—";
 
