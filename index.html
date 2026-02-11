@@ -5073,10 +5073,6 @@ function renderLowestRatePanel(){
     </div>
     <div class="mt-1 truncate text-xs text-slate-500">${sub}</div>
   </div>
-  <div class="shrink-0">
-    <div class="text-[11px] font-extrabold text-slate-500 mb-1 text-right">材料率 / 毛利率 / 廠價</div>
-    <div class="w-[240px]">${__costCards}</div>
-  </div>
 </div>
 
           <div class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -5103,6 +5099,10 @@ function renderLowestRatePanel(){
         <div class="shrink-0 text-right">
           <div class="text-xs font-bold text-slate-500">前六名</div>
           <div class="mono text-3xl font-black ${_metricCls}">${metricText}</div>
+          <div class="mt-2 inline-block text-left">
+            <div class="text-[11px] font-extrabold text-slate-500 mb-1">材料率 / 毛利率 / 廠價</div>
+            <div class="w-[240px]">${__costCards}</div>
+          </div>
 </div>
       </div>
     `;
