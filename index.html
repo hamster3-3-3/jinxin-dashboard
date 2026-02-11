@@ -841,8 +841,8 @@ function normalizeProdName(v){
     .trim();
 }
 function isTwoPei(v){
-  const s = normalizeProdName(v);
-  return s.slice(0,2) === "二配";
+  const s = normalizeBaseName(v);
+  return /^[\s\(（]*二配/u.test(s);
 }
 
 
@@ -928,7 +928,7 @@ function parseDevConfirmWorkbook(wb){
       if(!name) continue;
       if(/商品名稱|商品名|品名/i.test(name)) continue;
 
-      const normName = normalizeProdName(name);
+      const normName = normalizeProdNameForCost(name);
         const key = cleanKey(normName);
       if(!key) continue;
 
@@ -1124,10 +1124,21 @@ const costDB = {
   srcPath: ""
 };
 
+function normalizeBaseName(name){
+  return String(name||"")
+    .replace(/\u00a0/g," ")
+    .replace(/[\u200B-\u200D\uFEFF]/g,"")
+    .replace(/\u3000/g," ")
+    .replace(/\s+/g," ")
+    .trim();
+}
 function normalizeProdName(name){
-  // Treat products with leading "二配" as the same product (e.g., "二配XX" -> "XX")
-  let t = String(name||"").trim();
-  // remove leading brackets/spaces + 二配 + separators
+  // Generic normalizer (DO NOT strip 配別前綴；用於商品本體識別)
+  return normalizeBaseName(name);
+}
+function normalizeProdNameForCost(name){
+  // Cost lookup normalizer: treat leading 「二配」 as the same product (e.g., "二配XX" -> "XX")
+  let t = normalizeBaseName(name);
   t = t.replace(/^[\s\(（]*二配[\s\)）\-—_:：\s]*/u, "");
   return t.trim();
 }
@@ -1185,7 +1196,7 @@ async function loadCostDB(){
         const name = cleanText(r[idxName] || "");
         if(!name) continue;
 
-        const normName = normalizeProdName(name);
+        const normName = normalizeProdNameForCost(name);
         const key = cleanKey(normName);
         const mat = Number(r[idxMat]);
         const gross = Number(r[idxGross]);
@@ -1215,7 +1226,7 @@ function getCostOfProduct(prodName){
   const raw = cleanText(prodName||"");
   if(!raw) return null;
 
-  const norm = normalizeProdName(raw);
+  const norm = normalizeProdNameForCost(raw);
   const key = cleanKey(norm);
   if(!key) return null;
 
