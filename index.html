@@ -1093,6 +1093,13 @@ const COST_XLSX_PATHS = [
   "data/2025-2026全品項材料率、毛利率.xlsx"
 ];
 
+// 成本資料快取（以商品名 key）
+const costDB = {
+  loaded: false,
+  byName: new Map(), // key: normalized product name
+  srcPath: ""
+};
+
 function normalizeProdName(name){
   // Treat products with leading "二配" as the same product (e.g., "二配XX" -> "XX")
   let t = String(name||"").trim();
