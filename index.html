@@ -5066,15 +5066,18 @@ function renderLowestRatePanel(){
       <div class="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-4 items-start">
         <div class="min-w-0">
           <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-            <div class="min-w-0">
-              <div class="flex items-center gap-2">
-                <div class="truncate text-base font-extrabold ${_titleCls}">${it.prod || "—"}</div>
-                <span class="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-bold text-slate-500">${label}</span>
-              </div>
-              <div class="mt-1 truncate text-xs text-slate-500">${sub}</div>
-            </div>
-            </div>
-          </div>
+  <div class="min-w-0">
+    <div class="flex items-center gap-2">
+      <div class="truncate text-base font-extrabold ${_titleCls}">${it.prod || "—"}</div>
+      <span class="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-bold text-slate-500">${label}</span>
+    </div>
+    <div class="mt-1 truncate text-xs text-slate-500">${sub}</div>
+  </div>
+  <div class="shrink-0">
+    <div class="text-[11px] font-extrabold text-slate-500 mb-1 text-right">材料率 / 毛利率 / 廠價</div>
+    <div class="w-[240px]">${__costCards}</div>
+  </div>
+</div>
 
           <div class="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div class="relative rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
@@ -5100,14 +5103,7 @@ function renderLowestRatePanel(){
         <div class="shrink-0 text-right">
           <div class="text-xs font-bold text-slate-500">前六名</div>
           <div class="mono text-3xl font-black ${_metricCls}">${metricText}</div>
-
-          <div class="mt-2 flex flex-col items-end">
-            <div class="text-[11px] font-extrabold text-slate-500 mb-1">材料率 / 毛利率 / 廠價</div>
-            <div class="w-[240px]">
-              ${__costCards}
-            </div>
-          </div>
-        </div>
+</div>
       </div>
     `;
 
