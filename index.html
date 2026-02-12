@@ -2774,127 +2774,86 @@ function fmtDeltaForMetric(metric, delta){
   return fmtSigned(delta, 2);
 }
 
+
 const deltaArcPlugin = {
   id: "deltaArcs",
-  afterDatasetsDraw(chart, args, opts){
-    if(!opts || opts.enabled === false) return;
-    const area = chart.chartArea;
-    if(!area) return;
-    const ctx = chart.ctx;
+  afterDatasetsDraw(chart, args, pluginOptions){
+    try{
+      const opt = (pluginOptions||{});
+      if(!opt || opt.enabled === false) return;
+      const dsIndex = (opt.datasetIndex ?? 0);
+      const meta = chart.getDatasetMeta(dsIndex);
+      if(!meta || !meta.data || meta.data.length < 2) return;
 
-    const total = chart.data?.labels?.length || 0;
-    // If too dense, annotate every Nth segment
-    const step = (opts.step && Number.isFinite(opts.step)) ? opts.step : (total > 40 ? 2 : 1);
+      const ctx = chart.ctx;
+      const ds = chart.data.datasets[dsIndex] || {};
+      const vals = (ds.data||[]).map(v => (typeof v === "number" ? v : (v && typeof v.y === "number" ? v.y : NaN)));
 
-    const arcH = (opts.arcHeight && Number.isFinite(opts.arcHeight)) ? opts.arcHeight : 14;
-    const padTop = 8;
+      const fontSize = opt.fontSize ?? 12;
+      const pad = opt.pad ?? 6;
+      const offset = opt.offset ?? 14;   // 距離折線的距離
+      const tickLen = opt.tickLen ?? 10; // 小小標示的長度
+      const minAbs = opt.minAbs ?? 0;
 
-    ctx.save();
-    ctx.beginPath();
-    // allow drawing a bit above the chart area for delta labels
-    ctx.rect(area.left, area.top - 48, area.right - area.left, (area.bottom - area.top) + 64);
-    ctx.clip();
+      ctx.save();
+      ctx.font = `${fontSize}px system-ui, -apple-system, Segoe UI, Roboto, Noto Sans TC, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
 
-    ctx.lineWidth = opts.lineWidth || 1.5;
-    ctx.font = `${opts.fontWeight || 700} ${opts.fontSize || 11}px "Noto Sans TC", system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
+      for(let i=1;i<meta.data.length;i++){
+        const p0 = meta.data[i-1];
+        const p1 = meta.data[i];
+        const v0 = vals[i-1], v1 = vals[i];
+        if(!isFinite(v0) || !isFinite(v1)) continue;
 
-    const formatter = opts.formatter || ((delta, _ds)=>fmtSigned(delta, 0));
-    const colorPos = opts.colorPos || "#16a34a";
-    const colorNeg = opts.colorNeg || "#dc2626";
-    const colorZero = opts.colorZero || "#64748b";
+        const delta = v1 - v0;
+        if(Math.abs(delta) < minAbs) continue;
 
-    chart.data.datasets.forEach((ds, di)=>{
-      const meta = chart.getDatasetMeta(di);
-      if(meta.hidden) return;
-      const pts = meta.data || [];
-      for(let i=1;i<pts.length;i++){
-        if(step > 1 && (i % step) !== 0) continue;
-        const v0 = ds.data[i-1];
-        const v1 = ds.data[i];
-        if(v0 === null || v0 === undefined || v1 === null || v1 === undefined) continue;
-        if(!Number.isFinite(Number(v0)) || !Number.isFinite(Number(v1))) continue;
+        const x0=p0.x, y0=p0.y, x1=p1.x, y1=p1.y;
 
-        const delta = Number(v1) - Number(v0);
-        if(!Number.isFinite(delta) || delta === 0) continue;
+        // segment unit direction
+        let dx = x1-x0, dy=y1-y0;
+        const segLen = Math.hypot(dx,dy) || 1;
+        dx/=segLen; dy/=segLen;
 
-        const p0 = pts[i-1];
-        const p1 = pts[i];
-        if(!p0 || !p1) continue;
+        // normal (pointing "up" from the line)
+        let nx = -dy, ny = dx;
+        const mx = (x0+x1)/2, my=(y0+y1)/2;
 
-        const midX = (p0.x + p1.x) / 2;
+        // keep marker inside chart area
+        const ca = chart.chartArea;
+        let bx = mx + nx*offset;
+        let by = my + ny*offset;
+        bx = Math.max(ca.left+4, Math.min(ca.right-4, bx));
+        by = Math.max(ca.top+4, Math.min(ca.bottom-4, by));
 
-        // Draw the delta arc close to the segment (offset along the segment normal),
-        // instead of sticking to the top of the chart.
-        const dx = (p1.x - p0.x);
-        const dy = (p1.y - p0.y);
-        const segLen = Math.hypot(dx, dy) || 1;
+        const col = delta>=0 ? (opt.posColor || "#16a34a") : (opt.negColor || "#dc2626");
+        const sign = delta>=0 ? "+" : "−";
+        const label = `${sign}${Math.round(Math.abs(delta)).toLocaleString()}`;
 
-        // Two normals: (-dy, dx) and (dy, -dx). Pick the one that points upward (ny < 0) in screen coords.
-        const nxA = -dy / segLen, nyA = dx / segLen;
-        const nxB =  dy / segLen, nyB = -dx / segLen;
-        let nx = nxA, ny = nyA;
-        if(nyA >= 0 && nyB < 0){ nx = nxB; ny = nyB; }
-        else if(nyA >= 0 && nyB >= 0){
-          // both point downward-ish (can happen on flat/near-flat lines); just flip A
-          nx = -nxA; ny = -nyA;
-        }
-
-        const offset = (opts.offset && Number.isFinite(opts.offset)) ? opts.offset : Math.max(10, arcH);
-        const bump = (opts.bump && Number.isFinite(opts.bump)) ? opts.bump : (offset * 0.8);
-        const clampY = (y)=>Math.max(area.top + padTop, Math.min(area.bottom - padTop, y));
-
-        // Baseline endpoints (a little above the segment)
-        let ax0 = p0.x + nx * offset, ay0 = clampY(p0.y + ny * offset);
-        let ax1 = p1.x + nx * offset, ay1 = clampY(p1.y + ny * offset);
-
-        const midAx = (ax0 + ax1) / 2;
-        const midAy = (ay0 + ay1) / 2;
-
-        // Control point slightly further along the same normal to form a small arc
-        const cpX = midAx + nx * bump;
-        const cpY = clampY(midAy + ny * bump);
-
-        const txt = formatter(delta, ds, i, chart);
-        const col = delta > 0 ? colorPos : (delta < 0 ? colorNeg : colorZero);
-
-        // Arc
+        // draw tiny tick marker (no arc)
         ctx.strokeStyle = col;
+        ctx.lineWidth = opt.lineWidth ?? 2;
         ctx.beginPath();
-        ctx.moveTo(ax0, ay0);
-        ctx.quadraticCurveTo(cpX, cpY, ax1, ay1);
+        ctx.moveTo(bx - nx*(tickLen/2), by - ny*(tickLen/2));
+        ctx.lineTo(bx + nx*(tickLen/2), by + ny*(tickLen/2));
         ctx.stroke();
 
-        // Small end ticks (along the normal)
-        const tick = 4;
-        ctx.beginPath();
-        ctx.moveTo(ax0 - nx*tick, ay0 - ny*tick);
-        ctx.lineTo(ax0 + nx*tick, ay0 + ny*tick);
-        ctx.moveTo(ax1 - nx*tick, ay1 - ny*tick);
-        ctx.lineTo(ax1 + nx*tick, ay1 + ny*tick);
-        ctx.stroke();
-
-        // Text: near the arc apex, nudged a bit along normal
+        // text near tick
         ctx.fillStyle = col;
-        const tx = midAx + nx * (bump + 10);
-        const ty = clampY(midAy + ny * (bump + 10));
-        ctx.fillText(String(txt), tx, ty);
+        ctx.fillText(label, bx + nx*(pad+fontSize*0.2), by + ny*(pad+fontSize*0.2));
       }
-    });
-
-    ctx.restore();
+      ctx.restore();
+    }catch(e){
+      // silent
+    }
   }
 };
-
-// Ensure plugin is registered (Chart.js might load after our script in some deployments)
-function ensureDeltaArcs(){
-  try{
-    if(window.Chart && !window.__deltaArcsRegistered){
-      window.Chart.register(deltaArcPlugin);
-      window.__deltaArcsRegistered = true;
-    }
-  }catch(e){}
+if(!window.__deltaArcsRegistered){
+  Chart.register(deltaArcPlugin);
+  window.__deltaArcsRegistered = true;
+}
+}catch(e){}
 }
 // Attempt early registration
 ensureDeltaArcs();
@@ -5050,54 +5009,114 @@ function _dateObjToKey(d){
 }
 
 // 取得「上一期」的日期集合：年/月/週/日/指定範圍
+
 function _getPrevMmddSetForDrop(){
   const temp = state.temp;
-  const dr = getActiveDayRange();
-  if(dr){
-    const len = _daysInclusiveUTC(dr.start, dr.end);
-    const ps = addDaysUTC(dr.start, -len);
-    const pe = addDaysUTC(dr.end, -len);
-    return _buildSetFromRange(temp, ps, pe);
+  const tempAll = getAllDatesForTemp(temp); // Date objects (UTC)
+  if(!tempAll || !tempAll.length) return new Set();
+
+  const mode = state.rangeMode;
+
+  // helper: find closest previous date before a given start
+  function _findPrevDate(beforeDate){
+    for(let i=tempAll.length-1;i>=0;i--){
+      if(tempAll[i].getTime() < beforeDate.getTime()) return tempAll[i];
+    }
+    return null;
   }
 
-  if(state.rangeMode === "year"){
-    const py = Number(state.year) - 1;
-    return new Set(_getAllDatesForTempYearAny(temp, py).map(o=>o.mmdd));
+  // helper: month start/end UTC
+  function _monthRangeUTC(y, m){ // m: 1-12
+    const start = new Date(Date.UTC(y, m-1, 1));
+    const next  = new Date(Date.UTC(y, m, 1));
+    const end   = addDaysUTC(next, -1);
+    return {start, end};
   }
 
-  if(state.rangeMode === "month"){
-    let py = Number(state.year);
-    let pm = Number(state.month) - 1;
-    if(pm <= 0){ pm = 12; py = py - 1; }
-    const wk = getMonthWeekWindowsUTC(py, pm); // 前月的週視圖（會跨月）
-    return _buildSetFromRange(temp, wk.start, wk.end);
+  if(mode === "year"){
+    const curStart = new Date(Date.UTC(state.year, 0, 1));
+    const prevY = state.year - 1;
+    let {start:ps, end:pe} = {start:new Date(Date.UTC(prevY,0,1)), end:new Date(Date.UTC(prevY,11,31))};
+    let prevSet = _buildSetFromRange(temp, ps, pe);
+    if(prevSet.size) return prevSet;
+
+    // fallback: previous available year with data
+    const prevDate = _findPrevDate(curStart);
+    if(!prevDate) return new Set();
+    const y = prevDate.getUTCFullYear();
+    prevSet = _buildSetFromRange(temp, new Date(Date.UTC(y,0,1)), new Date(Date.UTC(y,11,31)));
+    return prevSet;
   }
 
-  if(state.rangeMode === "week"){
+  if(mode === "month"){
+    const {start:curStart} = _monthRangeUTC(state.year, state.month);
+    // naive previous month
+    let py = state.year, pm = state.month - 1;
+    if(pm < 1){ pm = 12; py -= 1; }
+    let r = _monthRangeUTC(py, pm);
+    let prevSet = _buildSetFromRange(temp, r.start, r.end);
+    if(prevSet.size) return prevSet;
+
+    // fallback: previous available month with data
+    const prevDate = _findPrevDate(curStart);
+    if(!prevDate) return new Set();
+    r = _monthRangeUTC(prevDate.getUTCFullYear(), prevDate.getUTCMonth()+1);
+    prevSet = _buildSetFromRange(temp, r.start, r.end);
+    return prevSet;
+  }
+
+  if(mode === "week"){
     if(!state.weekStartStr) return new Set();
-    const ws = new Date(state.weekStartStr + "T00:00:00Z");
-    const pws = addDaysUTC(ws, -7);
-    const pwe = addDaysUTC(pws, 6);
-    return _buildSetFromRange(temp, pws, pwe);
+    const ws = new Date(state.weekStartStr+"T00:00:00Z");
+    const curStart = ws;
+    const prevStart = addDaysUTC(ws, -7);
+    const prevEnd   = addDaysUTC(ws, -1);
+    let prevSet = _buildSetFromRange(temp, prevStart, prevEnd);
+    if(prevSet.size) return prevSet;
+
+    // fallback: use previous available week's start (even if跨月)
+    const prevDate = _findPrevDate(curStart);
+    if(!prevDate) return new Set();
+    const pws = getWeekStartUTC(prevDate);
+    prevSet = _buildSetFromRange(temp, pws, addDaysUTC(pws, 6));
+    return prevSet;
   }
 
-  // day
-  if(state.dayStr){
-    const d = new Date(state.dayStr + "T00:00:00Z");
-    const pd = addDaysUTC(d, -1);
-    const key = _dateObjToKey(pd);
-    return state.summaries.has(`${temp}|${key}`) ? new Set([key]) : new Set();
+  if(mode === "day"){
+    if(!state.day) return new Set();
+    const cur = new Date(state.day+"T00:00:00Z");
+    const prev = addDaysUTC(cur, -1);
+    let prevSet = _buildSetFromRange(temp, prev, prev);
+    if(prevSet.size) return prevSet;
+
+    const prevDate = _findPrevDate(cur);
+    if(!prevDate) return new Set();
+    prevSet = _buildSetFromRange(temp, prevDate, prevDate);
+    return prevSet;
+  }
+
+  // custom range: use previous range length
+  if(mode === "custom"){
+    if(!state.customStart || !state.customEnd) return new Set();
+    const s = new Date(state.customStart+"T00:00:00Z");
+    const e = new Date(state.customEnd+"T00:00:00Z");
+    const days = Math.round((e.getTime()-s.getTime())/86400000) + 1;
+    const prevE = addDaysUTC(s, -1);
+    const prevS = addDaysUTC(prevE, -(days-1));
+    let prevSet = _buildSetFromRange(temp, prevS, prevE);
+    if(prevSet.size) return prevSet;
+
+    const prevDate = _findPrevDate(s);
+    if(!prevDate) return new Set();
+    const pws = getWeekStartUTC(prevDate);
+    prevSet = _buildSetFromRange(temp, pws, addDaysUTC(pws, 6));
+    return prevSet;
   }
 
   return new Set();
 }
 
-function _isSummaryRowProdName(prod){
-  const p = cleanText(prod || "");
-  return !p || /(平均|合計|小計|總計)/.test(p);
-}
 
-// mode=drop：回傳下滑數最高的前 6 名（drop = prevAvgQtyDay - curAvgQtyDay, 僅列 drop>0）
 function _metricDropAgg(metric, pairFilter){
   // metric: "qty" | "cap" | "eff"
   const curSet = getDateSetInSelection();
