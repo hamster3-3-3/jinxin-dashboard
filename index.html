@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
+  <!-- BUILD: v15 (month cross-week + debug stamp) -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -576,6 +577,7 @@
   </div>
 
 <script>
+console.log("BUILD v15");
 /* =========================
    解析/圖表套件載入（自動 fallback）
    - 優先使用同資料夾的本地檔（可選）：./xlsx.full.min.js、./chart.umd.min.js
@@ -2497,17 +2499,21 @@ function refreshActiveCatCounts(){
   const temp = state.temp;
   const all = getAllDatesForTemp(temp);
 
-  // 月別：以「週歸屬」統計（週一~週日），只要該週的週一落在所選月份，就把整週（含跨月）納入
+  // 月別：以「週視圖」統計（週二～週一），只要該週與所選月份有交集就納入（可跨月）
   // 其他：以目前選取範圍統計
   let mmddSet = new Set();
   if(state.rangeMode === "month"){
-    const m = state.month;
-    all.filter(o => (getWeekStartUTC(o.dateObj).getUTCMonth()+1) === m).forEach(o => mmddSet.add(o.mmdd));
+    const m = Number(state.month);
+    const hasInMonth = all.some(o => (o.dateObj.getUTCMonth()+1) === m);
+    if(hasInMonth){
+      const wk = getMonthWeekWindowsUTC(state.year, m); // wk.start/wk.end 會跨月
+      all.filter(o => o.dateObj >= wk.start && o.dateObj <= wk.end).forEach(o => mmddSet.add(o.mmdd));
+    }
   }else{
     mmddSet = getDateSetInSelection();
   }
 
-  const map = new Map(); // cat -> Set(prod)
+const map = new Map(); // cat -> Set(prod)
 
   for(const rec of state.records.values()){
     if(rec.temp !== temp) continue;
@@ -3609,13 +3615,19 @@ state.activeGroupCat = "";
 function getActiveGroupMmddSet(){
   const temp = state.temp;
   const all = getAllDatesForTemp(temp);
-  // 月別：以日曆月統計（1~31）；其他：以目前選取範圍統計
+
+  // 月別：以「週視圖」統計（週二～週一），只要該週與所選月份有交集就納入（可跨月）
   if(state.rangeMode === "month"){
-    const m = state.month;
+    const m = Number(state.month);
+    // 若該月在資料中完全沒有一天，避免跨月抓到別月資料
+    const hasInMonth = all.some(o => (o.dateObj.getUTCMonth()+1) === m);
+    if(!hasInMonth) return new Set();
+    const wk = getMonthWeekWindowsUTC(state.year, m); // wk.start/wk.end 會跨月
     const s = new Set();
-    all.filter(o => (o.dateObj.getUTCMonth()+1) === m).forEach(o => s.add(o.mmdd));
+    all.filter(o => o.dateObj >= wk.start && o.dateObj <= wk.end).forEach(o => s.add(o.mmdd));
     return s;
   }
+
   return getDateSetInSelection();
 }
 
@@ -4037,17 +4049,21 @@ function buildGroupRowsForCat(catName){
   const temp = state.temp;
   const all = getAllDatesForTemp(temp);
 
-  // 月別：以「週歸屬」統計（週一~週日），只要該週的週一落在所選月份，就把整週（含跨月）納入
+  // 月別：以「週視圖」統計（週二～週一），只要該週與所選月份有交集就納入（可跨月）
   // 其他：以目前選取範圍統計
   let mmddSet = new Set();
   if(state.rangeMode === "month"){
-    const m = state.month;
-    all.filter(o => (getWeekStartUTC(o.dateObj).getUTCMonth()+1) === m).forEach(o => mmddSet.add(o.mmdd));
+    const m = Number(state.month);
+    const hasInMonth = all.some(o => (o.dateObj.getUTCMonth()+1) === m);
+    if(hasInMonth){
+      const wk = getMonthWeekWindowsUTC(state.year, m); // wk.start/wk.end 會跨月
+      all.filter(o => o.dateObj >= wk.start && o.dateObj <= wk.end).forEach(o => mmddSet.add(o.mmdd));
+    }
   }else{
     mmddSet = getDateSetInSelection();
   }
 
-  const catKey = cleanKey(cleanText(catName || ""));
+const catKey = cleanKey(cleanText(catName || ""));
   const byDate = new Map(); // dateStr -> agg
 
   for(const rec of state.records.values()){
@@ -4830,8 +4846,6 @@ function _getPrevMmddSetForDrop(){
     if(pm <= 0){ pm = 12; py = py - 1; }
     const wk = getMonthWeekWindowsUTC(py, pm); // 前月的週視圖（會跨月）
     return _buildSetFromRange(temp, wk.start, wk.end);
-  }
-    return s;
   }
 
   if(state.rangeMode === "week"){
