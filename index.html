@@ -2783,9 +2783,11 @@ function buildWeeklyOrDailySeries(kpi = state.chartKpi){
   let focus = all;
 
   if(mode === "month"){
-    focus = all.filter(o => o.dateObj.getUTCMonth()+1 === state.month);
+    const wk = getMonthWeekWindowsUTC(state.year, state.month);
+    focus = all.filter(o => o.dateObj >= wk.start && o.dateObj <= wk.end);
     title = `週趨勢（${String(state.month).padStart(2,"0")} 月｜每週平均）`;
   }else if(mode === "week"){
+
     const ws = new Date(state.weekStartStr + "T00:00:00Z");
     const we = addDaysUTC(ws,6);
     focus = all.filter(o => o.dateObj >= ws && o.dateObj <= we);
@@ -2827,35 +2829,18 @@ function buildWeeklyOrDailySeries(kpi = state.chartKpi){
     if(!byWeek.has(wsStr)) byWeek.set(wsStr, []);
     byWeek.get(wsStr).push(it);
   }
-  const weeks = Array.from(byWeek.entries()).sort((a,b)=>a[0].localeCompare(b[0]));
-  const labels = [];
-  const values = [];
-  for(const [wsStr, items] of weeks){
-    let qty=0, rev=0, multi=0, itemSum=0, attSum=0, effSum=0, attCnt=0, effCnt=0, dayCnt=0;
-    for(const it of items){
-      const s = it.summary;
-      const q = toNumber(s.totalQty); if(Number.isFinite(q)) qty += q;
-      const r = toNumber(s.revenue); if(Number.isFinite(r)) rev += r;
-      const mu = toNumber(s.multi); if(Number.isFinite(mu)) multi += mu;
-      const a = toNumber(s.attendance); if(Number.isFinite(a)){ attSum += a; attCnt++; }
-      const e = toNumber(s.efficiency); if(Number.isFinite(e)){ effSum += e; effCnt++; }
-      const dk = `${temp}|${it.mmdd}`;
-      const ic = state.itemCountDaily.get(dk);
-      if(Number.isFinite(ic)) itemSum += ic;
-      dayCnt++;
-    }
-    const dn = Math.max(dayCnt, 1);
-    const weekAvg = {
-      totalQty: qty/dn,
-      revenue: rev/dn,
-      multi: multi/dn,
-      attendance: attCnt ? (attSum/attCnt) : null,
-      efficiency: effCnt ? (effSum/effCnt) : null,
-      avgPrice: (qty>0 && rev>0) ? (rev/qty) : null,
-      itemCount: itemSum/dn
-    };
-    labels.push(wsStr.slice(5));
-    values.push(weekAvg[kpi] ?? null);
+  const wk = (mode==="month") ? getMonthWeekWindowsUTC(state.year, state.month) : null;
+  const labelByStart = wk ? new Map(wk.weeks.map(w=>[w.startStr, w.label])) : null;
+
+  const orderedStarts = (mode==="month")
+    ? wk.weeks.map(w=>w.startStr)
+    : Array.from(byWeek.keys()).sort((a,b)=>a.localeCompare(b));
+
+  const labels=[], values=[];
+  for(const wsStr of orderedStarts){
+    const arr = byWeek.get(wsStr) || [];
+    labels.push(mode==="month" ? (labelByStart.get(wsStr) || wsStr.slice(5)) : wsStr.slice(5));
+    values.push(arr.length ? avg(arr.map(o=>o[metric])) : null);
   }
   return {title, labels, values};
 }
@@ -2958,17 +2943,18 @@ function buildProductSeriesMode(rows, metric, aggMode){
     byWeek.get(wsStr).push(it);
   }
 
-  const weeks = Array.from(byWeek.entries()).sort((a,b)=>a[0].localeCompare(b[0]));
+  const wk = (mode==='month') ? getMonthWeekWindowsUTC(state.year, state.month) : null;
+  const labelByStart = wk ? new Map(wk.weeks.map(w=>[w.startStr, w.label])) : null;
+
+  const orderedStarts = (mode==='month')
+    ? wk.weeks.map(w=>w.startStr)
+    : Array.from(byWeek.keys()).sort((a,b)=>a.localeCompare(b));
+
   const labels=[], values=[];
-  for(const [wsStr, arr] of weeks){
-    const ws = new Date(wsStr + "T00:00:00Z");
-    const we = addDaysUTC(ws, 6);
-    if(mode === "month"){
-      labels.push(`${md(ws)}～${md(we)}`);
-    }else{
-      labels.push(wsStr.slice(5));
-    }
-    values.push(agg(arr.map(it => it.rec[metric])));
+  for(const wsStr of orderedStarts){
+    const arr = byWeek.get(wsStr) || [];
+    labels.push(mode==='month' ? (labelByStart.get(wsStr) || wsStr.slice(5)) : wsStr.slice(5));
+    values.push(arr.length ? agg(arr.map(it=>it.rec[metric])) : null);
   }
 
   return {title, labels, values};
