@@ -577,7 +577,7 @@
   </div>
 
 <script>
-console.log("BUILD v19");
+console.log("BUILD v20");
 /* =========================
    解析/圖表套件載入（自動 fallback）
    - 優先使用同資料夾的本地檔（可選）：./xlsx.full.min.js、./chart.umd.min.js
@@ -2685,7 +2685,8 @@ const valueLabelPlugin = {
 
     ctx.save();
     ctx.beginPath();
-    ctx.rect(area.left, area.top, area.right - area.left, area.bottom - area.top);
+    // allow drawing a bit above the chart area for delta labels
+    ctx.rect(area.left, area.top - 48, area.right - area.left, (area.bottom - area.top) + 64);
     ctx.clip();
 
     ctx.fillStyle = opts.color || "#334155";
@@ -2761,7 +2762,8 @@ const deltaArcPlugin = {
 
     ctx.save();
     ctx.beginPath();
-    ctx.rect(area.left, area.top, area.right - area.left, area.bottom - area.top);
+    // allow drawing a bit above the chart area for delta labels
+    ctx.rect(area.left, area.top - 48, area.right - area.left, (area.bottom - area.top) + 64);
     ctx.clip();
 
     ctx.lineWidth = opts.lineWidth || 1.5;
@@ -2818,7 +2820,8 @@ const deltaArcPlugin = {
 
         // Text
         ctx.fillStyle = col;
-        ctx.fillText(String(txt), midX, yTop - 10);
+                const yText = Math.max(area.top + 12, yTop - 10);
+        ctx.fillText(String(txt), midX, yText);
       }
     });
 
