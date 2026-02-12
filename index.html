@@ -577,7 +577,7 @@
   </div>
 
 <script>
-console.log("BUILD v27");
+console.log("BUILD v28");
 /* =========================
    解析/圖表套件載入（自動 fallback）
    - 優先使用同資料夾的本地檔（可選）：./xlsx.full.min.js、./chart.umd.min.js
@@ -1721,6 +1721,18 @@ function yearFromFilename(filename){
   }
   return state.year || 2025;
 }
+
+function baseMonthFromFilename(filename){
+  const s = String(filename || "");
+  // e.g. "115.01.01-30..." or "114.12.01-31..."
+  const m = s.match(/^\d{3}\.(\d{2})\./);
+  if(m){
+    const mm = Number(m[1]);
+    if(mm>=1 && mm<=12) return mm;
+  }
+  return null;
+}
+
 function dateKeyToDateObj(dateKey){
   const m = String(dateKey).match(/^(\d{4})(\d{4})$/);
   if(!m) return null;
@@ -1734,18 +1746,35 @@ async function parseWorkbookArrayBuffer(buf, filename){
   const wb = XLSX.read(buf, {type:"array"});
   state.loadedFiles.push(filename);
   const fileYear = yearFromFilename(filename);
+  const baseMonth = baseMonthFromFilename(filename);
 
   for(const sname of wb.SheetNames){
     const mmdd = parseMmdd(sname);
     if(mmdd){
-      const dateKey = `${fileYear}${mmdd}`;
+      let y = fileYear;
+      const sm = Number(mmdd.slice(0,2));
+      if(baseMonth===1 && sm===12) y = fileYear - 1;
+      if(baseMonth===12 && sm===1) y = fileYear + 1;
+      const dateKey = `${y}${mmdd}`;
       parseDailySummarySheet(wb, sname, dateKey);
       continue;
     }
     const t18 = String(sname).match(/晉欣\s*18度C\s*(\d{4})/);
     const t4  = String(sname).match(/晉欣\s*4度C\s*(\d{4})/);
-    if(t18) parseTempSheet(wb, sname, "18", `${fileYear}${t18[1]}`);
-    if(t4)  parseTempSheet(wb, sname, "4",  `${fileYear}${t4[1]}`);
+    if(t18){
+      let y = fileYear;
+      const sm = Number(t18[1].slice(0,2));
+      if(baseMonth===1 && sm===12) y = fileYear - 1;
+      if(baseMonth===12 && sm===1) y = fileYear + 1;
+      parseTempSheet(wb, sname, "18", `${y}${t18[1]}`);
+    }
+    if(t4){
+      let y = fileYear;
+      const sm = Number(t4[1].slice(0,2));
+      if(baseMonth===1 && sm===12) y = fileYear - 1;
+      if(baseMonth===12 && sm===1) y = fileYear + 1;
+      parseTempSheet(wb, sname, "4",  `${y}${t4[1]}`);
+    }
     }
 }
 
