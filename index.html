@@ -577,7 +577,7 @@
   </div>
 
 <script>
-console.log("BUILD v15");
+console.log("BUILD v18");
 /* =========================
    解析/圖表套件載入（自動 fallback）
    - 優先使用同資料夾的本地檔（可選）：./xlsx.full.min.js、./chart.umd.min.js
@@ -2952,11 +2952,19 @@ function buildProductSeriesMode(rows, metric, aggMode){
   }
 
   const wk = (mode==='month') ? getMonthWeekWindowsUTC(state.year, state.month) : null;
-  const labelByStart = wk ? new Map(wk.weeks.map(w=>[w.startStr, w.label])) : null;
 
-  const orderedStarts = (mode==='month')
-    ? wk.weeks.map(w=>w.startStr)
-    : Array.from(byWeek.keys()).sort((a,b)=>a.localeCompare(b));
+// 月別：wk.weeks 只有 {start,end}，因此這裡自行產生 startStr 與 label
+const labelByStart = wk
+  ? new Map(wk.weeks.map(w=>{
+      const startStr = dateObjToStr(w.start);
+      const label = `${md(w.start)}~${md(w.end)}`;
+      return [startStr, label];
+    }))
+  : null;
+
+const orderedStarts = (mode==='month')
+  ? wk.weeks.map(w=>dateObjToStr(w.start))
+  : Array.from(byWeek.keys()).sort((a,b)=>a.localeCompare(b));
 
   const labels=[], values=[];
   for(const wsStr of orderedStarts){
