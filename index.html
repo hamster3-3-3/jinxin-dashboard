@@ -1063,6 +1063,26 @@ function addDaysUTC(dateObj, days){
   d.setUTCDate(d.getUTCDate()+days);
   return d;
 }
+
+function getMonthWeekWindowsUTC(year, month){
+  // 回傳「該月需顯示的週期」：包含與該月有交集的週（週二～週一）
+  const monthStart = new Date(Date.UTC(Number(year), Number(month)-1, 1));
+  const monthEnd = new Date(Date.UTC(Number(year), Number(month), 0)); // last day of month
+  monthStart.setUTCHours(0,0,0,0);
+  monthEnd.setUTCHours(0,0,0,0);
+
+  let ws = getWeekStartUTC(monthStart);
+  const weeks = [];
+  while(ws.getTime() <= monthEnd.getTime()){
+    const we = addDaysUTC(ws, 6);
+    // 有交集才納入
+    if(we.getTime() >= monthStart.getTime() && ws.getTime() <= monthEnd.getTime()){
+      weeks.push({ start: new Date(ws.getTime()), end: we });
+    }
+    ws = addDaysUTC(ws, 7);
+  }
+  return { monthStart, monthEnd, weeks };
+}
 function monthKeyFromDate(dateObj){
   return `${dateObj.getUTCFullYear()}-${String(dateObj.getUTCMonth()+1).padStart(2,"0")}`;
 }
@@ -2923,9 +2943,12 @@ function buildProductSeriesMode(rows, metric, aggMode){
   };
 
   if(mode === "month"){
-    // 以週起始日（週二）歸屬月份
-    focus = items.filter(it => (getWeekStartUTC(it.dateObj).getUTCMonth()+1) === state.month);
-    title = `週別（${String(state.month).padStart(2,"0")} 月｜每週${aggMode==="sum"?"加總":"平均"}）`;
+    const wk = getMonthWeekWindowsUTC(state.year, state.month);
+    const allowed = new Set(wk.weeks.map(w => dateObjToStr(w.start)));
+    focus = items.filter(it => allowed.has(dateObjToStr(getWeekStartUTC(it.dateObj))));
+    title = (viewMode === "sum")
+      ? `週別（${String(state.month).padStart(2,"0")} 月｜每週加總）`
+      : `週別（${String(state.month).padStart(2,"0")} 月｜每週平均）`;
   }
 
   for(const it of focus){
@@ -4183,7 +4206,9 @@ function buildGroupSeries(rows, metric, viewMode="avg"){
   };
 
   if(mode === "month"){
-    focus = items.filter(it => (getWeekStartUTC(it.dateObj).getUTCMonth()+1) === state.month);
+    const wk = getMonthWeekWindowsUTC(state.year, state.month);
+    const allowed = new Set(wk.weeks.map(w => dateObjToStr(w.start)));
+    focus = items.filter(it => allowed.has(dateObjToStr(getWeekStartUTC(it.dateObj))));
     title = (viewMode === "sum")
       ? `週別（${String(state.month).padStart(2,"0")} 月｜每週加總）`
       : `週別（${String(state.month).padStart(2,"0")} 月｜每週平均）`;
