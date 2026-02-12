@@ -577,7 +577,7 @@
   </div>
 
 <script>
-console.log("BUILD v21");
+console.log("BUILD v22");
 /* =========================
    解析/圖表套件載入（自動 fallback）
    - 優先使用同資料夾的本地檔（可選）：./xlsx.full.min.js、./chart.umd.min.js
@@ -2858,14 +2858,17 @@ const deltaArcPlugin = {
   }
 };
 
-// Register once
-try{
-  if(window.Chart && !window.__deltaArcsRegistered){
-    window.Chart.register(deltaArcPlugin);
-    window.__deltaArcsRegistered = true;
-  }
-}catch(e){}
-
+// Ensure plugin is registered (Chart.js might load after our script in some deployments)
+function ensureDeltaArcs(){
+  try{
+    if(window.Chart && !window.__deltaArcsRegistered){
+      window.Chart.register(deltaArcPlugin);
+      window.__deltaArcsRegistered = true;
+    }
+  }catch(e){}
+}
+// Attempt early registration
+ensureDeltaArcs();
 
 function kpiLabel(k){
   return {
@@ -3203,6 +3206,7 @@ function renderProductTrend(rows){
     }
 
     const ctx = $(canvasId).getContext("2d");
+    ensureDeltaArcs();
     return new Chart(ctx, {
       type: "line",
       data: { labels, datasets },
@@ -3661,6 +3665,7 @@ function renderCharts(){
     });
   }
 
+  ensureDeltaArcs();
   dailyChart = new Chart(dctx, {
     type: "line",
     data: { labels, datasets: dailyDatasets },
@@ -3690,6 +3695,7 @@ function renderCharts(){
         pointHoverRadius: 5
       });
     }
+    ensureDeltaArcs();
     dailySumChart = new Chart(dctxSum, {
       type: "line",
       data: { labels, datasets: sumDatasets },
@@ -3721,6 +3727,7 @@ function renderCharts(){
     });
   }
 
+  ensureDeltaArcs();
   cumChart = new Chart(cctx, {
     type: "line",
     data: { labels, datasets: cumDatasets },
@@ -4517,6 +4524,7 @@ function renderGroupTrend(catName){
   }
 
   const ctx = $("groupTrendCanvas").getContext("2d");
+  ensureDeltaArcs();
   groupChart = new Chart(ctx, {
     type: "line",
     data: { labels, datasets: datasetsAvg },
@@ -4564,6 +4572,7 @@ function renderGroupTrend(catName){
 
   const ctxSum = $("groupTrendCanvasSum") ? $("groupTrendCanvasSum").getContext("2d") : null;
   if(ctxSum){
+    ensureDeltaArcs();
     groupChartSum = new Chart(ctxSum, {
       type: "line",
       data: { labels, datasets: datasetsSum },
@@ -5746,4 +5755,3 @@ $("lineSelect").value = "";
 </script>
 </body>
 </html>
-  
