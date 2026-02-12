@@ -577,7 +577,7 @@
   </div>
 
 <script>
-console.log("BUILD v20");
+console.log("BUILD v21");
 /* =========================
    解析/圖表套件載入（自動 fallback）
    - 優先使用同資料夾的本地檔（可選）：./xlsx.full.min.js、./chart.umd.min.js
@@ -2795,33 +2795,62 @@ const deltaArcPlugin = {
         if(!p0 || !p1) continue;
 
         const midX = (p0.x + p1.x) / 2;
-        let yTop = Math.min(p0.y, p1.y) - arcH;
-        yTop = Math.max(area.top + padTop, yTop);
 
-        const cpY = yTop - arcH * 0.6; // control point for a small arc
+        // Draw the delta arc close to the segment (offset along the segment normal),
+        // instead of sticking to the top of the chart.
+        const dx = (p1.x - p0.x);
+        const dy = (p1.y - p0.y);
+        const segLen = Math.hypot(dx, dy) || 1;
+
+        // Two normals: (-dy, dx) and (dy, -dx). Pick the one that points upward (ny < 0) in screen coords.
+        const nxA = -dy / segLen, nyA = dx / segLen;
+        const nxB =  dy / segLen, nyB = -dx / segLen;
+        let nx = nxA, ny = nyA;
+        if(nyA >= 0 && nyB < 0){ nx = nxB; ny = nyB; }
+        else if(nyA >= 0 && nyB >= 0){
+          // both point downward-ish (can happen on flat/near-flat lines); just flip A
+          nx = -nxA; ny = -nyA;
+        }
+
+        const offset = (opts.offset && Number.isFinite(opts.offset)) ? opts.offset : Math.max(10, arcH);
+        const bump = (opts.bump && Number.isFinite(opts.bump)) ? opts.bump : (offset * 0.8);
+        const clampY = (y)=>Math.max(area.top + padTop, Math.min(area.bottom - padTop, y));
+
+        // Baseline endpoints (a little above the segment)
+        let ax0 = p0.x + nx * offset, ay0 = clampY(p0.y + ny * offset);
+        let ax1 = p1.x + nx * offset, ay1 = clampY(p1.y + ny * offset);
+
+        const midAx = (ax0 + ax1) / 2;
+        const midAy = (ay0 + ay1) / 2;
+
+        // Control point slightly further along the same normal to form a small arc
+        const cpX = midAx + nx * bump;
+        const cpY = clampY(midAy + ny * bump);
+
         const txt = formatter(delta, ds, i, chart);
         const col = delta > 0 ? colorPos : (delta < 0 ? colorNeg : colorZero);
 
         // Arc
         ctx.strokeStyle = col;
         ctx.beginPath();
-        ctx.moveTo(p0.x, yTop);
-        ctx.quadraticCurveTo(midX, cpY, p1.x, yTop);
+        ctx.moveTo(ax0, ay0);
+        ctx.quadraticCurveTo(cpX, cpY, ax1, ay1);
         ctx.stroke();
 
-        // Small end ticks
+        // Small end ticks (along the normal)
         const tick = 4;
         ctx.beginPath();
-        ctx.moveTo(p0.x, yTop - tick);
-        ctx.lineTo(p0.x, yTop + tick);
-        ctx.moveTo(p1.x, yTop - tick);
-        ctx.lineTo(p1.x, yTop + tick);
+        ctx.moveTo(ax0 - nx*tick, ay0 - ny*tick);
+        ctx.lineTo(ax0 + nx*tick, ay0 + ny*tick);
+        ctx.moveTo(ax1 - nx*tick, ay1 - ny*tick);
+        ctx.lineTo(ax1 + nx*tick, ay1 + ny*tick);
         ctx.stroke();
 
-        // Text
+        // Text: near the arc apex, nudged a bit along normal
         ctx.fillStyle = col;
-                const yText = Math.max(area.top + 12, yTop - 10);
-        ctx.fillText(String(txt), midX, yText);
+        const tx = midAx + nx * (bump + 10);
+        const ty = clampY(midAy + ny * (bump + 10));
+        ctx.fillText(String(txt), tx, ty);
       }
     });
 
@@ -5717,3 +5746,4 @@ $("lineSelect").value = "";
 </script>
 </body>
 </html>
+  
