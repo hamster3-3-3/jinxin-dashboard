@@ -4831,6 +4831,8 @@ function _getPrevMmddSetForDrop(){
     const wk = getMonthWeekWindowsUTC(py, pm); // 前月的週視圖（會跨月）
     return _buildSetFromRange(temp, wk.start, wk.end);
   }
+    return s;
+  }
 
   if(state.rangeMode === "week"){
     if(!state.weekStartStr) return new Set();
