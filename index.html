@@ -2939,7 +2939,7 @@ function buildProductSeriesMode(rows, metric, aggMode){
     const wk = getMonthWeekWindowsUTC(state.year, state.month);
     const allowed = new Set(wk.weeks.map(w => dateObjToStr(w.start)));
     focus = items.filter(it => allowed.has(dateObjToStr(getWeekStartUTC(it.dateObj))));
-    title = (viewMode === "sum")
+    title = (aggMode === "sum")
       ? `週別（${String(state.month).padStart(2,"0")} 月｜每週加總）`
       : `週別（${String(state.month).padStart(2,"0")} 月｜每週平均）`;
   }
