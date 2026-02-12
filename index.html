@@ -2775,85 +2775,73 @@ function fmtDeltaForMetric(metric, delta){
 }
 
 
-const deltaArcPlugin = {
-  id: "deltaArcs",
-  afterDatasetsDraw(chart, args, pluginOptions){
-    try{
-      const opt = (pluginOptions||{});
-      if(!opt || opt.enabled === false) return;
-      const dsIndex = (opt.datasetIndex ?? 0);
-      const meta = chart.getDatasetMeta(dsIndex);
-      if(!meta || !meta.data || meta.data.length < 2) return;
+  // ===== Delta marker plugin (tick + text, no arcs) =====
+  const deltaArcPlugin = {
+    id: "deltaArcs",
+    afterDatasetsDraw(chart, args, pluginOptions) {
+      try {
+        const opt = chart?.options?.plugins?.deltaArcs || {};
+        if (!opt.enabled) return;
+        const dsIdx = opt.datasetIndex ?? 0;
+        const ds = chart.data?.datasets?.[dsIdx];
+        if (!ds) return;
+        const meta = chart.getDatasetMeta(dsIdx);
+        if (!meta || meta.hidden) return;
+        const pts = meta.data || [];
+        const data = Array.isArray(ds.data) ? ds.data : [];
+        if (pts.length < 2) return;
 
-      const ctx = chart.ctx;
-      const ds = chart.data.datasets[dsIndex] || {};
-      const vals = (ds.data||[]).map(v => (typeof v === "number" ? v : (v && typeof v.y === "number" ? v.y : NaN)));
+        const ctx = chart.ctx;
+        const fmt = (n) => {
+          if (n === null || n === undefined || Number.isNaN(n)) return "";
+          const v = Number(n);
+          const sign = v > 0 ? "+" : "";
+          const abs = Math.abs(v);
+          const s = abs >= 1000 ? abs.toLocaleString() : String(abs);
+          return sign + s;
+        };
 
-      const fontSize = opt.fontSize ?? 12;
-      const pad = opt.pad ?? 6;
-      const offset = opt.offset ?? 14;   // 距離折線的距離
-      const tickLen = opt.tickLen ?? 10; // 小小標示的長度
-      const minAbs = opt.minAbs ?? 0;
+        const tickLen = opt.tickLen ?? 8;
+        const yPad = opt.yPad ?? 10;
+        const font = opt.font || "600 12px system-ui, -apple-system, Segoe UI, Roboto, Noto Sans TC, sans-serif";
+        const textPad = opt.textPad ?? 4;
 
-      ctx.save();
-      ctx.font = `${fontSize}px system-ui, -apple-system, Segoe UI, Roboto, Noto Sans TC, sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-
-      for(let i=1;i<meta.data.length;i++){
-        const p0 = meta.data[i-1];
-        const p1 = meta.data[i];
-        const v0 = vals[i-1], v1 = vals[i];
-        if(!isFinite(v0) || !isFinite(v1)) continue;
-
-        const delta = v1 - v0;
-        if(Math.abs(delta) < minAbs) continue;
-
-        const x0=p0.x, y0=p0.y, x1=p1.x, y1=p1.y;
-
-        // segment unit direction
-        let dx = x1-x0, dy=y1-y0;
-        const segLen = Math.hypot(dx,dy) || 1;
-        dx/=segLen; dy/=segLen;
-
-        // normal (pointing "up" from the line)
-        let nx = -dy, ny = dx;
-        const mx = (x0+x1)/2, my=(y0+y1)/2;
-
-        // keep marker inside chart area
-        const ca = chart.chartArea;
-        let bx = mx + nx*offset;
-        let by = my + ny*offset;
-        bx = Math.max(ca.left+4, Math.min(ca.right-4, bx));
-        by = Math.max(ca.top+4, Math.min(ca.bottom-4, by));
-
-        const col = delta>=0 ? (opt.posColor || "#16a34a") : (opt.negColor || "#dc2626");
-        const sign = delta>=0 ? "+" : "−";
-        const label = `${sign}${Math.round(Math.abs(delta)).toLocaleString()}`;
-
-        // draw tiny tick marker (no arc)
-        ctx.strokeStyle = col;
+        ctx.save();
         ctx.lineWidth = opt.lineWidth ?? 2;
-        ctx.beginPath();
-        ctx.moveTo(bx - nx*(tickLen/2), by - ny*(tickLen/2));
-        ctx.lineTo(bx + nx*(tickLen/2), by + ny*(tickLen/2));
-        ctx.stroke();
+        ctx.font = font;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
 
-        // text near tick
-        ctx.fillStyle = col;
-        ctx.fillText(label, bx + nx*(pad+fontSize*0.2), by + ny*(pad+fontSize*0.2));
-      }
-      ctx.restore();
-    }catch(e){
-      // silent
+        for (let i = 1; i < pts.length; i++) {
+          const p0 = pts[i - 1];
+          const p1 = pts[i];
+          if (!p0 || !p1) continue;
+          const v0 = Number(data[i - 1]);
+          const v1 = Number(data[i]);
+          if (!Number.isFinite(v0) || !Number.isFinite(v1)) continue;
+          const d = v1 - v0;
+          if (!Number.isFinite(d) || d === 0) continue;
+
+          const xm = (p0.x + p1.x) / 2;
+          const ym = (p0.y + p1.y) / 2 - yPad;
+          const color = d > 0 ? (opt.upColor || "#16a34a") : (opt.downColor || "#ef4444");
+
+          ctx.strokeStyle = color;
+          ctx.beginPath();
+          ctx.moveTo(xm, ym);
+          ctx.lineTo(xm, ym + tickLen);
+          ctx.stroke();
+
+          ctx.fillStyle = color;
+          ctx.fillText(fmt(d), xm, ym - textPad);
+        }
+
+        ctx.restore();
+      } catch (e) {}
     }
-  }
-};
-if(!window.__deltaArcsRegistered){
-  Chart.register(deltaArcPlugin);
-  window.__deltaArcsRegistered = true;
-}
-}catch(e){}
+  };
+  if (window.Chart && window.Chart.register) { try { window.Chart.register(deltaArcPlugin); } catch (e) {} }
+window.__deltaArcsRegistered = true;
 }
 // Attempt early registration
 ensureDeltaArcs();
