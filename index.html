@@ -577,7 +577,7 @@
   </div>
 
 <script>
-console.log("BUILD v25");
+console.log("BUILD v27");
 /* =========================
    解析/圖表套件載入（自動 fallback）
    - 優先使用同資料夾的本地檔（可選）：./xlsx.full.min.js、./chart.umd.min.js
@@ -1553,13 +1553,13 @@ function parseTempSheet(wb, sheetName, temp, dateKey){
   const idxEffList = indexOfAllHeaderContains(header, "人時性");
 
   // 有些 4°C 分頁會出現「標準」與「實際」兩組（人數/產能/時/人時性 重複兩次）
-  const idxPeopleStd = (idxPeopleList.length>=2) ? idxPeopleList[0] : -1;
-  const idxCapStd    = (idxCapList.length>=2) ? idxCapList[0] : -1;
-  const idxEffStd    = (idxEffList.length>=2) ? idxEffList[0] : -1;
+  const idxPeopleAct = (idxPeopleList.length>=2) ? idxPeopleList[0] : (idxPeopleList[0] ?? -1);
+  const idxCapAct    = (idxCapList.length>=2) ? idxCapList[0] : (idxCapList[0] ?? -1);
+  const idxEffAct    = (idxEffList.length>=2) ? idxEffList[0] : (idxEffList[0] ?? -1);
 
-  const idxPeopleAct = (idxPeopleList.length>=2) ? idxPeopleList[1] : (idxPeopleList[0] ?? -1);
-  const idxCapAct    = (idxCapList.length>=2) ? idxCapList[1] : (idxCapList[0] ?? -1);
-  const idxEffAct    = (idxEffList.length>=2) ? idxEffList[1] : (idxEffList[0] ?? -1);
+  const idxPeopleStd = (idxPeopleList.length>=2) ? idxPeopleList[1] : -1;
+  const idxCapStd    = (idxCapList.length>=2) ? idxCapList[1] : -1;
+  const idxEffStd    = (idxEffList.length>=2) ? idxEffList[1] : -1;
 
   // 對外仍以「實際」為主（若只有一組，就等同該組）
   const idxPeople = idxPeopleAct;
@@ -1573,7 +1573,7 @@ function parseTempSheet(wb, sheetName, temp, dateKey){
   // 達成率欄位（若有）：通常同時包含「人時性達成率」與（4°C）「產能達成率」
   const _achCols = indexOfAllHeaderContains(header, "達成率");
   const idxHumanAch = _achCols.length ? _achCols[0] : -1;
-  const idxCapAch = (temp === "4") ? (_achCols.length ? _achCols[_achCols.length-1] : -1) : -1;
+  const idxCapAch = (temp === "4") ? ((_achCols.length>=2) ? _achCols[_achCols.length-1] : -1) : -1;
 
   let currentLine = "";
   let currentCat = "";
@@ -5132,10 +5132,10 @@ function _metricDropAgg(metric, pairFilter){
     const p = _safeNum(rec.people);
     if(Number.isFinite(p)){ it.peopleSum += p; it.peopleCnt++; }
 
-    const e = _safeNum(rec.eff);
+    const e = _safeNum(rec.humanAch);
     if(Number.isFinite(e)){ it.effSum += e; it.effCnt++; }
 
-    const c = _safeNum(rec.cap);
+    const c = _safeNum(rec.capAch);
     if(Number.isFinite(c)){ it.capSum += c; it.capCnt++; }
   }
 
@@ -5279,13 +5279,13 @@ function _metricRiseAgg(metric, pairFilter){
       a.peopleN += 1;
     }
 
-    const eff = +rec.eff;
+    const eff = +rec.humanAch;
     if(Number.isFinite(eff)){
       a.effSum += eff;
       a.effN += 1;
     }
 
-    const cap = +rec.cap;
+    const cap = +rec.capAch;
     if(Number.isFinite(cap)){
       a.capSum += cap;
       a.capN += 1;
@@ -5412,7 +5412,7 @@ function renderLowestRatePanel(){
   const isRiseMode = mode.startsWith("rise_");
   const isChangeMode = isDropMode || isRiseMode;
 
-  if(isChangeMode){
+  if(isDropMode){
     const metric = (mode === "drop_cap") ? "cap" : (mode === "drop_eff") ? "eff" : "qty";
     list = _metricDropAgg(metric, pair);
     empty.textContent = "目前範圍內未取得可比較的上一期資料。";
@@ -5424,6 +5424,8 @@ function renderLowestRatePanel(){
     list = _lowestRateAgg(mode, pair);
     empty.textContent = "目前範圍內未取得達成率資料。";
   }
+
+
 
   box.innerHTML = "";
   if(!list.length){
@@ -5450,7 +5452,9 @@ function renderLowestRatePanel(){
     const btn = document.createElement("button");
     const _isTop6 = i < 6;
     const _titleCls = _isTop6 ? "text-red-700" : "text-slate-900";
-    const _metricCls = _isTop6 ? "text-red-600" : "text-slate-900";
+    const _metricCls = _isTop6
+      ? (isRiseMode ? "text-blue-600" : "text-red-600")
+      : "text-slate-900";
 
     btn.type = "button";
     btn.className = "w-full rounded-2xl border border-slate-200 bg-white px-5 py-4 text-left hover:border-slate-300 hover:shadow-sm transition";
@@ -5478,11 +5482,11 @@ function renderLowestRatePanel(){
       detailLabel = "前→現";
       if(it.metric === "qty"){
         const v = isRiseMode ? it.riseVal : it.dropVal;
-        metricText = isRiseMode ? ("+" + fmtInt(v)) : fmtInt(v);
+        metricText = isRiseMode ? fmtInt(v) : fmtInt(v);
         detailValue = `${fmtInt(it.prevVal)} → ${fmtInt(it.curVal)}`;
       }else{
         const v = isRiseMode ? it.riseVal : it.dropVal;
-        metricText = isRiseMode ? ("+" + fmtDec(v, 2)) : fmtDec(v, 2);
+        metricText = isRiseMode ? fmtDec(v, 2) : fmtDec(v, 2);
         detailValue = `${fmtDec(it.prevVal, 2)} → ${fmtDec(it.curVal, 2)}`;
       }
     }else{
