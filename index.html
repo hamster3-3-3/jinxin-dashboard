@@ -2842,9 +2842,6 @@ function fmtDeltaForMetric(metric, delta){
   };
   if (window.Chart && window.Chart.register) { try { window.Chart.register(deltaArcPlugin); } catch (e) {} }
 window.__deltaArcsRegistered = true;
-}
-// Attempt early registration
-ensureDeltaArcs();
 
 function kpiLabel(k){
   return {
@@ -3182,7 +3179,6 @@ function renderProductTrend(rows){
     }
 
     const ctx = $(canvasId).getContext("2d");
-    ensureDeltaArcs();
     return new Chart(ctx, {
       type: "line",
       data: { labels, datasets },
@@ -3641,7 +3637,6 @@ function renderCharts(){
     });
   }
 
-  ensureDeltaArcs();
   dailyChart = new Chart(dctx, {
     type: "line",
     data: { labels, datasets: dailyDatasets },
@@ -3671,7 +3666,6 @@ function renderCharts(){
         pointHoverRadius: 5
       });
     }
-    ensureDeltaArcs();
     dailySumChart = new Chart(dctxSum, {
       type: "line",
       data: { labels, datasets: sumDatasets },
@@ -3703,7 +3697,6 @@ function renderCharts(){
     });
   }
 
-  ensureDeltaArcs();
   cumChart = new Chart(cctx, {
     type: "line",
     data: { labels, datasets: cumDatasets },
@@ -4500,7 +4493,6 @@ function renderGroupTrend(catName){
   }
 
   const ctx = $("groupTrendCanvas").getContext("2d");
-  ensureDeltaArcs();
   groupChart = new Chart(ctx, {
     type: "line",
     data: { labels, datasets: datasetsAvg },
@@ -4548,7 +4540,6 @@ function renderGroupTrend(catName){
 
   const ctxSum = $("groupTrendCanvasSum") ? $("groupTrendCanvasSum").getContext("2d") : null;
   if(ctxSum){
-    ensureDeltaArcs();
     groupChartSum = new Chart(ctxSum, {
       type: "line",
       data: { labels, datasets: datasetsSum },
@@ -4998,110 +4989,49 @@ function _dateObjToKey(d){
 
 // 取得「上一期」的日期集合：年/月/週/日/指定範圍
 
-function _getPrevMmddSetForDrop(){
-  const temp = state.temp;
-  const tempAll = getAllDatesForTemp(temp); // Date objects (UTC)
-  if(!tempAll || !tempAll.length) return new Set();
-
+function _getPrevMmddSetForDrop() {
   const mode = state.rangeMode;
+  const temp = state.temp;
+  // Compare with the immediately previous period (allow partial coverage if some days are missing).
+  const cur = getDateSetInSelection();
+  const curDates = [...cur].map(mmdd => ymdFromState(mmdd)).filter(Boolean).sort();
+  if (!curDates.length) return new Set();
+  const curStart = new Date(curDates[0].y, curDates[0].m-1, curDates[0].d);
+  const curEnd = new Date(curDates[curDates.length-1].y, curDates[curDates.length-1].m-1, curDates[curDates.length-1].d);
 
-  // helper: find closest previous date before a given start
-  function _findPrevDate(beforeDate){
-    for(let i=tempAll.length-1;i>=0;i--){
-      if(tempAll[i].getTime() < beforeDate.getTime()) return tempAll[i];
-    }
-    return null;
+  const addDays = (dt, n) => { const x = new Date(dt); x.setDate(x.getDate()+n); return x; };
+  const addMonths = (dt, n) => { const x = new Date(dt); const d=x.getDate(); x.setDate(1); x.setMonth(x.getMonth()+n); const md = new Date(x.getFullYear(), x.getMonth()+1, 0).getDate(); x.setDate(Math.min(d, md)); return x; };
+
+  let prevStart = null;
+  let prevEnd = null;
+  if (mode === 'day') {
+    prevStart = addDays(curStart, -1);
+    prevEnd = prevStart;
+  } else if (mode === 'week') {
+    prevStart = addDays(curStart, -7);
+    prevEnd = addDays(prevStart, 6);
+  } else if (mode === 'month') {
+    const s = new Date(curStart.getFullYear(), curStart.getMonth(), 1);
+    prevStart = addMonths(s, -1);
+    prevStart = new Date(prevStart.getFullYear(), prevStart.getMonth(), 1);
+    prevEnd = new Date(prevStart.getFullYear(), prevStart.getMonth()+1, 0);
+  } else if (mode === 'year') {
+    prevStart = new Date(curStart.getFullYear()-1, 0, 1);
+    prevEnd = new Date(curStart.getFullYear()-1, 11, 31);
+  } else if (mode === 'range') {
+    const span = Math.max(1, Math.round((curEnd - curStart) / 86400000) + 1);
+    prevEnd = addDays(curStart, -1);
+    prevStart = addDays(prevEnd, -(span-1));
+  } else {
+    // fallback: use nearest previous available date
+    const tempAll = getAllDatesForTemp(temp);
+    const prev = _findPrevDate(tempAll, curStart);
+    if (!prev) return new Set();
+    prevStart = prev;
+    prevEnd = prev;
   }
 
-  // helper: month start/end UTC
-  function _monthRangeUTC(y, m){ // m: 1-12
-    const start = new Date(Date.UTC(y, m-1, 1));
-    const next  = new Date(Date.UTC(y, m, 1));
-    const end   = addDaysUTC(next, -1);
-    return {start, end};
-  }
-
-  if(mode === "year"){
-    const curStart = new Date(Date.UTC(state.year, 0, 1));
-    const prevY = state.year - 1;
-    let {start:ps, end:pe} = {start:new Date(Date.UTC(prevY,0,1)), end:new Date(Date.UTC(prevY,11,31))};
-    let prevSet = _buildSetFromRange(temp, ps, pe);
-    if(prevSet.size) return prevSet;
-
-    // fallback: previous available year with data
-    const prevDate = _findPrevDate(curStart);
-    if(!prevDate) return new Set();
-    const y = prevDate.getUTCFullYear();
-    prevSet = _buildSetFromRange(temp, new Date(Date.UTC(y,0,1)), new Date(Date.UTC(y,11,31)));
-    return prevSet;
-  }
-
-  if(mode === "month"){
-    const {start:curStart} = _monthRangeUTC(state.year, state.month);
-    // naive previous month
-    let py = state.year, pm = state.month - 1;
-    if(pm < 1){ pm = 12; py -= 1; }
-    let r = _monthRangeUTC(py, pm);
-    let prevSet = _buildSetFromRange(temp, r.start, r.end);
-    if(prevSet.size) return prevSet;
-
-    // fallback: previous available month with data
-    const prevDate = _findPrevDate(curStart);
-    if(!prevDate) return new Set();
-    r = _monthRangeUTC(prevDate.getUTCFullYear(), prevDate.getUTCMonth()+1);
-    prevSet = _buildSetFromRange(temp, r.start, r.end);
-    return prevSet;
-  }
-
-  if(mode === "week"){
-    if(!state.weekStartStr) return new Set();
-    const ws = new Date(state.weekStartStr+"T00:00:00Z");
-    const curStart = ws;
-    const prevStart = addDaysUTC(ws, -7);
-    const prevEnd   = addDaysUTC(ws, -1);
-    let prevSet = _buildSetFromRange(temp, prevStart, prevEnd);
-    if(prevSet.size) return prevSet;
-
-    // fallback: use previous available week's start (even if跨月)
-    const prevDate = _findPrevDate(curStart);
-    if(!prevDate) return new Set();
-    const pws = getWeekStartUTC(prevDate);
-    prevSet = _buildSetFromRange(temp, pws, addDaysUTC(pws, 6));
-    return prevSet;
-  }
-
-  if(mode === "day"){
-    if(!state.day) return new Set();
-    const cur = new Date(state.day+"T00:00:00Z");
-    const prev = addDaysUTC(cur, -1);
-    let prevSet = _buildSetFromRange(temp, prev, prev);
-    if(prevSet.size) return prevSet;
-
-    const prevDate = _findPrevDate(cur);
-    if(!prevDate) return new Set();
-    prevSet = _buildSetFromRange(temp, prevDate, prevDate);
-    return prevSet;
-  }
-
-  // custom range: use previous range length
-  if(mode === "custom"){
-    if(!state.customStart || !state.customEnd) return new Set();
-    const s = new Date(state.customStart+"T00:00:00Z");
-    const e = new Date(state.customEnd+"T00:00:00Z");
-    const days = Math.round((e.getTime()-s.getTime())/86400000) + 1;
-    const prevE = addDaysUTC(s, -1);
-    const prevS = addDaysUTC(prevE, -(days-1));
-    let prevSet = _buildSetFromRange(temp, prevS, prevE);
-    if(prevSet.size) return prevSet;
-
-    const prevDate = _findPrevDate(s);
-    if(!prevDate) return new Set();
-    const pws = getWeekStartUTC(prevDate);
-    prevSet = _buildSetFromRange(temp, pws, addDaysUTC(pws, 6));
-    return prevSet;
-  }
-
-  return new Set();
+  return _buildSetFromRange(temp, prevStart, prevEnd);
 }
 
 
