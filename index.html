@@ -1077,11 +1077,16 @@ function getMonthWeekWindowsUTC(year, month){
     const we = addDaysUTC(ws, 6);
     // 有交集才納入
     if(we.getTime() >= monthStart.getTime() && ws.getTime() <= monthEnd.getTime()){
-      weeks.push({ start: new Date(ws.getTime()), end: we });
+      weeks.push({ start: new Date(ws.getTime()), end: new Date(we.getTime()) });
     }
     ws = addDaysUTC(ws, 7);
   }
-  return { monthStart, monthEnd, weeks };
+
+  // 供其他地方快速取「該月週視圖」的整段起訖（會跨月）
+  const start = weeks.length ? weeks[0].start : new Date(monthStart.getTime());
+  const end   = weeks.length ? weeks[weeks.length-1].end : new Date(monthEnd.getTime());
+
+  return { monthStart, monthEnd, weeks, start, end };
 }
 function monthKeyFromDate(dateObj){
   return `${dateObj.getUTCFullYear()}-${String(dateObj.getUTCMonth()+1).padStart(2,"0")}`;
@@ -2182,18 +2187,15 @@ function summariesInRange(){
     return base.map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
   }
   if(state.rangeMode === "month"){
-    const m = state.month;
-    const inMonth = base.filter(o=>o.dateObj.getUTCMonth()+1 === m);
-    if(!inMonth.length) return [];
-    const firstDay = inMonth[0].dateObj;
-    const lastDay  = inMonth[inMonth.length-1].dateObj;
-    const firstWs = getWeekStartUTC(firstDay);
-    const lastWs  = getWeekStartUTC(lastDay);
-    const end = addDaysUTC(lastWs, 6);
+    const m = Number(state.month);
+    // 先確認「所選月」在 base 內至少有一天資料（避免選到完全沒資料月份卻跨月抓到別月）
+    const hasInMonth = base.some(o => (o.dateObj.getUTCMonth()+1) === m);
+    if(!hasInMonth) return [];
+    const wk = getMonthWeekWindowsUTC(state.year, m); // wk.start/wk.end 會跨月
     return base
-      .filter(o=>o.dateObj >= firstWs && o.dateObj <= end)
-      .map(o=>({...o, summary:getSummaryForDay(temp, o.mmdd)}))
-      .filter(x=>x.summary);
+      .filter(o => o.dateObj >= wk.start && o.dateObj <= wk.end)
+      .map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)}))
+      .filter(x => x.summary);
   }
 if(state.rangeMode === "week"){
     if(!state.weekStartStr) return [];
@@ -4826,11 +4828,9 @@ function _getPrevMmddSetForDrop(){
     let py = Number(state.year);
     let pm = Number(state.month) - 1;
     if(pm <= 0){ pm = 12; py = py - 1; }
-    const all = _getAllDatesForTempYearAny(temp, py);
-    const s = new Set();
-    for(const o of all){
-      if((getWeekStartUTC(o.dateObj).getUTCMonth()+1) === pm) s.add(o.mmdd);
-    }
+    const wk = getMonthWeekWindowsUTC(py, pm); // 前月的週視圖（會跨月）
+    return _buildSetFromRange(temp, wk.start, wk.end);
+  }
     return s;
   }
 
