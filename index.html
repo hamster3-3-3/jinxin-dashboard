@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v23 (delta tick labels, minimal) -->
+  <!-- BUILD: v15 (month cross-week + debug stamp) -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -577,7 +577,7 @@
   </div>
 
 <script>
-console.log("BUILD v24");
+console.log("BUILD v25");
 /* =========================
    解析/圖表套件載入（自動 fallback）
    - 優先使用同資料夾的本地檔（可選）：./xlsx.full.min.js、./chart.umd.min.js
@@ -2757,17 +2757,17 @@ const deltaArcPlugin = {
     // If too dense, annotate every Nth segment
     const step = (opts.step && Number.isFinite(opts.step)) ? opts.step : (total > 40 ? 2 : 1);
 
-    const tickLen = (opts.tickLen && Number.isFinite(opts.tickLen)) ? opts.tickLen : 10;  // marker length
-    const textGap = (opts.textGap && Number.isFinite(opts.textGap)) ? opts.textGap : 10;  // distance from marker to text
+    const arcH = (opts.arcHeight && Number.isFinite(opts.arcHeight)) ? opts.arcHeight : 14;
+    const padTop = 8;
 
     ctx.save();
-    // Keep everything inside the plot area (avoid blocking outside UI)
     ctx.beginPath();
-    ctx.rect(area.left, area.top, area.right - area.left, area.bottom - area.top);
+    // allow drawing a bit above the chart area for delta labels
+    ctx.rect(area.left, area.top - 48, area.right - area.left, (area.bottom - area.top) + 64);
     ctx.clip();
 
-    ctx.lineWidth = opts.lineWidth || 1.6;
-    ctx.font = `${opts.fontWeight || 700} ${opts.fontSize || 12}px "Noto Sans TC", system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
+    ctx.lineWidth = opts.lineWidth || 1.5;
+    ctx.font = `${opts.fontWeight || 700} ${opts.fontSize || 11}px "Noto Sans TC", system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
@@ -2775,9 +2775,6 @@ const deltaArcPlugin = {
     const colorPos = opts.colorPos || "#16a34a";
     const colorNeg = opts.colorNeg || "#dc2626";
     const colorZero = opts.colorZero || "#64748b";
-
-    const clampX = (x)=>Math.max(area.left + 6, Math.min(area.right - 6, x));
-    const clampY = (y)=>Math.max(area.top + 10, Math.min(area.bottom - 10, y));
 
     chart.data.datasets.forEach((ds, di)=>{
       const meta = chart.getDatasetMeta(di);
@@ -2797,35 +2794,62 @@ const deltaArcPlugin = {
         const p1 = pts[i];
         if(!p0 || !p1) continue;
 
-        // Midpoint on the segment
-        const mx = (p0.x + p1.x) / 2;
-        const my = (p0.y + p1.y) / 2;
+        const midX = (p0.x + p1.x) / 2;
 
-        // Segment normal (choose the upward-pointing normal in screen coords)
+        // Draw the delta arc close to the segment (offset along the segment normal),
+        // instead of sticking to the top of the chart.
         const dx = (p1.x - p0.x);
         const dy = (p1.y - p0.y);
         const segLen = Math.hypot(dx, dy) || 1;
 
-        let nx = -dy / segLen, ny = dx / segLen; // normal A
-        // if normal points down (ny>0), flip it so the label sits "above" the segment
-        if(ny > 0){ nx = -nx; ny = -ny; }
+        // Two normals: (-dy, dx) and (dy, -dx). Pick the one that points upward (ny < 0) in screen coords.
+        const nxA = -dy / segLen, nyA = dx / segLen;
+        const nxB =  dy / segLen, nyB = -dx / segLen;
+        let nx = nxA, ny = nyA;
+        if(nyA >= 0 && nyB < 0){ nx = nxB; ny = nyB; }
+        else if(nyA >= 0 && nyB >= 0){
+          // both point downward-ish (can happen on flat/near-flat lines); just flip A
+          nx = -nxA; ny = -nyA;
+        }
 
-        const col = delta > 0 ? colorPos : (delta < 0 ? colorNeg : colorZero);
+        const offset = (opts.offset && Number.isFinite(opts.offset)) ? opts.offset : Math.max(10, arcH);
+        const bump = (opts.bump && Number.isFinite(opts.bump)) ? opts.bump : (offset * 0.8);
+        const clampY = (y)=>Math.max(area.top + padTop, Math.min(area.bottom - padTop, y));
+
+        // Baseline endpoints (a little above the segment)
+        let ax0 = p0.x + nx * offset, ay0 = clampY(p0.y + ny * offset);
+        let ax1 = p1.x + nx * offset, ay1 = clampY(p1.y + ny * offset);
+
+        const midAx = (ax0 + ax1) / 2;
+        const midAy = (ay0 + ay1) / 2;
+
+        // Control point slightly further along the same normal to form a small arc
+        const cpX = midAx + nx * bump;
+        const cpY = clampY(midAy + ny * bump);
+
         const txt = formatter(delta, ds, i, chart);
+        const col = delta > 0 ? colorPos : (delta < 0 ? colorNeg : colorZero);
 
-        // Small marker (a short tick) crossing the segment at midpoint
+        // Arc
         ctx.strokeStyle = col;
-        const hx = nx * (tickLen/2);
-        const hy = ny * (tickLen/2);
         ctx.beginPath();
-        ctx.moveTo(clampX(mx - hx), clampY(my - hy));
-        ctx.lineTo(clampX(mx + hx), clampY(my + hy));
+        ctx.moveTo(ax0, ay0);
+        ctx.quadraticCurveTo(cpX, cpY, ax1, ay1);
         ctx.stroke();
 
-        // Text just above the segment, close to the tick
+        // Small end ticks (along the normal)
+        const tick = 4;
+        ctx.beginPath();
+        ctx.moveTo(ax0 - nx*tick, ay0 - ny*tick);
+        ctx.lineTo(ax0 + nx*tick, ay0 + ny*tick);
+        ctx.moveTo(ax1 - nx*tick, ay1 - ny*tick);
+        ctx.lineTo(ax1 + nx*tick, ay1 + ny*tick);
+        ctx.stroke();
+
+        // Text: near the arc apex, nudged a bit along normal
         ctx.fillStyle = col;
-        const tx = clampX(mx + nx * (tickLen/2 + textGap));
-        const ty = clampY(my + ny * (tickLen/2 + textGap));
+        const tx = midAx + nx * (bump + 10);
+        const ty = clampY(midAy + ny * (bump + 10));
         ctx.fillText(String(txt), tx, ty);
       }
     });
@@ -2834,7 +2858,7 @@ const deltaArcPlugin = {
   }
 };
 
-// Ensure plugin is registered (Chart.js might load after our script in some deployments) (Chart.js might load after our script in some deployments)
+// Ensure plugin is registered (Chart.js might load after our script in some deployments)
 function ensureDeltaArcs(){
   try{
     if(window.Chart && !window.__deltaArcsRegistered){
@@ -4752,10 +4776,10 @@ function refreshLowestRateModeOptions(){
   opts.push(["drop_cap","產能下滑數（高→低）"]);
   opts.push(["drop_eff","人時性下滑數(平均)（高→低）"]);
 
-  // 上升數（跨線別彙總，以品名為主鍵）
-  opts.push(["rise_qty","生產量上升數(低->高)"]);
-  opts.push(["rise_cap","產能上升數(低->高)"]);
-  opts.push(["rise_eff","人時性上升數(平均)(低->高)"]);
+  // 上升數（以本期-前期，越高越前）
+  opts.push(["rise_qty","生產量上升數（高→低）"]);
+  opts.push(["rise_cap","產能上升數（高→低）"]);
+  opts.push(["rise_eff","人時性上升數(平均)（高→低）"]);
 
   sel.innerHTML = "";
   for(const [v,t] of opts){
@@ -5216,118 +5240,112 @@ function _metricDropAgg(metric, pairFilter){
   return out.slice(0, 6);
 }
 
+function _prodDropAgg(pairFilter){
+  // backward compatible wrapper (older code may use mode "drop")
+  return _metricDropAgg("qty", pairFilter);
+}
 
-/* ===== 上升數（高→低）：依視圖與上一期比較（qty 以期間加總；cap/eff 以平均） ===== */
-function _metricRisePrevAgg(metric, pairFilter){
+
+
+
+
+function _metricRiseAgg(metric, pairFilter){
   // metric: "qty" | "cap" | "eff"
+  // 與 _metricDropAgg 相同邏輯，但取「本期 - 前期」的上升值，並以「上升越多越前」排序
+  const out = [];
   const curSet = getDateSetInSelection();
-  const prevSet = _getPrevMmddSetForDrop(); // 同一套「上一期」邏輯
+  const prevSet = _getPrevMmddSetForDrop();
+  if(!curSet || !curSet.size || !prevSet || !prevSet.size) return out;
 
-  const curDays = Math.max(1, (curSet && curSet.size) ? curSet.size : 0);
-  const prevDays = Math.max(1, (prevSet && prevSet.size) ? prevSet.size : 0);
+  const curDays = curSet.size;
+  const prevDays = prevSet.size;
 
+  // prodKey -> aggregates
   const curMap = new Map();
   const prevMap = new Map();
 
-  function ensure(map, rec){
-    const prodKey = cleanKey(rec.product);
-    if(!prodKey) return null;
-    if(_isSummaryRowProdName(rec.product)) return null;
+  const addAgg = (map, prodKey, rec)=>{
+    let a = map.get(prodKey);
+    if(!a){
+      a = { qtySum:0, peopleSum:0, effSum:0, capSum:0, effN:0, capN:0, peopleN:0, meta:null, reps:[] };
+      map.set(prodKey, a);
+    }
+    const qty = +rec.qty || 0;
+    a.qtySum += qty;
 
-    // 配別篩選：以品名前二字是否為「二配」判定
+    const ppl = +rec.people;
+    if(Number.isFinite(ppl)){
+      a.peopleSum += ppl;
+      a.peopleN += 1;
+    }
+
+    const eff = +rec.eff;
+    if(Number.isFinite(eff)){
+      a.effSum += eff;
+      a.effN += 1;
+    }
+
+    const cap = +rec.cap;
+    if(Number.isFinite(cap)){
+      a.capSum += cap;
+      a.capN += 1;
+    }
+
+    // collect representative line/cat for click (prefer the one in current period later)
+    if(rec.lineKey || rec.catKey){
+      a.reps.push({lineKey: rec.lineKey||"", catKey: rec.catKey||"", line: rec.line||"", cat: rec.cat||""});
+    }
+
+    if(!a.meta){
+      a.meta = { prod: rec.prod||"", prodKey };
+    }
+  };
+
+  // iterate daily records (already normalized into state.allDailyRows)
+  const rows = state.allDailyRows || [];
+  for(const r of rows){
+    if(!r || !r.mmdd) continue;
+    if(!r.prodKey || !r.prod) continue;
+
+    // 配別過濾（UI: all / two / nonTwo）
     if(pairFilter === "two"){
-      if(!isTwoPei(rec.product)) return null;
+      if(!(r.prod||"").startsWith("二配")) continue;
     }else if(pairFilter === "nonTwo"){
-      if(isTwoPei(rec.product)) return null;
+      if((r.prod||"").startsWith("二配")) continue;
     }
 
-    if(!map.has(prodKey)){
-      map.set(prodKey, {
-        prodKey,
-        prod: cleanText(rec.product),
-        qtySum: 0, qtyCnt: 0,
-        peopleSum: 0, peopleCnt: 0,
-        effSum: 0, effCnt: 0,
-        capSum: 0, capCnt: 0,
-        lineQty: Object.create(null),
-        catQty: Object.create(null),
-        catKeyBy: Object.create(null),
-      });
+    if(curSet.has(r.mmdd)){
+      addAgg(curMap, r.prodKey, r);
+    }else if(prevSet.has(r.mmdd)){
+      addAgg(prevMap, r.prodKey, r);
     }
-    return map.get(prodKey);
   }
 
-  function acc(map, rec){
-    const it = ensure(map, rec);
-    if(!it) return;
+  // build list
+  for(const [prodKey, curAgg] of curMap.entries()){
+    const prevAgg = prevMap.get(prodKey);
+    if(!prevAgg) continue;
 
-    const q = _safeNum(rec.qty);
-    if(Number.isFinite(q)){
-      it.qtySum += q; it.qtyCnt++;
-      const lk = cleanKey(rec.line);
-      if(lk){ it.lineQty[lk] = (it.lineQty[lk] || 0) + q; }
-      const ck = cleanKey(rec.category || "");
-      if(ck){
-        it.catQty[ck] = (it.catQty[ck] || 0) + q;
-        it.catKeyBy[ck] = cleanText(rec.category || "");
-      }
-    }
+    const meta = curAgg.meta || prevAgg.meta || {prodKey, prod:""};
+    // prefer representative info from curAgg, fallback to prevAgg
+    const rep = (curAgg.reps && curAgg.reps[0]) ? curAgg.reps[0] : (prevAgg.reps && prevAgg.reps[0]) ? prevAgg.reps[0] : {lineKey:"",catKey:"",line:"",cat:""};
 
-    const p = _safeNum(rec.people);
-    if(Number.isFinite(p)){ it.peopleSum += p; it.peopleCnt++; }
+    const curQtySum = curAgg.qtySum;
+    const prevQtySum = prevAgg.qtySum;
 
-    const e = _safeNum(rec.eff);
-    if(Number.isFinite(e)){ it.effSum += e; it.effCnt++; }
+    const curAvgQtyDay = curQtySum / Math.max(1, curDays);
+    const prevAvgQtyDay = prevQtySum / Math.max(1, prevDays);
 
-    const c = _safeNum(rec.cap);
-    if(Number.isFinite(c)){ it.capSum += c; it.capCnt++; }
-  }
+    const curAvgPeople = (curAgg.peopleN ? (curAgg.peopleSum / curAgg.peopleN) : null);
+    const prevAvgPeople = (prevAgg.peopleN ? (prevAgg.peopleSum / prevAgg.peopleN) : null);
 
-  for(const rec of state.records.values()){
-    if(rec.temp !== state.temp) continue;
-    if(curSet.has(rec.mmdd))  acc(curMap, rec);
-    if(prevSet.has(rec.mmdd)) acc(prevMap, rec);
-  }
+    const curAvgEff = (curAgg.effN ? (curAgg.effSum / curAgg.effN) : null);
+    const prevAvgEff = (prevAgg.effN ? (prevAgg.effSum / prevAgg.effN) : null);
 
-  function pickTop(obj){
-    let bestK = "";
-    let bestV = -Infinity;
-    for(const k in obj){
-      const v = obj[k];
-      if(v > bestV){ bestV = v; bestK = k; }
-    }
-    return bestK || "";
-  }
+    const curAvgCap = (curAgg.capN ? (curAgg.capSum / curAgg.capN) : null);
+    const prevAvgCap = (prevAgg.capN ? (prevAgg.capSum / prevAgg.capN) : null);
 
-  const allKeys = new Set([...curMap.keys(), ...prevMap.keys()]);
-  const out = [];
-
-  for(const prodKey of allKeys){
-    const cur = curMap.get(prodKey);
-    const prev = prevMap.get(prodKey);
-    const meta = cur || prev;
-    if(!meta) continue;
-
-    const repLineKey = pickTop((cur && cur.lineQty) ? cur.lineQty : (prev ? prev.lineQty : {}));
-    const repCatKey  = pickTop((cur && cur.catQty) ? cur.catQty : (prev ? prev.catQty : {}));
-
-    const repLineName = repLineKey ? displayLineName(repLineKey) : "—";
-    const repCatName  = repCatKey ? (meta.catKeyBy && meta.catKeyBy[repCatKey] ? meta.catKeyBy[repCatKey] : "—") : "—";
-
-    const curQtySum = cur ? cur.qtySum : 0;
-    const prevQtySum = prev ? prev.qtySum : 0;
-
-    const curAvgQtyDay = curQtySum / curDays;
-    const prevAvgQtyDay = prevQtySum / prevDays;
-
-    const curAvgPeople = (cur && cur.peopleCnt>0) ? (cur.peopleSum/cur.peopleCnt) : NaN;
-    const curAvgEff = (cur && cur.effCnt>0) ? (cur.effSum/cur.effCnt) : NaN;
-    const curAvgCap = (cur && cur.capCnt>0) ? (cur.capSum/cur.capCnt) : NaN;
-
-    const prevAvgEff = (prev && prev.effCnt>0) ? (prev.effSum/prev.effCnt) : NaN;
-    const prevAvgCap = (prev && prev.capCnt>0) ? (prev.capSum/prev.capCnt) : NaN;
-
-    let prevVal = NaN, curVal = NaN, riseVal = NaN;
+    let prevVal=null, curVal=null, riseVal=null;
     if(metric === "qty"){
       prevVal = prevQtySum;
       curVal = curQtySum;
@@ -5335,11 +5353,11 @@ function _metricRisePrevAgg(metric, pairFilter){
     }else if(metric === "cap"){
       prevVal = prevAvgCap;
       curVal = curAvgCap;
-      riseVal = curVal - prevVal;
+      riseVal = (Number.isFinite(curVal) && Number.isFinite(prevVal)) ? (curVal - prevVal) : null;
     }else if(metric === "eff"){
       prevVal = prevAvgEff;
       curVal = curAvgEff;
-      riseVal = curVal - prevVal;
+      riseVal = (Number.isFinite(curVal) && Number.isFinite(prevVal)) ? (curVal - prevVal) : null;
     }else{
       continue;
     }
@@ -5351,15 +5369,16 @@ function _metricRisePrevAgg(metric, pairFilter){
     const launchDays = _calcLaunchDays(li ? li.date : null);
 
     out.push({
-      lineKey: repLineKey || "",
-      catKey: repCatKey || "",
+      lineKey: rep.lineKey || "",
+      catKey: rep.catKey || "",
       prodKey: meta.prodKey || prodKey,
-      line: repLineName,
-      cat: repCatName,
-      prod: meta.prod,
+      line: rep.line || "",
+      cat: rep.cat || "",
+      prod: meta.prod || "",
 
       launchStr, launchDays,
 
+      // current-period metrics (cards)
       totalQty: curQtySum,
       avgQtyDay: curAvgQtyDay,
       avgPeople: curAvgPeople,
@@ -5377,78 +5396,6 @@ function _metricRisePrevAgg(metric, pairFilter){
   return out.slice(0, 6);
 }
 
-
-function _prodDropAgg(pairFilter){
-  // backward compatible wrapper (older code may use mode "drop")
-  return _metricDropAgg("qty", pairFilter);
-}
-
-
-
-
-function _metricRiseAgg(metric, pairFilter){
-  // metric: "qty" | "cap" | "eff"
-  const cand = [];
-  const mmddSet = getActiveGroupMmddSet(state.temp);
-  for(const [baseName, arr] of Object.entries(state.productDailyMap||{})){
-    // 配別過濾：二配=只看開頭為"二配"；非二配=排除開頭為"二配"
-    if(pairFilter === "二配"){
-      if(!arr.some(x=> (x.prod||"").startsWith("二配"))) continue;
-    }else if(pairFilter === "非二配"){
-      if(arr.some(x=> (x.prod||"").startsWith("二配"))) continue;
-    }
-
-    const items = arr.filter(x=>mmddSet.has(x.mmdd));
-    if(items.length < 2) continue;
-
-    // 以週別(週二~週一)為單位：取當前範圍最後一週 vs 前一週
-    const wsList = items.map(it=>({it, ws:getWeekStartUTC(it.dateObj).getTime()}));
-    wsList.sort((a,b)=>a.ws-b.ws);
-    const uniqWs = Array.from(new Set(wsList.map(x=>x.ws)));
-    if(uniqWs.length < 2) continue;
-    const curWs = uniqWs[uniqWs.length-1];
-    const prevWs = uniqWs[uniqWs.length-2];
-
-    const curItems = wsList.filter(x=>x.ws===curWs).map(x=>x.it);
-    const prevItems = wsList.filter(x=>x.ws===prevWs).map(x=>x.it);
-
-    const sumBy = (arr, key)=>arr.reduce((s,o)=>s+(+o[key]||0),0);
-    const avgBy = (arr, key)=>{
-      const xs = arr.map(o=>+o[key]).filter(v=>Number.isFinite(v));
-      if(!xs.length) return null;
-      return xs.reduce((a,b)=>a+b,0)/xs.length;
-    };
-
-    let prevVal=null, curVal=null;
-    if(metric==="qty"){
-      prevVal = sumBy(prevItems, "qty");
-      curVal = sumBy(curItems, "qty");
-    }else if(metric==="cap"){
-      prevVal = avgBy(prevItems, "cap");
-      curVal = avgBy(curItems, "cap");
-    }else{
-      prevVal = avgBy(prevItems, "eff");
-      curVal = avgBy(curItems, "eff");
-    }
-    if(prevVal==null || curVal==null) continue;
-
-    const riseVal = curVal - prevVal;
-    if(!(riseVal > 0)) continue;
-
-    // 取代表資料
-    const repr = items[items.length-1];
-    cand.push({
-      baseName,
-      prod: repr.prod,
-      category: repr.category,
-      line: repr.line,
-      prevVal, curVal, riseVal
-    });
-  }
-
-  cand.sort((a,b)=>a.riseVal-b.riseVal); // 低→高
-  return cand.slice(0,6);
-}
 function renderLowestRatePanel(){
   const sel = $("lowestRateMode");
   const box = $("lowestRateList");
@@ -5466,11 +5413,12 @@ function renderLowestRatePanel(){
   const isChangeMode = isDropMode || isRiseMode;
 
   if(isChangeMode){
-    const metric =
-      (mode.endsWith("_cap")) ? "cap" :
-      (mode.endsWith("_eff")) ? "eff" : "qty";
-
-    list = isRiseMode ? _metricRisePrevAgg(metric, pair) : _metricDropAgg(metric, pair);
+    const metric = (mode === "drop_cap") ? "cap" : (mode === "drop_eff") ? "eff" : "qty";
+    list = _metricDropAgg(metric, pair);
+    empty.textContent = "目前範圍內未取得可比較的上一期資料。";
+  }else if(isRiseMode){
+    const metric = (mode === "rise_cap") ? "cap" : (mode === "rise_eff") ? "eff" : "qty";
+    list = _metricRiseAgg(metric, pair);
     empty.textContent = "目前範圍內未取得可比較的上一期資料。";
   }else{
     list = _lowestRateAgg(mode, pair);
@@ -5483,6 +5431,7 @@ function renderLowestRatePanel(){
     return;
   }
   empty.classList.add("hidden");
+
   const labelMap = {
     human: "人時達成率",
     cap: "產能達成率",
@@ -5490,9 +5439,9 @@ function renderLowestRatePanel(){
     drop_qty: "生產量下滑數",
     drop_cap: "產能下滑數",
     drop_eff: "人時性下滑數(平均)",
-    rise_qty: "生產量上升數(低->高)",
-    rise_cap: "產能上升數(低->高)",
-    rise_eff: "人時性上升數(平均)(低->高)"
+    rise_qty: "生產量上升數",
+    rise_cap: "產能上升數",
+    rise_eff: "人時性上升數(平均)"
   };
   const label = labelMap[mode] || "—";
 
@@ -5500,8 +5449,8 @@ function renderLowestRatePanel(){
     const it = list[i];
     const btn = document.createElement("button");
     const _isTop6 = i < 6;
-    const _titleCls = _isTop6 ? (isRiseMode ? "text-emerald-700" : "text-red-700") : "text-slate-900";
-    const _metricCls = _isTop6 ? (isRiseMode ? "text-emerald-600" : "text-red-600") : "text-slate-900";
+    const _titleCls = _isTop6 ? "text-red-700" : "text-slate-900";
+    const _metricCls = _isTop6 ? "text-red-600" : "text-slate-900";
 
     btn.type = "button";
     btn.className = "w-full rounded-2xl border border-slate-200 bg-white px-5 py-4 text-left hover:border-slate-300 hover:shadow-sm transition";
@@ -5527,12 +5476,13 @@ function renderLowestRatePanel(){
     let detailValue = "—";
     if(isChangeMode){
       detailLabel = "前→現";
-      const ch = isRiseMode ? it.riseVal : it.dropVal;
       if(it.metric === "qty"){
-        metricText = (isRiseMode ? "+" : "") + fmtInt(ch);
+        const v = isRiseMode ? it.riseVal : it.dropVal;
+        metricText = isRiseMode ? ("+" + fmtInt(v)) : fmtInt(v);
         detailValue = `${fmtInt(it.prevVal)} → ${fmtInt(it.curVal)}`;
       }else{
-        metricText = (isRiseMode ? "+" : "") + fmtDec(ch, 2);
+        const v = isRiseMode ? it.riseVal : it.dropVal;
+        metricText = isRiseMode ? ("+" + fmtDec(v, 2)) : fmtDec(v, 2);
         detailValue = `${fmtDec(it.prevVal, 2)} → ${fmtDec(it.curVal, 2)}`;
       }
     }else{
