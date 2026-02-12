@@ -348,10 +348,10 @@
 
   </div>
 
-  <!-- 低達成率品項（當前範圍） -->
+  <!-- 各品項KPI排序（當前範圍） -->
   <div class="card mt-6">
     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div class="h2">低達成率品項（當前範圍）</div>
+      <div class="h2">各品項KPI排序（當前範圍）</div>
       <div class="flex items-center gap-4">
         <div class="flex items-center gap-2">
           <div class="text-slate-500 text-sm font-bold whitespace-nowrap shrink-0 leading-none">配別</div>
@@ -2163,11 +2163,19 @@ function summariesInRange(){
   }
   if(state.rangeMode === "month"){
     const m = state.month;
-    // 以「週二～週一」為一週；跨月時以週起始日（週二）決定歸屬月份
-    return base.filter(o => (getWeekStartUTC(o.dateObj).getUTCMonth()+1) === m)
-               .map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
+    const inMonth = base.filter(o=>o.dateObj.getUTCMonth()+1 === m);
+    if(!inMonth.length) return [];
+    const firstDay = inMonth[0].dateObj;
+    const lastDay  = inMonth[inMonth.length-1].dateObj;
+    const firstWs = getWeekStartUTC(firstDay);
+    const lastWs  = getWeekStartUTC(lastDay);
+    const end = addDaysUTC(lastWs, 6);
+    return base
+      .filter(o=>o.dateObj >= firstWs && o.dateObj <= end)
+      .map(o=>({...o, summary:getSummaryForDay(temp, o.mmdd)}))
+      .filter(x=>x.summary);
   }
-  if(state.rangeMode === "week"){
+if(state.rangeMode === "week"){
     if(!state.weekStartStr) return [];
     const ws = new Date(state.weekStartStr + "T00:00:00Z");
     const we = addDaysUTC(ws, 6);
@@ -5018,6 +5026,70 @@ function _prodDropAgg(pairFilter){
 
 
 
+
+function _metricRiseAgg(metric, pairFilter){
+  // metric: "qty" | "cap" | "eff"
+  const cand = [];
+  const mmddSet = getActiveGroupMmddSet(state.temp);
+  for(const [baseName, arr] of Object.entries(state.productDailyMap||{})){
+    // 配別過濾：二配=只看開頭為"二配"；非二配=排除開頭為"二配"
+    if(pairFilter === "二配"){
+      if(!arr.some(x=> (x.prod||"").startsWith("二配"))) continue;
+    }else if(pairFilter === "非二配"){
+      if(arr.some(x=> (x.prod||"").startsWith("二配"))) continue;
+    }
+
+    const items = arr.filter(x=>mmddSet.has(x.mmdd));
+    if(items.length < 2) continue;
+
+    // 以週別(週二~週一)為單位：取當前範圍最後一週 vs 前一週
+    const wsList = items.map(it=>({it, ws:getWeekStartUTC(it.dateObj).getTime()}));
+    wsList.sort((a,b)=>a.ws-b.ws);
+    const uniqWs = Array.from(new Set(wsList.map(x=>x.ws)));
+    if(uniqWs.length < 2) continue;
+    const curWs = uniqWs[uniqWs.length-1];
+    const prevWs = uniqWs[uniqWs.length-2];
+
+    const curItems = wsList.filter(x=>x.ws===curWs).map(x=>x.it);
+    const prevItems = wsList.filter(x=>x.ws===prevWs).map(x=>x.it);
+
+    const sumBy = (arr, key)=>arr.reduce((s,o)=>s+(+o[key]||0),0);
+    const avgBy = (arr, key)=>{
+      const xs = arr.map(o=>+o[key]).filter(v=>Number.isFinite(v));
+      if(!xs.length) return null;
+      return xs.reduce((a,b)=>a+b,0)/xs.length;
+    };
+
+    let prevVal=null, curVal=null;
+    if(metric==="qty"){
+      prevVal = sumBy(prevItems, "qty");
+      curVal = sumBy(curItems, "qty");
+    }else if(metric==="cap"){
+      prevVal = avgBy(prevItems, "cap");
+      curVal = avgBy(curItems, "cap");
+    }else{
+      prevVal = avgBy(prevItems, "eff");
+      curVal = avgBy(curItems, "eff");
+    }
+    if(prevVal==null || curVal==null) continue;
+
+    const riseVal = curVal - prevVal;
+    if(!(riseVal > 0)) continue;
+
+    // 取代表資料
+    const repr = items[items.length-1];
+    cand.push({
+      baseName,
+      prod: repr.prod,
+      category: repr.category,
+      line: repr.line,
+      prevVal, curVal, riseVal
+    });
+  }
+
+  cand.sort((a,b)=>a.riseVal-b.riseVal); // 低→高
+  return cand.slice(0,6);
+}
 function renderLowestRatePanel(){
   const sel = $("lowestRateMode");
   const box = $("lowestRateList");
@@ -5092,7 +5164,7 @@ function renderLowestRatePanel(){
         metricText = fmtInt(it.dropVal);
         detailValue = `${fmtInt(it.prevVal)} → ${fmtInt(it.curVal)}`;
       }else{
-        metricText = fmtDec(it.dropVal, 2);
+        metricText = mode.startsWith("rise_") ? ("+" + fmtDec(it.riseVal, 2)) : fmtDec(it.dropVal, 2);
         detailValue = `${fmtDec(it.prevVal, 2)} → ${fmtDec(it.curVal, 2)}`;
       }
     }else{
