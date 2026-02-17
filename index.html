@@ -577,7 +577,7 @@
   </div>
 
 <script>
-console.log("BUILD v28");
+console.log("BUILD v36");
 /* =========================
    解析/圖表套件載入（自動 fallback）
    - 優先使用同資料夾的本地檔（可選）：./xlsx.full.min.js、./chart.umd.min.js
@@ -4988,6 +4988,29 @@ function _dateObjToKey(d){
 }
 
 // 取得「上一期」的日期集合：年/月/週/日/指定範圍
+
+
+// --- helper: parse date key from state/date-set (expects YYYYMMDD or MM/DD) ---
+function ymdFromState(key){
+  if(!key) return null;
+  const s = String(key).trim();
+  // common: YYYYMMDD
+  if(/^\d{8}$/.test(s)){
+    return { y: +s.slice(0,4), m: +s.slice(4,6), d: +s.slice(6,8) };
+  }
+  // allow YYYY-MM-DD
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)){
+    return { y: +s.slice(0,4), m: +s.slice(5,7), d: +s.slice(8,10) };
+  }
+  // allow MM/DD (fallback to selected year if any)
+  const mmdd = s.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if(mmdd){
+    const m = +mmdd[1], d = +mmdd[2];
+    const y = +((window.state && window.state.yearSel) || new Date().getFullYear());
+    return { y, m, d };
+  }
+  return null;
+}
 
 function _getPrevMmddSetForDrop() {
   const mode = state.rangeMode;
