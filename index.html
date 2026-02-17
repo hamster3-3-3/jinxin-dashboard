@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v15 (month cross-week + debug stamp) -->
+  <!-- BUILD: v23 (delta tick labels, minimal) -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -577,8 +577,7 @@
   </div>
 
 <script>
-console.log("BUILD v40");
-function pad2(n){ return String(n).padStart(2,'0'); }
+console.log("BUILD v22");
 /* =========================
    解析/圖表套件載入（自動 fallback）
    - 優先使用同資料夾的本地檔（可選）：./xlsx.full.min.js、./chart.umd.min.js
@@ -643,8 +642,7 @@ const PRELOAD_FILES = [
   "114.10.01-27晉欣廠生產日報表.xlsx",
   "114.11.01-30晉欣廠生產日報表.xlsx",
   "114.12.01-30晉欣廠生產日報表.xlsx",
-  "115.01.01-30晉欣廠生產日報表.xlsx",
-  "115.02.01-09晉欣廠生產日報表.xlsx"
+  "115.01.01-05晉欣廠生產日報表.xlsx",
 ];
 
 /* =========================
@@ -1010,16 +1008,6 @@ function toNumber(v){
   const n = Number(s);
   return Number.isFinite(n) ? n : NaN;
 }
-
-// 判斷是否為「合計/平均/小計」等非商品列（不同月份/廠別檔案可能用詞略有差異）
-function _isSummaryRowProdName(name){
-  const s = (name ?? "").toString().trim();
-  if(!s) return true;
-  const keys = ["合計","小計","平均","總計","總和","彙總","摘要","TOTAL","SUM","AVG"];
-  return keys.some(k => s.includes(k));
-}
-// 相容：避免其他地方誤用無底線版本
-function isSummaryRowProdName(name){ return _isSummaryRowProdName(name); }
 
 // 若分頁同時有「標準/實際」兩組欄位（4°C常見），可用 實際/標準 推得達成率
 function _calcAchFromStdAct(idxStd, idxAct, row){
@@ -1453,9 +1441,25 @@ function fillFallbackAchievements(){
   }
 }
 function getAllDatesForTemp(temp){
-  // 回傳該溫層所有日別（依 YYYYMMDD 排序），mmdd 使用 YYYYMMDD（與 state.summaries 一致）
-  const base = (typeof _getAllDatesForTempAny === 'function') ? _getAllDatesForTempAny(temp) : [];
-  return base.map(o => ({...o, label: `${String(o.mmdd).slice(4,6)}-${String(o.mmdd).slice(6,8)}`}));
+  const out = [];
+  const y = String(state.year);
+
+  // 只取「該溫層」真正有 summary 的日期，避免 18°C/4°C 日期集合混在一起造成：
+  // - 18°C 週別選到但其實那週沒有 18°C 資料（顯示全空）
+  // - 週別下拉無法正常建立（因為過濾後為空）
+  for(const k of state.summaries.keys()){
+    const parts = String(k).split("|"); // temp|YYYYMMDD
+    if(parts.length < 2) continue;
+    const t = parts[0];
+    const dk = parts[1];
+    if(String(t) !== String(temp)) continue;
+    if(!String(dk).startsWith(y)) continue;
+    const d = dateKeyToDateObj(dk);
+    if(d) out.push({mmdd:dk, dateObj:d, dateStr:dateObjToStr(d)});
+  }
+
+  out.sort((a,b)=>a.dateObj-b.dateObj);
+  return out;
 }
 
 function sheetToGrid(ws){
@@ -1549,13 +1553,13 @@ function parseTempSheet(wb, sheetName, temp, dateKey){
   const idxEffList = indexOfAllHeaderContains(header, "人時性");
 
   // 有些 4°C 分頁會出現「標準」與「實際」兩組（人數/產能/時/人時性 重複兩次）
-  const idxPeopleAct = (idxPeopleList.length>=2) ? idxPeopleList[0] : (idxPeopleList[0] ?? -1);
-  const idxCapAct    = (idxCapList.length>=2) ? idxCapList[0] : (idxCapList[0] ?? -1);
-  const idxEffAct    = (idxEffList.length>=2) ? idxEffList[0] : (idxEffList[0] ?? -1);
+  const idxPeopleStd = (idxPeopleList.length>=2) ? idxPeopleList[0] : -1;
+  const idxCapStd    = (idxCapList.length>=2) ? idxCapList[0] : -1;
+  const idxEffStd    = (idxEffList.length>=2) ? idxEffList[0] : -1;
 
-  const idxPeopleStd = (idxPeopleList.length>=2) ? idxPeopleList[1] : -1;
-  const idxCapStd    = (idxCapList.length>=2) ? idxCapList[1] : -1;
-  const idxEffStd    = (idxEffList.length>=2) ? idxEffList[1] : -1;
+  const idxPeopleAct = (idxPeopleList.length>=2) ? idxPeopleList[1] : (idxPeopleList[0] ?? -1);
+  const idxCapAct    = (idxCapList.length>=2) ? idxCapList[1] : (idxCapList[0] ?? -1);
+  const idxEffAct    = (idxEffList.length>=2) ? idxEffList[1] : (idxEffList[0] ?? -1);
 
   // 對外仍以「實際」為主（若只有一組，就等同該組）
   const idxPeople = idxPeopleAct;
@@ -1569,7 +1573,7 @@ function parseTempSheet(wb, sheetName, temp, dateKey){
   // 達成率欄位（若有）：通常同時包含「人時性達成率」與（4°C）「產能達成率」
   const _achCols = indexOfAllHeaderContains(header, "達成率");
   const idxHumanAch = _achCols.length ? _achCols[0] : -1;
-  const idxCapAch = (temp === "4") ? ((_achCols.length>=2) ? _achCols[_achCols.length-1] : -1) : -1;
+  const idxCapAch = (temp === "4") ? (_achCols.length ? _achCols[_achCols.length-1] : -1) : -1;
 
   let currentLine = "";
   let currentCat = "";
@@ -1717,18 +1721,6 @@ function yearFromFilename(filename){
   }
   return state.year || 2025;
 }
-
-function baseMonthFromFilename(filename){
-  const s = String(filename || "");
-  // e.g. "115.01.01-30..." or "114.12.01-31..."
-  const m = s.match(/^\d{3}\.(\d{2})\./);
-  if(m){
-    const mm = Number(m[1]);
-    if(mm>=1 && mm<=12) return mm;
-  }
-  return null;
-}
-
 function dateKeyToDateObj(dateKey){
   const m = String(dateKey).match(/^(\d{4})(\d{4})$/);
   if(!m) return null;
@@ -1742,35 +1734,18 @@ async function parseWorkbookArrayBuffer(buf, filename){
   const wb = XLSX.read(buf, {type:"array"});
   state.loadedFiles.push(filename);
   const fileYear = yearFromFilename(filename);
-  const baseMonth = baseMonthFromFilename(filename);
 
   for(const sname of wb.SheetNames){
     const mmdd = parseMmdd(sname);
     if(mmdd){
-      let y = fileYear;
-      const sm = Number(mmdd.slice(0,2));
-      if(baseMonth===1 && sm===12) y = fileYear - 1;
-      if(baseMonth===12 && sm===1) y = fileYear + 1;
-      const dateKey = `${y}${mmdd}`;
+      const dateKey = `${fileYear}${mmdd}`;
       parseDailySummarySheet(wb, sname, dateKey);
       continue;
     }
     const t18 = String(sname).match(/晉欣\s*18度C\s*(\d{4})/);
     const t4  = String(sname).match(/晉欣\s*4度C\s*(\d{4})/);
-    if(t18){
-      let y = fileYear;
-      const sm = Number(t18[1].slice(0,2));
-      if(baseMonth===1 && sm===12) y = fileYear - 1;
-      if(baseMonth===12 && sm===1) y = fileYear + 1;
-      parseTempSheet(wb, sname, "18", `${y}${t18[1]}`);
-    }
-    if(t4){
-      let y = fileYear;
-      const sm = Number(t4[1].slice(0,2));
-      if(baseMonth===1 && sm===12) y = fileYear - 1;
-      if(baseMonth===12 && sm===1) y = fileYear + 1;
-      parseTempSheet(wb, sname, "4",  `${y}${t4[1]}`);
-    }
+    if(t18) parseTempSheet(wb, sname, "18", `${fileYear}${t18[1]}`);
+    if(t4)  parseTempSheet(wb, sname, "4",  `${fileYear}${t4[1]}`);
     }
 }
 
@@ -1912,28 +1887,6 @@ setDataChip("warn", "自動載入中…");
       return `<li>${escapeHtml(it.name)}${d?` <span class="text-xs text-slate-400">(${escapeHtml(d)})</span>`:""}</li>`;
     }).join("");
   }
-  // 只預載最新 N 份，避免一次載入太多造成卡住/看起來像沒資料
-  const PRELOAD_LATEST_COUNT = 8;
-  const _parsed = fileItems.map(it => {
-    const mm = String(it.name||"").match(/^(\d{3})\.(\d{2})\./);
-    const rocY = mm ? parseInt(mm[1], 10) : NaN;
-    const mth  = mm ? parseInt(mm[2], 10) : NaN;
-    const key  = (Number.isFinite(rocY) && Number.isFinite(mth)) ? (rocY*100 + mth) : -1;
-    return { ...it, _key: key, _rocY: rocY, _m: mth };
-  }).sort((a,b)=> (b._key - a._key));
-
-  const _latest = _parsed.filter(x=>x._key>0).slice(0, PRELOAD_LATEST_COUNT);
-
-  if(_latest.length){
-    // 若目前 state.year 不在最新清單內，預設跳到最新年度（民國+1911）
-    const latestRocY = _latest[0]._rocY;
-    const latestAD   = latestRocY + 1911;
-    if(!Number.isFinite(state.year) || !_latest.some(x => (x._rocY + 1911) === state.year)){
-      state.year = latestAD;
-    }
-    fileItems = _latest.map(({_key,_rocY,_m, ...rest}) => rest);
-  }
-
 
   let ok = 0, fail = 0;
   for(const it of fileItems){
@@ -2095,6 +2048,7 @@ function refreshSelectors(){
   const monthsWithData = new Set();
   const y = String(state.year);
   for(const dk of state.availableMmdd){
+    if(!String(dk).startsWith(y)) continue;
     const m = monthNumFromMmdd(dk);
     if(m) monthsWithData.add(m);
   }
@@ -2791,86 +2745,106 @@ function fmtDeltaForMetric(metric, delta){
   return fmtSigned(delta, 2);
 }
 
+const deltaArcPlugin = {
+  id: "deltaArcs",
+  afterDatasetsDraw(chart, args, opts){
+    if(!opts || opts.enabled === false) return;
+    const area = chart.chartArea;
+    if(!area) return;
+    const ctx = chart.ctx;
 
-  // ===== Delta marker plugin (tick + text, no arcs) =====
-  const deltaArcPlugin = {
-    id: "deltaArcs",
-    afterDatasetsDraw(chart, args, pluginOptions) {
-      try {
-        const opt = chart?.options?.plugins?.deltaArcs || {};
-        if (!opt.enabled) return;
-        const dsIdx = opt.datasetIndex ?? 0;
-        const ds = chart.data?.datasets?.[dsIdx];
-        if (!ds) return;
-        const meta = chart.getDatasetMeta(dsIdx);
-        if (!meta || meta.hidden) return;
-        const pts = meta.data || [];
-        const data = Array.isArray(ds.data) ? ds.data : [];
-        if (pts.length < 2) return;
+    const total = chart.data?.labels?.length || 0;
+    // If too dense, annotate every Nth segment
+    const step = (opts.step && Number.isFinite(opts.step)) ? opts.step : (total > 40 ? 2 : 1);
 
-        const ctx = chart.ctx;
-        const fmt = (n) => {
-          if (n === null || n === undefined || Number.isNaN(n)) return "";
-          const v = Number(n);
-          const sign = v > 0 ? "+" : "";
-          const abs = Math.abs(v);
-          const s = abs >= 1000 ? abs.toLocaleString() : String(abs);
-          return sign + s;
-        };
+    const tickLen = (opts.tickLen && Number.isFinite(opts.tickLen)) ? opts.tickLen : 10;  // marker length
+    const textGap = (opts.textGap && Number.isFinite(opts.textGap)) ? opts.textGap : 10;  // distance from marker to text
 
-        const tickLen = opt.tickLen ?? 8;
-        const yPad = opt.yPad ?? 10;
-        const font = opt.font || "600 12px system-ui, -apple-system, Segoe UI, Roboto, Noto Sans TC, sans-serif";
-        const textPad = opt.textPad ?? 4;
+    ctx.save();
+    // Keep everything inside the plot area (avoid blocking outside UI)
+    ctx.beginPath();
+    ctx.rect(area.left, area.top, area.right - area.left, area.bottom - area.top);
+    ctx.clip();
 
-        ctx.save();
-        ctx.lineWidth = opt.lineWidth ?? 2;
-        ctx.font = font;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "bottom";
+    ctx.lineWidth = opts.lineWidth || 1.6;
+    ctx.font = `${opts.fontWeight || 700} ${opts.fontSize || 12}px "Noto Sans TC", system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
 
-        for (let i = 1; i < pts.length; i++) {
-          const p0 = pts[i - 1];
-          const p1 = pts[i];
-          if (!p0 || !p1) continue;
-          const getY = (v)=>{
-            if(v==null) return null;
-            if(typeof v==='number' && Number.isFinite(v)) return v;
-            if(typeof v==='string'){ const n=Number(v); return Number.isFinite(n)?n:null; }
-            if(typeof v==='object'){
-              if('y' in v){ const n=Number(v.y); return Number.isFinite(n)?n:null; }
-              if('v' in v){ const n=Number(v.v); return Number.isFinite(n)?n:null; }
-              if('value' in v){ const n=Number(v.value); return Number.isFinite(n)?n:null; }
-            }
-            const n=Number(v);
-            return Number.isFinite(n)?n:null;
-          };
-          const v0 = getY(data[i - 1]);
-          const v1 = getY(data[i]);
-          if (v0==null || v1==null) continue;
-          const d = v1 - v0;
-          if (!Number.isFinite(d) || d === 0) continue;
+    const formatter = opts.formatter || ((delta, _ds)=>fmtSigned(delta, 0));
+    const colorPos = opts.colorPos || "#16a34a";
+    const colorNeg = opts.colorNeg || "#dc2626";
+    const colorZero = opts.colorZero || "#64748b";
 
-          const xm = (p0.x + p1.x) / 2;
-          const ym = (p0.y + p1.y) / 2 - yPad;
-          const color = d > 0 ? (opt.upColor || "#16a34a") : (opt.downColor || "#ef4444");
+    const clampX = (x)=>Math.max(area.left + 6, Math.min(area.right - 6, x));
+    const clampY = (y)=>Math.max(area.top + 10, Math.min(area.bottom - 10, y));
 
-          ctx.strokeStyle = color;
-          ctx.beginPath();
-          ctx.moveTo(xm, ym);
-          ctx.lineTo(xm, ym + tickLen);
-          ctx.stroke();
+    chart.data.datasets.forEach((ds, di)=>{
+      const meta = chart.getDatasetMeta(di);
+      if(meta.hidden) return;
+      const pts = meta.data || [];
+      for(let i=1;i<pts.length;i++){
+        if(step > 1 && (i % step) !== 0) continue;
+        const v0 = ds.data[i-1];
+        const v1 = ds.data[i];
+        if(v0 === null || v0 === undefined || v1 === null || v1 === undefined) continue;
+        if(!Number.isFinite(Number(v0)) || !Number.isFinite(Number(v1))) continue;
 
-          ctx.fillStyle = color;
-          ctx.fillText(fmt(d), xm, ym - textPad);
-        }
+        const delta = Number(v1) - Number(v0);
+        if(!Number.isFinite(delta) || delta === 0) continue;
 
-        ctx.restore();
-      } catch (e) {}
+        const p0 = pts[i-1];
+        const p1 = pts[i];
+        if(!p0 || !p1) continue;
+
+        // Midpoint on the segment
+        const mx = (p0.x + p1.x) / 2;
+        const my = (p0.y + p1.y) / 2;
+
+        // Segment normal (choose the upward-pointing normal in screen coords)
+        const dx = (p1.x - p0.x);
+        const dy = (p1.y - p0.y);
+        const segLen = Math.hypot(dx, dy) || 1;
+
+        let nx = -dy / segLen, ny = dx / segLen; // normal A
+        // if normal points down (ny>0), flip it so the label sits "above" the segment
+        if(ny > 0){ nx = -nx; ny = -ny; }
+
+        const col = delta > 0 ? colorPos : (delta < 0 ? colorNeg : colorZero);
+        const txt = formatter(delta, ds, i, chart);
+
+        // Small marker (a short tick) crossing the segment at midpoint
+        ctx.strokeStyle = col;
+        const hx = nx * (tickLen/2);
+        const hy = ny * (tickLen/2);
+        ctx.beginPath();
+        ctx.moveTo(clampX(mx - hx), clampY(my - hy));
+        ctx.lineTo(clampX(mx + hx), clampY(my + hy));
+        ctx.stroke();
+
+        // Text just above the segment, close to the tick
+        ctx.fillStyle = col;
+        const tx = clampX(mx + nx * (tickLen/2 + textGap));
+        const ty = clampY(my + ny * (tickLen/2 + textGap));
+        ctx.fillText(String(txt), tx, ty);
+      }
+    });
+
+    ctx.restore();
+  }
+};
+
+// Ensure plugin is registered (Chart.js might load after our script in some deployments) (Chart.js might load after our script in some deployments)
+function ensureDeltaArcs(){
+  try{
+    if(window.Chart && !window.__deltaArcsRegistered){
+      window.Chart.register(deltaArcPlugin);
+      window.__deltaArcsRegistered = true;
     }
-  };
-  if (window.Chart && window.Chart.register) { try { window.Chart.register(deltaArcPlugin); } catch (e) {} }
-window.__deltaArcsRegistered = true;
+  }catch(e){}
+}
+// Attempt early registration
+ensureDeltaArcs();
 
 function kpiLabel(k){
   return {
@@ -3186,7 +3160,7 @@ function renderProductTrend(rows){
     const datasets = [{
       label: label1,
       data: values1,
-      tension: 0,
+      tension: 0.25,
       pointRadius: 3,
       pointHoverRadius: 5,
       spanGaps: true,
@@ -3198,7 +3172,7 @@ function renderProductTrend(rows){
       datasets.push({
         label: label2,
         data: values2,
-        tension: 0,
+        tension: 0.25,
         pointRadius: 3,
         pointHoverRadius: 5,
         spanGaps: true,
@@ -3208,7 +3182,7 @@ function renderProductTrend(rows){
     }
 
     const ctx = $(canvasId).getContext("2d");
-    try { registerDeltaPluginOnce(); } catch(e) {}
+    ensureDeltaArcs();
     return new Chart(ctx, {
       type: "line",
       data: { labels, datasets },
@@ -3291,10 +3265,7 @@ function renderCharts(){
   const sumTitleEl = document.getElementById("dailyChartSumTitle");
   if(sumTitleEl) sumTitleEl.textContent = `${axisLabel}（加總）`;
 
-// NOTE: used by early init code (preload / selectors). Must be hoisted.
-function pad2(n){
-  return String(n).padStart(2, "0");
-}
+  const pad2 = (n)=>String(n).padStart(2,"0");
   const fmtMMDDSlash = (d)=>`${pad2(d.getMonth()+1)}/${pad2(d.getDate())}`;
 
   const getWeekStart = (d)=>{
@@ -3653,7 +3624,7 @@ function pad2(n){
     yAxisID: "y",
     _kpi: kpi1,
     spanGaps: true,
-    tension: 0,
+    tension: 0.25,
     pointRadius: (labels.length > 35) ? 0 : 3,
     pointHoverRadius: 5
   }];
@@ -3664,12 +3635,13 @@ function pad2(n){
       yAxisID: "y1",
       _kpi: kpi2,
       spanGaps: true,
-      tension: 0,
+      tension: 0.25,
       pointRadius: (labels.length > 35) ? 0 : 3,
       pointHoverRadius: 5
     });
   }
 
+  ensureDeltaArcs();
   dailyChart = new Chart(dctx, {
     type: "line",
     data: { labels, datasets: dailyDatasets },
@@ -3683,7 +3655,7 @@ function pad2(n){
       yAxisID: "y",
       _kpi: kpi1,
       spanGaps: true,
-      tension: 0,
+      tension: 0.25,
       pointRadius: (labels.length > 35) ? 0 : 3,
       pointHoverRadius: 5
     }];
@@ -3694,11 +3666,12 @@ function pad2(n){
         yAxisID: "y1",
         _kpi: kpi2,
         spanGaps: true,
-        tension: 0,
+        tension: 0.25,
         pointRadius: (labels.length > 35) ? 0 : 3,
         pointHoverRadius: 5
       });
     }
+    ensureDeltaArcs();
     dailySumChart = new Chart(dctxSum, {
       type: "line",
       data: { labels, datasets: sumDatasets },
@@ -3730,6 +3703,7 @@ function pad2(n){
     });
   }
 
+  ensureDeltaArcs();
   cumChart = new Chart(cctx, {
     type: "line",
     data: { labels, datasets: cumDatasets },
@@ -4481,7 +4455,7 @@ function renderGroupTrend(catName){
   const datasetsAvg = [{
     label: metricName(metric1),
     data: avgValues1,
-    tension: 0,
+    tension: 0.25,
     pointRadius: 3,
     pointHoverRadius: 5,
     spanGaps: true,
@@ -4493,7 +4467,7 @@ function renderGroupTrend(catName){
     datasetsAvg.push({
       label: metricName(metric2),
       data: avgValues2,
-      tension: 0,
+      tension: 0.25,
       pointRadius: 3,
       pointHoverRadius: 5,
       spanGaps: true,
@@ -4505,7 +4479,7 @@ function renderGroupTrend(catName){
   const datasetsSum = [{
     label: metricName(metric1),
     data: sumValues1,
-    tension: 0,
+    tension: 0.25,
     pointRadius: 3,
     pointHoverRadius: 5,
     spanGaps: true,
@@ -4516,7 +4490,7 @@ function renderGroupTrend(catName){
     datasetsSum.push({
       label: metricName(metric2),
       data: sumValues2,
-      tension: 0,
+      tension: 0.25,
       pointRadius: 3,
       pointHoverRadius: 5,
       spanGaps: true,
@@ -4526,6 +4500,7 @@ function renderGroupTrend(catName){
   }
 
   const ctx = $("groupTrendCanvas").getContext("2d");
+  ensureDeltaArcs();
   groupChart = new Chart(ctx, {
     type: "line",
     data: { labels, datasets: datasetsAvg },
@@ -4573,6 +4548,7 @@ function renderGroupTrend(catName){
 
   const ctxSum = $("groupTrendCanvasSum") ? $("groupTrendCanvasSum").getContext("2d") : null;
   if(ctxSum){
+    ensureDeltaArcs();
     groupChartSum = new Chart(ctxSum, {
       type: "line",
       data: { labels, datasets: datasetsSum },
@@ -4775,11 +4751,6 @@ function refreshLowestRateModeOptions(){
   opts.push(["drop_qty","生產量下滑數（高→低）"]);
   opts.push(["drop_cap","產能下滑數（高→低）"]);
   opts.push(["drop_eff","人時性下滑數(平均)（高→低）"]);
-
-  // 上升數（以本期-前期，越高越前）
-  opts.push(["rise_qty","生產量上升數（高→低）"]);
-  opts.push(["rise_cap","產能上升數（高→低）"]);
-  opts.push(["rise_eff","人時性上升數(平均)（高→低）"]);
 
   sel.innerHTML = "";
   for(const [v,t] of opts){
@@ -5021,111 +4992,54 @@ function _dateObjToKey(d){
 }
 
 // 取得「上一期」的日期集合：年/月/週/日/指定範圍
-
-
-// --- helper: parse date key from state/date-set (expects YYYYMMDD or MM/DD) ---
-function ymdFromState(key){
-  if(!key) return null;
-  const s = String(key).trim();
-  // common: YYYYMMDD
-  if(/^\d{8}$/.test(s)){
-    return { y: +s.slice(0,4), m: +s.slice(4,6), d: +s.slice(6,8) };
-  }
-  // allow YYYY-MM-DD
-  if(/^\d{4}-\d{2}-\d{2}$/.test(s)){
-    return { y: +s.slice(0,4), m: +s.slice(5,7), d: +s.slice(8,10) };
-  }
-  // allow MM/DD (fallback to selected year if any)
-  const mmdd = s.match(/^(\d{1,2})\/(\d{1,2})$/);
-  if(mmdd){
-    const m = +mmdd[1], d = +mmdd[2];
-    const y = +((window.state && window.state.yearSel) || new Date().getFullYear());
-    return { y, m, d };
-  }
-  return null;
-}
-
 function _getPrevMmddSetForDrop(){
-  // 依「目前範圍」推算上一期（年/月份/週/日/指定範圍），回傳 YYYYMMDD 的 Set。
   const temp = state.temp;
-  const all = getAllDatesForTemp(temp);
-  if(!all.length) return null;
-
-  const inRange = (d, s, e) => d.dateObj >= s && d.dateObj <= e;
-
-  // 目前選取的 start/end（UTC 00:00）
-  let curStart=null, curEnd=null;
-
-  if(state.rangeMode==='year'){
-    const y = Number(state.year);
-    curStart = new Date(Date.UTC(y,0,1));
-    curEnd   = new Date(Date.UTC(y,11,31));
-  } else if(state.rangeMode==='month'){
-    const y = Number(state.year);
-    const m = Number(state.month);
-    const win = getMonthWeekWindowsUTC(y,m);
-    curStart = win.start;
-    curEnd   = win.end;
-  } else if(state.rangeMode==='week'){
-    const ws = state.weekStartStr ? new Date(state.weekStartStr+'T00:00:00Z') : null;
-    if(!ws || isNaN(ws)) return null;
-    curStart = ws;
-    curEnd = addDaysUTC(ws, 6);
-  } else if(state.rangeMode==='day'){
-    if(state.dayStr){
-      const d = new Date(state.dayStr+'T00:00:00Z');
-      if(isNaN(d)) return null;
-      curStart = d;
-      curEnd = d;
-    } else return null;
-  } else if(state.rangeMode==='custom'){
-    if(state.customStartStr && state.customEndStr){
-      const s = new Date(state.customStartStr+'T00:00:00Z');
-      const e = new Date(state.customEndStr+'T00:00:00Z');
-      if(isNaN(s)||isNaN(e)) return null;
-      curStart=s; curEnd=e;
-    } else return null;
+  const dr = getActiveDayRange();
+  if(dr){
+    const len = _daysInclusiveUTC(dr.start, dr.end);
+    const ps = addDaysUTC(dr.start, -len);
+    const pe = addDaysUTC(dr.end, -len);
+    return _buildSetFromRange(temp, ps, pe);
   }
 
-  if(state.dayRange && state.dayRange.start && state.dayRange.end){
-    const s = new Date(state.dayRange.start+'T00:00:00Z');
-    const e = new Date(state.dayRange.end+'T00:00:00Z');
-    if(!isNaN(s)&&!isNaN(e)){
-      curStart=s; curEnd=e;
-    }
+  if(state.rangeMode === "year"){
+    const py = Number(state.year) - 1;
+    return new Set(_getAllDatesForTempYearAny(temp, py).map(o=>o.mmdd));
   }
 
-  if(!curStart || !curEnd) return null;
-
-  let prevStart=null, prevEnd=null;
-  if(state.rangeMode==='year'){
-    const y = Number(state.year)-1;
-    prevStart = new Date(Date.UTC(y,0,1));
-    prevEnd   = new Date(Date.UTC(y,11,31));
-  } else if(state.rangeMode==='month'){
-    let y = Number(state.year);
-    let m = Number(state.month)-1;
-    if(m<=0){ m=12; y-=1; }
-    const win = getMonthWeekWindowsUTC(y,m);
-    prevStart = win.start;
-    prevEnd   = win.end;
-  } else if(state.rangeMode==='week'){
-    prevStart = addDaysUTC(curStart,-7);
-    prevEnd   = addDaysUTC(curEnd,-7);
-  } else {
-    const days = Math.round((curEnd-curStart)/(24*3600*1000))+1;
-    prevEnd = addDaysUTC(curStart,-1);
-    prevStart = addDaysUTC(prevEnd, -(days-1));
+  if(state.rangeMode === "month"){
+    let py = Number(state.year);
+    let pm = Number(state.month) - 1;
+    if(pm <= 0){ pm = 12; py = py - 1; }
+    const wk = getMonthWeekWindowsUTC(py, pm); // 前月的週視圖（會跨月）
+    return _buildSetFromRange(temp, wk.start, wk.end);
   }
 
-  const set = new Set();
-  for(const d of all){
-    if(inRange(d, prevStart, prevEnd)) set.add(d.key);
+  if(state.rangeMode === "week"){
+    if(!state.weekStartStr) return new Set();
+    const ws = new Date(state.weekStartStr + "T00:00:00Z");
+    const pws = addDaysUTC(ws, -7);
+    const pwe = addDaysUTC(pws, 6);
+    return _buildSetFromRange(temp, pws, pwe);
   }
-  return set.size ? set : null;
+
+  // day
+  if(state.dayStr){
+    const d = new Date(state.dayStr + "T00:00:00Z");
+    const pd = addDaysUTC(d, -1);
+    const key = _dateObjToKey(pd);
+    return state.summaries.has(`${temp}|${key}`) ? new Set([key]) : new Set();
+  }
+
+  return new Set();
 }
 
+function _isSummaryRowProdName(prod){
+  const p = cleanText(prod || "");
+  return !p || /(平均|合計|小計|總計)/.test(p);
+}
 
+// mode=drop：回傳下滑數最高的前 6 名（drop = prevAvgQtyDay - curAvgQtyDay, 僅列 drop>0）
 function _metricDropAgg(metric, pairFilter){
   // metric: "qty" | "cap" | "eff"
   const curSet = getDateSetInSelection();
@@ -5189,10 +5103,10 @@ function _metricDropAgg(metric, pairFilter){
     const p = _safeNum(rec.people);
     if(Number.isFinite(p)){ it.peopleSum += p; it.peopleCnt++; }
 
-    const e = _safeNum(rec.humanAch);
+    const e = _safeNum(rec.eff);
     if(Number.isFinite(e)){ it.effSum += e; it.effCnt++; }
 
-    const c = _safeNum(rec.capAch);
+    const c = _safeNum(rec.cap);
     if(Number.isFinite(c)){ it.capSum += c; it.capCnt++; }
   }
 
@@ -5305,154 +5219,69 @@ function _prodDropAgg(pairFilter){
 
 
 
-
 function _metricRiseAgg(metric, pairFilter){
   // metric: "qty" | "cap" | "eff"
-  // 與 _metricDropAgg 相同邏輯，但取「本期 - 前期」的上升值，並以「上升越多越前」排序
-  const out = [];
-  const curSet = getDateSetInSelection();
-  const prevSet = _getPrevMmddSetForDrop();
-  if(!curSet || !curSet.size || !prevSet || !prevSet.size) return out;
-
-  const curDays = curSet.size;
-  const prevDays = prevSet.size;
-
-  // prodKey -> aggregates
-  const curMap = new Map();
-  const prevMap = new Map();
-
-  const addAgg = (map, prodKey, rec)=>{
-    let a = map.get(prodKey);
-    if(!a){
-      a = { qtySum:0, peopleSum:0, effSum:0, capSum:0, effN:0, capN:0, peopleN:0, meta:null, reps:[] };
-      map.set(prodKey, a);
-    }
-    const qty = +rec.qty || 0;
-    a.qtySum += qty;
-
-    const ppl = +rec.people;
-    if(Number.isFinite(ppl)){
-      a.peopleSum += ppl;
-      a.peopleN += 1;
+  const cand = [];
+  const mmddSet = getActiveGroupMmddSet(state.temp);
+  for(const [baseName, arr] of Object.entries(state.productDailyMap||{})){
+    // 配別過濾：二配=只看開頭為"二配"；非二配=排除開頭為"二配"
+    if(pairFilter === "二配"){
+      if(!arr.some(x=> (x.prod||"").startsWith("二配"))) continue;
+    }else if(pairFilter === "非二配"){
+      if(arr.some(x=> (x.prod||"").startsWith("二配"))) continue;
     }
 
-    const eff = +rec.humanAch;
-    if(Number.isFinite(eff)){
-      a.effSum += eff;
-      a.effN += 1;
-    }
+    const items = arr.filter(x=>mmddSet.has(x.mmdd));
+    if(items.length < 2) continue;
 
-    const cap = +rec.capAch;
-    if(Number.isFinite(cap)){
-      a.capSum += cap;
-      a.capN += 1;
-    }
+    // 以週別(週二~週一)為單位：取當前範圍最後一週 vs 前一週
+    const wsList = items.map(it=>({it, ws:getWeekStartUTC(it.dateObj).getTime()}));
+    wsList.sort((a,b)=>a.ws-b.ws);
+    const uniqWs = Array.from(new Set(wsList.map(x=>x.ws)));
+    if(uniqWs.length < 2) continue;
+    const curWs = uniqWs[uniqWs.length-1];
+    const prevWs = uniqWs[uniqWs.length-2];
 
-    // collect representative line/cat for click (prefer the one in current period later)
-    if(rec.lineKey || rec.catKey){
-      a.reps.push({lineKey: rec.lineKey||"", catKey: rec.catKey||"", line: rec.line||"", cat: rec.cat||""});
-    }
+    const curItems = wsList.filter(x=>x.ws===curWs).map(x=>x.it);
+    const prevItems = wsList.filter(x=>x.ws===prevWs).map(x=>x.it);
 
-    if(!a.meta){
-      a.meta = { prod: rec.prod||"", prodKey };
-    }
-  };
+    const sumBy = (arr, key)=>arr.reduce((s,o)=>s+(+o[key]||0),0);
+    const avgBy = (arr, key)=>{
+      const xs = arr.map(o=>+o[key]).filter(v=>Number.isFinite(v));
+      if(!xs.length) return null;
+      return xs.reduce((a,b)=>a+b,0)/xs.length;
+    };
 
-  // iterate daily records (already normalized into state.allDailyRows)
-  const rows = state.allDailyRows || [];
-  for(const r of rows){
-    if(!r || !r.mmdd) continue;
-    if(!r.prodKey || !r.prod) continue;
-
-    // 配別過濾（UI: all / two / nonTwo）
-    if(pairFilter === "two"){
-      if(!(r.prod||"").startsWith("二配")) continue;
-    }else if(pairFilter === "nonTwo"){
-      if((r.prod||"").startsWith("二配")) continue;
-    }
-
-    if(curSet.has(r.mmdd)){
-      addAgg(curMap, r.prodKey, r);
-    }else if(prevSet.has(r.mmdd)){
-      addAgg(prevMap, r.prodKey, r);
-    }
-  }
-
-  // build list
-  for(const [prodKey, curAgg] of curMap.entries()){
-    const prevAgg = prevMap.get(prodKey);
-    if(!prevAgg) continue;
-
-    const meta = curAgg.meta || prevAgg.meta || {prodKey, prod:""};
-    // prefer representative info from curAgg, fallback to prevAgg
-    const rep = (curAgg.reps && curAgg.reps[0]) ? curAgg.reps[0] : (prevAgg.reps && prevAgg.reps[0]) ? prevAgg.reps[0] : {lineKey:"",catKey:"",line:"",cat:""};
-
-    const curQtySum = curAgg.qtySum;
-    const prevQtySum = prevAgg.qtySum;
-
-    const curAvgQtyDay = curQtySum / Math.max(1, curDays);
-    const prevAvgQtyDay = prevQtySum / Math.max(1, prevDays);
-
-    const curAvgPeople = (curAgg.peopleN ? (curAgg.peopleSum / curAgg.peopleN) : null);
-    const prevAvgPeople = (prevAgg.peopleN ? (prevAgg.peopleSum / prevAgg.peopleN) : null);
-
-    const curAvgEff = (curAgg.effN ? (curAgg.effSum / curAgg.effN) : null);
-    const prevAvgEff = (prevAgg.effN ? (prevAgg.effSum / prevAgg.effN) : null);
-
-    const curAvgCap = (curAgg.capN ? (curAgg.capSum / curAgg.capN) : null);
-    const prevAvgCap = (prevAgg.capN ? (prevAgg.capSum / prevAgg.capN) : null);
-
-    let prevVal=null, curVal=null, riseVal=null;
-    if(metric === "qty"){
-      prevVal = prevQtySum;
-      curVal = curQtySum;
-      riseVal = curVal - prevVal;
-    }else if(metric === "cap"){
-      prevVal = prevAvgCap;
-      curVal = curAvgCap;
-      riseVal = (Number.isFinite(curVal) && Number.isFinite(prevVal)) ? (curVal - prevVal) : null;
-    }else if(metric === "eff"){
-      prevVal = prevAvgEff;
-      curVal = curAvgEff;
-      riseVal = (Number.isFinite(curVal) && Number.isFinite(prevVal)) ? (curVal - prevVal) : null;
+    let prevVal=null, curVal=null;
+    if(metric==="qty"){
+      prevVal = sumBy(prevItems, "qty");
+      curVal = sumBy(curItems, "qty");
+    }else if(metric==="cap"){
+      prevVal = avgBy(prevItems, "cap");
+      curVal = avgBy(curItems, "cap");
     }else{
-      continue;
+      prevVal = avgBy(prevItems, "eff");
+      curVal = avgBy(curItems, "eff");
     }
+    if(prevVal==null || curVal==null) continue;
 
-    if(!(riseVal > 0) || !Number.isFinite(riseVal)) continue;
+    const riseVal = curVal - prevVal;
+    if(!(riseVal > 0)) continue;
 
-    const li = getLaunchDateInfoForProd(meta.prod);
-    const launchStr = (li && li.str) ? li.str : "";
-    const launchDays = _calcLaunchDays(li ? li.date : null);
-
-    out.push({
-      lineKey: rep.lineKey || "",
-      catKey: rep.catKey || "",
-      prodKey: meta.prodKey || prodKey,
-      line: rep.line || "",
-      cat: rep.cat || "",
-      prod: meta.prod || "",
-
-      launchStr, launchDays,
-
-      // current-period metrics (cards)
-      totalQty: curQtySum,
-      avgQtyDay: curAvgQtyDay,
-      avgPeople: curAvgPeople,
-      avgEff: curAvgEff,
-      avgCap: curAvgCap,
-
-      metric,
-      prevVal,
-      curVal,
-      riseVal
+    // 取代表資料
+    const repr = items[items.length-1];
+    cand.push({
+      baseName,
+      prod: repr.prod,
+      category: repr.category,
+      line: repr.line,
+      prevVal, curVal, riseVal
     });
   }
 
-  out.sort((a,b)=> (b.riseVal - a.riseVal) || (b.avgQtyDay - a.avgQtyDay));
-  return out.slice(0, 6);
+  cand.sort((a,b)=>a.riseVal-b.riseVal); // 低→高
+  return cand.slice(0,6);
 }
-
 function renderLowestRatePanel(){
   const sel = $("lowestRateMode");
   const box = $("lowestRateList");
@@ -5466,23 +5295,14 @@ function renderLowestRatePanel(){
 
   let list = [];
   const isDropMode = mode.startsWith("drop_") || mode === "drop";
-  const isRiseMode = mode.startsWith("rise_");
-  const isChangeMode = isDropMode || isRiseMode;
-
   if(isDropMode){
     const metric = (mode === "drop_cap") ? "cap" : (mode === "drop_eff") ? "eff" : "qty";
     list = _metricDropAgg(metric, pair);
-    empty.textContent = "目前範圍內未取得可比較的上一期資料。";
-  }else if(isRiseMode){
-    const metric = (mode === "rise_cap") ? "cap" : (mode === "rise_eff") ? "eff" : "qty";
-    list = _metricRiseAgg(metric, pair);
     empty.textContent = "目前範圍內未取得可比較的上一期資料。";
   }else{
     list = _lowestRateAgg(mode, pair);
     empty.textContent = "目前範圍內未取得達成率資料。";
   }
-
-
 
   box.innerHTML = "";
   if(!list.length){
@@ -5497,10 +5317,7 @@ function renderLowestRatePanel(){
     drop: "生產量下滑數",
     drop_qty: "生產量下滑數",
     drop_cap: "產能下滑數",
-    drop_eff: "人時性下滑數(平均)",
-    rise_qty: "生產量上升數",
-    rise_cap: "產能上升數",
-    rise_eff: "人時性上升數(平均)"
+    drop_eff: "人時性下滑數(平均)"
   };
   const label = labelMap[mode] || "—";
 
@@ -5509,15 +5326,13 @@ function renderLowestRatePanel(){
     const btn = document.createElement("button");
     const _isTop6 = i < 6;
     const _titleCls = _isTop6 ? "text-red-700" : "text-slate-900";
-    const _metricCls = _isTop6
-      ? (isRiseMode ? "text-blue-600" : "text-red-600")
-      : "text-slate-900";
+    const _metricCls = _isTop6 ? "text-red-600" : "text-slate-900";
 
     btn.type = "button";
     btn.className = "w-full rounded-2xl border border-slate-200 bg-white px-5 py-4 text-left hover:border-slate-300 hover:shadow-sm transition";
 
     // subtitle
-    const sub = isChangeMode
+    const sub = isDropMode
       ? `${it.cat || "—"} ｜ 代表線別：${it.line || "—"}（跨線別彙總）`
       : `${it.cat || "—"} ｜ ${it.line || "—"}`;
 
@@ -5535,15 +5350,13 @@ function renderLowestRatePanel(){
     let metricText = "—";
     let detailLabel = "—";
     let detailValue = "—";
-    if(isChangeMode){
+    if(isDropMode){
       detailLabel = "前→現";
       if(it.metric === "qty"){
-        const v = isRiseMode ? it.riseVal : it.dropVal;
-        metricText = isRiseMode ? fmtInt(v) : fmtInt(v);
+        metricText = fmtInt(it.dropVal);
         detailValue = `${fmtInt(it.prevVal)} → ${fmtInt(it.curVal)}`;
       }else{
-        const v = isRiseMode ? it.riseVal : it.dropVal;
-        metricText = isRiseMode ? fmtDec(v, 2) : fmtDec(v, 2);
+        metricText = mode.startsWith("rise_") ? ("+" + fmtDec(it.riseVal, 2)) : fmtDec(it.dropVal, 2);
         detailValue = `${fmtDec(it.prevVal, 2)} → ${fmtDec(it.curVal, 2)}`;
       }
     }else{
