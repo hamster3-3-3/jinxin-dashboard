@@ -642,7 +642,8 @@ const PRELOAD_FILES = [
   "114.10.01-27晉欣廠生產日報表.xlsx",
   "114.11.01-30晉欣廠生產日報表.xlsx",
   "114.12.01-30晉欣廠生產日報表.xlsx",
-  "115.01.01-05晉欣廠生產日報表.xlsx",
+  "115.01.01-30晉欣廠生產日報表.xlsx",
+  "115.02.01-09晉欣廠生產日報表.xlsx"
 ];
 
 /* =========================
@@ -1931,6 +1932,28 @@ setDataChip("warn", "自動載入中…");
       return `<li>${escapeHtml(it.name)}${d?` <span class="text-xs text-slate-400">(${escapeHtml(d)})</span>`:""}</li>`;
     }).join("");
   }
+  // 只預載最新 N 份，避免一次載入太多造成卡住/看起來像沒資料
+  const PRELOAD_LATEST_COUNT = 8;
+  const _parsed = fileItems.map(it => {
+    const mm = String(it.name||"").match(/^(\d{3})\.(\d{2})\./);
+    const rocY = mm ? parseInt(mm[1], 10) : NaN;
+    const mth  = mm ? parseInt(mm[2], 10) : NaN;
+    const key  = (Number.isFinite(rocY) && Number.isFinite(mth)) ? (rocY*100 + mth) : -1;
+    return { ...it, _key: key, _rocY: rocY, _m: mth };
+  }).sort((a,b)=> (b._key - a._key));
+
+  const _latest = _parsed.filter(x=>x._key>0).slice(0, PRELOAD_LATEST_COUNT);
+
+  if(_latest.length){
+    // 若目前 state.year 不在最新清單內，預設跳到最新年度（民國+1911）
+    const latestRocY = _latest[0]._rocY;
+    const latestAD   = latestRocY + 1911;
+    if(!Number.isFinite(state.year) || !_latest.some(x => (x._rocY + 1911) === state.year)){
+      state.year = latestAD;
+    }
+    fileItems = _latest.map(({_key,_rocY,_m, ...rest}) => rest);
+  }
+
 
   let ok = 0, fail = 0;
   for(const it of fileItems){
