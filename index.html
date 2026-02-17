@@ -1,3 +1,11 @@
+function registerDeltaPluginOnce(){
+  try{
+    if (window.__deltaPluginRegistered) return;
+    if (!window.Chart || !window.deltaArcsPlugin) return;
+    window.Chart.register(window.deltaArcsPlugin);
+    window.__deltaPluginRegistered = true;
+  }catch(e){ /* ignore */ }
+}
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
@@ -578,6 +586,7 @@
 
 <script>
 console.log("BUILD v40");
+function pad2(n){ return String(n).padStart(2,'0'); }
 /* =========================
    解析/圖表套件載入（自動 fallback）
    - 優先使用同資料夾的本地檔（可選）：./xlsx.full.min.js、./chart.umd.min.js
@@ -1452,30 +1461,9 @@ function fillFallbackAchievements(){
   }
 }
 function getAllDatesForTemp(temp){
-  const out = [];
-  // 只取「該溫層」真正有 summary 的日期（key=YYYYMMDD），避免 18°C/4°C 日期集合混在一起。
-  for(const k of state.summaries.keys()){
-    const parts = String(k).split('|'); // temp|YYYYMMDD
-    if(parts.length < 2) continue;
-    const t = parts[0];
-    const dk = parts[1];
-    if(String(t) !== String(temp)) continue;
-
-    const d = dateKeyToDateObj(dk);
-    if(!d) continue;
-    const mm = pad2(d.getMonth()+1);
-    const dd = pad2(d.getDate());
-
-    out.push({
-      key: dk,             // YYYYMMDD（用於 summaries 取值）
-      mmdd: `${mm}/${dd}`, // 顯示用（用於 X 軸）
-      dateObj: d,
-      dateStr: dateObjToStr(d)
-    });
-  }
-
-  out.sort((a,b)=>a.dateObj-b.dateObj);
-  return out;
+  // 回傳該溫層所有日別（依 YYYYMMDD 排序），mmdd 使用 YYYYMMDD（與 state.summaries 一致）
+  const base = (typeof _getAllDatesForTempAny === 'function') ? _getAllDatesForTempAny(temp) : [];
+  return base.map(o => ({...o, label: `${String(o.mmdd).slice(4,6)}-${String(o.mmdd).slice(6,8)}`}));
 }
 
 function sheetToGrid(ws){
