@@ -1009,6 +1009,16 @@ function toNumber(v){
   return Number.isFinite(n) ? n : NaN;
 }
 
+// 判斷是否為「合計/平均/小計」等非商品列（不同月份/廠別檔案可能用詞略有差異）
+function _isSummaryRowProdName(name){
+  const s = (name ?? "").toString().trim();
+  if(!s) return true;
+  const keys = ["合計","小計","平均","總計","總和","彙總","摘要","TOTAL","SUM","AVG"];
+  return keys.some(k => s.includes(k));
+}
+// 相容：避免其他地方誤用無底線版本
+function isSummaryRowProdName(name){ return _isSummaryRowProdName(name); }
+
 // 若分頁同時有「標準/實際」兩組欄位（4°C常見），可用 實際/標準 推得達成率
 function _calcAchFromStdAct(idxStd, idxAct, row){
   if(idxStd<0 || idxAct<0) return NaN;
@@ -5017,10 +5027,18 @@ function _getPrevMmddSetForDrop() {
   const temp = state.temp;
   // Compare with the immediately previous period (allow partial coverage if some days are missing).
   const cur = getDateSetInSelection();
-  const curDates = [...cur].map(mmdd => ymdFromState(mmdd)).filter(Boolean).sort();
+  // ymdFromState() 回傳物件，不能用預設 sort()（會導致排序不穩定，上一期抓不到）
+  const curDates = [...cur]
+    .map(mmdd => ({ mmdd, ymd: ymdFromState(mmdd) }))
+    .filter(o => o.ymd && Number.isFinite(o.ymd.y) && Number.isFinite(o.ymd.m) && Number.isFinite(o.ymd.d))
+    .sort((a,b)=>{
+      const da = new Date(a.ymd.y, a.ymd.m-1, a.ymd.d);
+      const db = new Date(b.ymd.y, b.ymd.m-1, b.ymd.d);
+      return da - db;
+    });
   if (!curDates.length) return new Set();
-  const curStart = new Date(curDates[0].y, curDates[0].m-1, curDates[0].d);
-  const curEnd = new Date(curDates[curDates.length-1].y, curDates[curDates.length-1].m-1, curDates[curDates.length-1].d);
+  const curStart = new Date(curDates[0].ymd.y, curDates[0].ymd.m-1, curDates[0].ymd.d);
+  const curEnd = new Date(curDates[curDates.length-1].ymd.y, curDates[curDates.length-1].ymd.m-1, curDates[curDates.length-1].ymd.d);
 
   const addDays = (dt, n) => { const x = new Date(dt); x.setDate(x.getDate()+n); return x; };
   const addMonths = (dt, n) => { const x = new Date(dt); const d=x.getDate(); x.setDate(1); x.setMonth(x.getMonth()+n); const md = new Date(x.getFullYear(), x.getMonth()+1, 0).getDate(); x.setDate(Math.min(d, md)); return x; };
