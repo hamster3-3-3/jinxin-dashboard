@@ -577,7 +577,7 @@
   </div>
 
 <script>
-console.log("BUILD v36");
+console.log("BUILD v40");
 /* =========================
    解析/圖表套件載入（自動 fallback）
    - 優先使用同資料夾的本地檔（可選）：./xlsx.full.min.js、./chart.umd.min.js
@@ -3287,7 +3287,10 @@ function renderCharts(){
   const sumTitleEl = document.getElementById("dailyChartSumTitle");
   if(sumTitleEl) sumTitleEl.textContent = `${axisLabel}（加總）`;
 
-  const pad2 = (n)=>String(n).padStart(2,"0");
+// NOTE: used by early init code (preload / selectors). Must be hoisted.
+function pad2(n){
+  return String(n).padStart(2, "0");
+}
   const fmtMMDDSlash = (d)=>`${pad2(d.getMonth()+1)}/${pad2(d.getDate())}`;
 
   const getWeekStart = (d)=>{
