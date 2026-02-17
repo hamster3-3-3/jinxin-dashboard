@@ -1,11 +1,3 @@
-function registerDeltaPluginOnce(){
-  try{
-    if (window.__deltaPluginRegistered) return;
-    if (!window.Chart || !window.deltaArcsPlugin) return;
-    window.Chart.register(window.deltaArcsPlugin);
-    window.__deltaPluginRegistered = true;
-  }catch(e){ /* ignore */ }
-}
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
