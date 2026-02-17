@@ -1452,20 +1452,25 @@ function fillFallbackAchievements(){
 }
 function getAllDatesForTemp(temp){
   const out = [];
-  const y = String(state.year);
-
-  // 只取「該溫層」真正有 summary 的日期，避免 18°C/4°C 日期集合混在一起造成：
-  // - 18°C 週別選到但其實那週沒有 18°C 資料（顯示全空）
-  // - 週別下拉無法正常建立（因為過濾後為空）
+  // 只取「該溫層」真正有 summary 的日期（key=YYYYMMDD），避免 18°C/4°C 日期集合混在一起。
   for(const k of state.summaries.keys()){
-    const parts = String(k).split("|"); // temp|YYYYMMDD
+    const parts = String(k).split('|'); // temp|YYYYMMDD
     if(parts.length < 2) continue;
     const t = parts[0];
     const dk = parts[1];
     if(String(t) !== String(temp)) continue;
-    if(!String(dk).startsWith(y)) continue;
+
     const d = dateKeyToDateObj(dk);
-    if(d) out.push({mmdd:dk, dateObj:d, dateStr:dateObjToStr(d)});
+    if(!d) continue;
+    const mm = pad2(d.getMonth()+1);
+    const dd = pad2(d.getDate());
+
+    out.push({
+      key: dk,             // YYYYMMDD（用於 summaries 取值）
+      mmdd: `${mm}/${dd}`, // 顯示用（用於 X 軸）
+      dateObj: d,
+      dateStr: dateObjToStr(d)
+    });
   }
 
   out.sort((a,b)=>a.dateObj-b.dateObj);
@@ -2087,7 +2092,6 @@ function refreshSelectors(){
   const monthsWithData = new Set();
   const y = String(state.year);
   for(const dk of state.availableMmdd){
-    if(!String(dk).startsWith(y)) continue;
     const m = monthNumFromMmdd(dk);
     if(m) monthsWithData.add(m);
   }
@@ -2826,9 +2830,21 @@ function fmtDeltaForMetric(metric, delta){
           const p0 = pts[i - 1];
           const p1 = pts[i];
           if (!p0 || !p1) continue;
-          const v0 = Number(data[i - 1]);
-          const v1 = Number(data[i]);
-          if (!Number.isFinite(v0) || !Number.isFinite(v1)) continue;
+          const getY = (v)=>{
+            if(v==null) return null;
+            if(typeof v==='number' && Number.isFinite(v)) return v;
+            if(typeof v==='string'){ const n=Number(v); return Number.isFinite(n)?n:null; }
+            if(typeof v==='object'){
+              if('y' in v){ const n=Number(v.y); return Number.isFinite(n)?n:null; }
+              if('v' in v){ const n=Number(v.v); return Number.isFinite(n)?n:null; }
+              if('value' in v){ const n=Number(v.value); return Number.isFinite(n)?n:null; }
+            }
+            const n=Number(v);
+            return Number.isFinite(n)?n:null;
+          };
+          const v0 = getY(data[i - 1]);
+          const v1 = getY(data[i]);
+          if (v0==null || v1==null) continue;
           const d = v1 - v0;
           if (!Number.isFinite(d) || d === 0) continue;
 
@@ -5022,57 +5038,84 @@ function ymdFromState(key){
   return null;
 }
 
-function _getPrevMmddSetForDrop() {
-  const mode = state.rangeMode;
+function _getPrevMmddSetForDrop(){
+  // 依「目前範圍」推算上一期（年/月份/週/日/指定範圍），回傳 YYYYMMDD 的 Set。
   const temp = state.temp;
-  // Compare with the immediately previous period (allow partial coverage if some days are missing).
-  const cur = getDateSetInSelection();
-  // ymdFromState() 回傳物件，不能用預設 sort()（會導致排序不穩定，上一期抓不到）
-  const curDates = [...cur]
-    .map(mmdd => ({ mmdd, ymd: ymdFromState(mmdd) }))
-    .filter(o => o.ymd && Number.isFinite(o.ymd.y) && Number.isFinite(o.ymd.m) && Number.isFinite(o.ymd.d))
-    .sort((a,b)=>{
-      const da = new Date(a.ymd.y, a.ymd.m-1, a.ymd.d);
-      const db = new Date(b.ymd.y, b.ymd.m-1, b.ymd.d);
-      return da - db;
-    });
-  if (!curDates.length) return new Set();
-  const curStart = new Date(curDates[0].ymd.y, curDates[0].ymd.m-1, curDates[0].ymd.d);
-  const curEnd = new Date(curDates[curDates.length-1].ymd.y, curDates[curDates.length-1].ymd.m-1, curDates[curDates.length-1].ymd.d);
+  const all = getAllDatesForTemp(temp);
+  if(!all.length) return null;
 
-  const addDays = (dt, n) => { const x = new Date(dt); x.setDate(x.getDate()+n); return x; };
-  const addMonths = (dt, n) => { const x = new Date(dt); const d=x.getDate(); x.setDate(1); x.setMonth(x.getMonth()+n); const md = new Date(x.getFullYear(), x.getMonth()+1, 0).getDate(); x.setDate(Math.min(d, md)); return x; };
+  const inRange = (d, s, e) => d.dateObj >= s && d.dateObj <= e;
 
-  let prevStart = null;
-  let prevEnd = null;
-  if (mode === 'day') {
-    prevStart = addDays(curStart, -1);
-    prevEnd = prevStart;
-  } else if (mode === 'week') {
-    prevStart = addDays(curStart, -7);
-    prevEnd = addDays(prevStart, 6);
-  } else if (mode === 'month') {
-    const s = new Date(curStart.getFullYear(), curStart.getMonth(), 1);
-    prevStart = addMonths(s, -1);
-    prevStart = new Date(prevStart.getFullYear(), prevStart.getMonth(), 1);
-    prevEnd = new Date(prevStart.getFullYear(), prevStart.getMonth()+1, 0);
-  } else if (mode === 'year') {
-    prevStart = new Date(curStart.getFullYear()-1, 0, 1);
-    prevEnd = new Date(curStart.getFullYear()-1, 11, 31);
-  } else if (mode === 'range') {
-    const span = Math.max(1, Math.round((curEnd - curStart) / 86400000) + 1);
-    prevEnd = addDays(curStart, -1);
-    prevStart = addDays(prevEnd, -(span-1));
-  } else {
-    // fallback: use nearest previous available date
-    const tempAll = getAllDatesForTemp(temp);
-    const prev = _findPrevDate(tempAll, curStart);
-    if (!prev) return new Set();
-    prevStart = prev;
-    prevEnd = prev;
+  // 目前選取的 start/end（UTC 00:00）
+  let curStart=null, curEnd=null;
+
+  if(state.rangeMode==='year'){
+    const y = Number(state.year);
+    curStart = new Date(Date.UTC(y,0,1));
+    curEnd   = new Date(Date.UTC(y,11,31));
+  } else if(state.rangeMode==='month'){
+    const y = Number(state.year);
+    const m = Number(state.month);
+    const win = getMonthWeekWindowsUTC(y,m);
+    curStart = win.start;
+    curEnd   = win.end;
+  } else if(state.rangeMode==='week'){
+    const ws = state.weekStartStr ? new Date(state.weekStartStr+'T00:00:00Z') : null;
+    if(!ws || isNaN(ws)) return null;
+    curStart = ws;
+    curEnd = addDaysUTC(ws, 6);
+  } else if(state.rangeMode==='day'){
+    if(state.dayStr){
+      const d = new Date(state.dayStr+'T00:00:00Z');
+      if(isNaN(d)) return null;
+      curStart = d;
+      curEnd = d;
+    } else return null;
+  } else if(state.rangeMode==='custom'){
+    if(state.customStartStr && state.customEndStr){
+      const s = new Date(state.customStartStr+'T00:00:00Z');
+      const e = new Date(state.customEndStr+'T00:00:00Z');
+      if(isNaN(s)||isNaN(e)) return null;
+      curStart=s; curEnd=e;
+    } else return null;
   }
 
-  return _buildSetFromRange(temp, prevStart, prevEnd);
+  if(state.dayRange && state.dayRange.start && state.dayRange.end){
+    const s = new Date(state.dayRange.start+'T00:00:00Z');
+    const e = new Date(state.dayRange.end+'T00:00:00Z');
+    if(!isNaN(s)&&!isNaN(e)){
+      curStart=s; curEnd=e;
+    }
+  }
+
+  if(!curStart || !curEnd) return null;
+
+  let prevStart=null, prevEnd=null;
+  if(state.rangeMode==='year'){
+    const y = Number(state.year)-1;
+    prevStart = new Date(Date.UTC(y,0,1));
+    prevEnd   = new Date(Date.UTC(y,11,31));
+  } else if(state.rangeMode==='month'){
+    let y = Number(state.year);
+    let m = Number(state.month)-1;
+    if(m<=0){ m=12; y-=1; }
+    const win = getMonthWeekWindowsUTC(y,m);
+    prevStart = win.start;
+    prevEnd   = win.end;
+  } else if(state.rangeMode==='week'){
+    prevStart = addDaysUTC(curStart,-7);
+    prevEnd   = addDaysUTC(curEnd,-7);
+  } else {
+    const days = Math.round((curEnd-curStart)/(24*3600*1000))+1;
+    prevEnd = addDaysUTC(curStart,-1);
+    prevStart = addDaysUTC(prevEnd, -(days-1));
+  }
+
+  const set = new Set();
+  for(const d of all){
+    if(inRange(d, prevStart, prevEnd)) set.add(d.key);
+  }
+  return set.size ? set : null;
 }
 
 
