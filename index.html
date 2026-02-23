@@ -4752,6 +4752,11 @@ function refreshLowestRateModeOptions(){
   opts.push(["drop_cap","產能下滑數（高→低）"]);
   opts.push(["drop_eff","人時性下滑數(平均)（高→低）"]);
 
+  // 上升數（跨線別彙總，以品名為主鍵）
+  opts.push(["rise_qty","生產量上升數（高→低）"]);
+  opts.push(["rise_cap","產能上升數（高→低）"]);
+  opts.push(["rise_eff","人時性上升數(平均)（高→低）"]);
+
   sel.innerHTML = "";
   for(const [v,t] of opts){
     const o = document.createElement("option");
@@ -5221,66 +5226,171 @@ function _prodDropAgg(pairFilter){
 
 function _metricRiseAgg(metric, pairFilter){
   // metric: "qty" | "cap" | "eff"
-  const cand = [];
-  const mmddSet = getActiveGroupMmddSet(state.temp);
-  for(const [baseName, arr] of Object.entries(state.productDailyMap||{})){
-    // 配別過濾：二配=只看開頭為"二配"；非二配=排除開頭為"二配"
-    if(pairFilter === "二配"){
-      if(!arr.some(x=> (x.prod||"").startsWith("二配"))) continue;
-    }else if(pairFilter === "非二配"){
-      if(arr.some(x=> (x.prod||"").startsWith("二配"))) continue;
+  const curSet = getDateSetInSelection();
+  const prevSet = _getPrevMmddSetForDrop(); // 與下滑數相同：依視圖取上一期
+
+  const curDays = Math.max(1, (curSet && curSet.size) ? curSet.size : 0);
+  const prevDays = Math.max(1, (prevSet && prevSet.size) ? prevSet.size : 0);
+
+  const curMap = new Map();
+  const prevMap = new Map();
+
+  function ensure(map, rec){
+    const prodKey = cleanKey(rec.product);
+    if(!prodKey) return null;
+    if(_isSummaryRowProdName(rec.product)) return null;
+
+    // 配別篩選：以品名前二字是否為「二配」判定
+    if(pairFilter === "two"){
+      if(!isTwoPei(rec.product)) return null;
+    }else if(pairFilter === "nonTwo"){
+      if(isTwoPei(rec.product)) return null;
     }
 
-    const items = arr.filter(x=>mmddSet.has(x.mmdd));
-    if(items.length < 2) continue;
+    if(!map.has(prodKey)){
+      map.set(prodKey, {
+        prodKey,
+        prod: cleanText(rec.product),
+        // 統計
+        qtySum: 0, qtyCnt: 0,
+        peopleSum: 0, peopleCnt: 0,
+        effSum: 0, effCnt: 0,
+        capSum: 0, capCnt: 0,
+        // 代表線別/品群（用產量加權挑最大的）
+        lineQty: Object.create(null),
+        catQty: Object.create(null),
+        catKeyBy: Object.create(null),
+      });
+    }
+    return map.get(prodKey);
+  }
 
-    // 以週別(週二~週一)為單位：取當前範圍最後一週 vs 前一週
-    const wsList = items.map(it=>({it, ws:getWeekStartUTC(it.dateObj).getTime()}));
-    wsList.sort((a,b)=>a.ws-b.ws);
-    const uniqWs = Array.from(new Set(wsList.map(x=>x.ws)));
-    if(uniqWs.length < 2) continue;
-    const curWs = uniqWs[uniqWs.length-1];
-    const prevWs = uniqWs[uniqWs.length-2];
+  function acc(map, rec){
+    const it = ensure(map, rec);
+    if(!it) return;
 
-    const curItems = wsList.filter(x=>x.ws===curWs).map(x=>x.it);
-    const prevItems = wsList.filter(x=>x.ws===prevWs).map(x=>x.it);
+    const q = _safeNum(rec.qty);
+    if(Number.isFinite(q)){
+      it.qtySum += q; it.qtyCnt++;
+      const lk = cleanKey(rec.line);
+      if(lk){
+        it.lineQty[lk] = (it.lineQty[lk] || 0) + q;
+      }
+      const ck = cleanKey(rec.category || "");
+      if(ck){
+        it.catQty[ck] = (it.catQty[ck] || 0) + q;
+        it.catKeyBy[ck] = cleanText(rec.category || "");
+      }
+    }
 
-    const sumBy = (arr, key)=>arr.reduce((s,o)=>s+(+o[key]||0),0);
-    const avgBy = (arr, key)=>{
-      const xs = arr.map(o=>+o[key]).filter(v=>Number.isFinite(v));
-      if(!xs.length) return null;
-      return xs.reduce((a,b)=>a+b,0)/xs.length;
-    };
+    const p = _safeNum(rec.people);
+    if(Number.isFinite(p)){ it.peopleSum += p; it.peopleCnt++; }
 
-    let prevVal=null, curVal=null;
-    if(metric==="qty"){
-      prevVal = sumBy(prevItems, "qty");
-      curVal = sumBy(curItems, "qty");
-    }else if(metric==="cap"){
-      prevVal = avgBy(prevItems, "cap");
-      curVal = avgBy(curItems, "cap");
+    const e = _safeNum(rec.eff);
+    if(Number.isFinite(e)){ it.effSum += e; it.effCnt++; }
+
+    const c = _safeNum(rec.cap);
+    if(Number.isFinite(c)){ it.capSum += c; it.capCnt++; }
+  }
+
+  for(const rec of state.records.values()){
+    if(rec.temp !== state.temp) continue;
+    if(curSet.has(rec.mmdd))  acc(curMap, rec);
+    if(prevSet.has(rec.mmdd)) acc(prevMap, rec);
+  }
+
+  function pickTop(obj){
+    let bestK = "";
+    let bestV = -Infinity;
+    for(const k in obj){
+      const v = obj[k];
+      if(v > bestV){
+        bestV = v;
+        bestK = k;
+      }
+    }
+    return bestK || "";
+  }
+
+  const out = [];
+  const allKeys = new Set([...curMap.keys(), ...prevMap.keys()]);
+  for(const prodKey of allKeys){
+    const cur = curMap.get(prodKey);
+    const prev = prevMap.get(prodKey);
+    const meta = cur || prev;
+    if(!meta) continue;
+
+    // representative line/category: prefer current period, fallback previous
+    const repLineKey = pickTop((cur && cur.lineQty) ? cur.lineQty : (prev ? prev.lineQty : {}));
+    const repCatKey  = pickTop((cur && cur.catQty) ? cur.catQty : (prev ? prev.catQty : {}));
+
+    const repLineName = repLineKey ? displayLineName(repLineKey) : "—";
+    const repCatName  = repCatKey ? (meta.catKeyBy && meta.catKeyBy[repCatKey] ? meta.catKeyBy[repCatKey] : "—") : "—";
+
+    const curQtySum = cur ? cur.qtySum : 0;
+    const prevQtySum = prev ? prev.qtySum : 0;
+
+    const curAvgQtyDay = curQtySum / curDays;
+
+    const curAvgPeople = (cur && cur.peopleCnt>0) ? (cur.peopleSum/cur.peopleCnt) : NaN;
+    const curAvgEff = (cur && cur.effCnt>0) ? (cur.effSum/cur.effCnt) : NaN;
+    const curAvgCap = (cur && cur.capCnt>0) ? (cur.capSum/cur.capCnt) : NaN;
+
+    const prevAvgEff = (prev && prev.effCnt>0) ? (prev.effSum/prev.effCnt) : NaN;
+    const prevAvgCap = (prev && prev.capCnt>0) ? (prev.capSum/prev.capCnt) : NaN;
+
+    let prevVal = NaN, curVal = NaN, riseVal = NaN;
+    if(metric === "qty"){
+      // 生產量上升數：以「期間加總」比較（非平均）
+      prevVal = prevQtySum;
+      curVal = curQtySum;
+      riseVal = curVal - prevVal;
+    }else if(metric === "cap"){
+      prevVal = prevAvgCap;
+      curVal = curAvgCap;
+      riseVal = curVal - prevVal;
+    }else if(metric === "eff"){
+      prevVal = prevAvgEff;
+      curVal = curAvgEff;
+      riseVal = curVal - prevVal;
     }else{
-      prevVal = avgBy(prevItems, "eff");
-      curVal = avgBy(curItems, "eff");
+      continue;
     }
-    if(prevVal==null || curVal==null) continue;
 
-    const riseVal = curVal - prevVal;
-    if(!(riseVal > 0)) continue;
+    if(!(riseVal > 0) || !Number.isFinite(riseVal)) continue;
 
-    // 取代表資料
-    const repr = items[items.length-1];
-    cand.push({
-      baseName,
-      prod: repr.prod,
-      category: repr.category,
-      line: repr.line,
-      prevVal, curVal, riseVal
+    const li = getLaunchDateInfoForProd(meta.prod);
+    const launchStr = (li && li.str) ? li.str : "";
+    const launchDays = _calcLaunchDays(li ? li.date : null);
+
+    out.push({
+      // pick payload for click
+      lineKey: repLineKey || "",
+      catKey: repCatKey || "",
+      prodKey: meta.prodKey || prodKey,
+      line: repLineName,
+      cat: repCatName,
+      prod: meta.prod,
+
+      launchStr, launchDays,
+
+      // current-period metrics (cards)
+      totalQty: curQtySum,
+      avgQtyDay: curAvgQtyDay,
+      avgPeople: curAvgPeople,
+      avgEff: curAvgEff,
+      avgCap: curAvgCap,
+
+      // rise info
+      metric,
+      prevVal,
+      curVal,
+      riseVal
     });
   }
 
-  cand.sort((a,b)=>a.riseVal-b.riseVal); // 低→高
-  return cand.slice(0,6);
+  out.sort((a,b)=> (b.riseVal - a.riseVal) || (b.avgQtyDay - a.avgQtyDay));
+  return out.slice(0, 6);
 }
 function renderLowestRatePanel(){
   const sel = $("lowestRateMode");
@@ -5295,9 +5405,15 @@ function renderLowestRatePanel(){
 
   let list = [];
   const isDropMode = mode.startsWith("drop_") || mode === "drop";
-  if(isDropMode){
-    const metric = (mode === "drop_cap") ? "cap" : (mode === "drop_eff") ? "eff" : "qty";
-    list = _metricDropAgg(metric, pair);
+  const isRiseMode = mode.startsWith("rise_");
+  const isDiffMode = isDropMode || isRiseMode;
+
+  if(isDiffMode){
+    const metric =
+      (mode === "drop_cap" || mode === "rise_cap") ? "cap" :
+      (mode === "drop_eff" || mode === "rise_eff") ? "eff" :
+      "qty";
+    list = isRiseMode ? _metricRiseAgg(metric, pair) : _metricDropAgg(metric, pair);
     empty.textContent = "目前範圍內未取得可比較的上一期資料。";
   }else{
     list = _lowestRateAgg(mode, pair);
@@ -5317,7 +5433,10 @@ function renderLowestRatePanel(){
     drop: "生產量下滑數",
     drop_qty: "生產量下滑數",
     drop_cap: "產能下滑數",
-    drop_eff: "人時性下滑數(平均)"
+    drop_eff: "人時性下滑數(平均)",
+    rise_qty: "生產量上升數",
+    rise_cap: "產能上升數",
+    rise_eff: "人時性上升數(平均)"
   };
   const label = labelMap[mode] || "—";
 
@@ -5332,7 +5451,7 @@ function renderLowestRatePanel(){
     btn.className = "w-full rounded-2xl border border-slate-200 bg-white px-5 py-4 text-left hover:border-slate-300 hover:shadow-sm transition";
 
     // subtitle
-    const sub = isDropMode
+    const sub = isDiffMode
       ? `${it.cat || "—"} ｜ 代表線別：${it.line || "—"}（跨線別彙總）`
       : `${it.cat || "—"} ｜ ${it.line || "—"}`;
 
@@ -5350,13 +5469,14 @@ function renderLowestRatePanel(){
     let metricText = "—";
     let detailLabel = "—";
     let detailValue = "—";
-    if(isDropMode){
+    if(isDiffMode){
       detailLabel = "前→現";
+      const diffVal = isRiseMode ? it.riseVal : it.dropVal;
       if(it.metric === "qty"){
-        metricText = fmtInt(it.dropVal);
+        metricText = fmtInt(diffVal);
         detailValue = `${fmtInt(it.prevVal)} → ${fmtInt(it.curVal)}`;
       }else{
-        metricText = mode.startsWith("rise_") ? ("+" + fmtDec(it.riseVal, 2)) : fmtDec(it.dropVal, 2);
+        metricText = fmtDec(diffVal, 2);
         detailValue = `${fmtDec(it.prevVal, 2)} → ${fmtDec(it.curVal, 2)}`;
       }
     }else{
@@ -5365,7 +5485,7 @@ function renderLowestRatePanel(){
       detailValue = (mode === "cap") ? fmtDec(it.avgCap,2) : fmtDec(it.avgEff,2);
     }
 
-        btn.innerHTML = `
+    btn.innerHTML = `
       <div class="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-4 items-start">
         <div class="min-w-0">
           <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
