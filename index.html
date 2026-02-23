@@ -5033,7 +5033,7 @@ const _dropDatesCacheYear = new Map();
 
 function _getAllDatesForTempAny(temp){
   if(_dropDatesCacheAny.has(temp)) return _dropDatesCacheAny.get(temp);
-  const out = [];
+  let out = [];
   for(const k of state.summaries.keys()){
     const parts = String(k).split("|"); // temp|YYYYMMDD
     if(parts.length < 2) continue;
@@ -5211,7 +5211,7 @@ function _metricDropAgg(metric, pairFilter, catFilter){
   }
 
   const allKeys = new Set([...curMap.keys(), ...prevMap.keys()]);
-  const out = [];
+  let out = [];
 
   for(const prodKey of allKeys){
     const cur = curMap.get(prodKey);
@@ -5394,7 +5394,7 @@ function _metricRiseAgg(metric, pairFilter, catFilter){
     return bestK || "";
   }
 
-  const out = [];
+  let out = [];
   const allKeys = new Set([...curMap.keys(), ...prevMap.keys()]);
   for(const prodKey of allKeys){
     const cur = curMap.get(prodKey);
