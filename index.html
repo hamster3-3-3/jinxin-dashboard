@@ -1774,7 +1774,7 @@ async function fetchArrayBufferSmart(fileName){
   const dataDirParam = (params.get("dataDir") || params.get("data") || "").trim();
 
   // Relative prefixes to try
-  const prefixes = ["", "repo/"];
+  const prefixes = ["", "data/", "excel/", "xlsx/", "repo/"];
   if(dataDirParam && !/^https?:\/\//i.test(dataDirParam)){
     let p = dataDirParam.replace(/^\.?\/*/, ""); // remove leading ./ or /
     if(p && !p.endsWith("/")) p += "/";
@@ -2525,6 +2525,8 @@ const map = new Map(); // cat -> Set(prod)
 
     const prod = cleanText(rec.product || "");
     if(!prod) continue;
+    // 品名下拉：移除「平均」彙總列（所有品群皆不顯示）
+    if(cleanKey(prod) === cleanKey("平均")) continue;
 
     if(!map.has(cat)) map.set(cat, new Set());
     map.get(cat).add(prod);
