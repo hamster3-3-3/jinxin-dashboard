@@ -2551,8 +2551,13 @@ const map = new Map(); // cat -> Set(prod)
   }
 
   const arr = Array.from(map.entries())
-    .map(([cat, set]) => ({cat, n: set.size}))
-    .sort((a,b)=> b.n - a.n || a.cat.localeCompare(b.cat, "zh-Hant"));
+    .map(([cat, set]) => {
+      const __cost = avgCostOfProducts(set);
+      const __price = (__cost && Number.isFinite(__cost.price)) ? __cost.price : -Infinity;
+      return { cat, n: set.size, __price };
+    })
+    // 依「廠價」由高到低排列（左→右）
+    .sort((a,b)=> (b.__price - a.__price) || (b.n - a.n) || a.cat.localeCompare(b.cat, "zh-Hant"));
 
   if(meta){
     meta.textContent = `共 ${arr.length} 群`;
@@ -3967,8 +3972,13 @@ function refreshLineGroupCounts(){
   }
 
   const arr = Array.from(map.entries())
-    .map(([cat, set]) => ({cat, n: set.size}))
-    .sort((a,b)=> b.n - a.n || a.cat.localeCompare(b.cat, "zh-Hant"));
+    .map(([cat, set]) => {
+      const __cost = avgCostOfProducts(set);
+      const __price = (__cost && Number.isFinite(__cost.price)) ? __cost.price : -Infinity;
+      return { cat, n: set.size, __price };
+    })
+    // 依「廠價」由高到低排列（左→右）
+    .sort((a,b)=> (b.__price - a.__price) || (b.n - a.n) || a.cat.localeCompare(b.cat, "zh-Hant"));
 
   if(meta) meta.textContent = `共 ${arr.length} 群`;
 
