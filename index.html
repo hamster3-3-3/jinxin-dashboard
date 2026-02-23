@@ -2565,6 +2565,9 @@ const map = new Map(); // cat -> Set(prod)
     // 依「廠價」由高到低排列（左→右）
     .sort((a,b)=> (b.__price - a.__price) || (b.n - a.n) || a.cat.localeCompare(b.cat, "zh-Hant"));
 
+  // cache: keep the same ordering for other UI (e.g. KPI品群下拉)
+  state.activeCatsSortedByPrice = arr.map(x=>x.cat);
+
   if(meta){
     meta.textContent = `共 ${arr.length} 群`;
   }
@@ -4806,7 +4809,20 @@ function refreshKpiGroupFilterOptions(){
     if(!c) continue;
     set.add(c);
   }
-  const cats = Array.from(set).sort((a,b)=> a.localeCompare(b, "zh-Hant"));
+  const catsUnordered = Array.from(set);
+  let cats = catsUnordered;
+
+  // Prefer the same ordering as 「整體品群（當前範圍）」：依廠價高→低
+  if(Array.isArray(state.activeCatsSortedByPrice) && state.activeCatsSortedByPrice.length){
+    const rank = new Map(state.activeCatsSortedByPrice.map((c,i)=>[cleanKey(c), i]));
+    cats = catsUnordered.sort((a,b)=>{
+      const ra = rank.has(cleanKey(a)) ? rank.get(cleanKey(a)) : 1e9;
+      const rb = rank.has(cleanKey(b)) ? rank.get(cleanKey(b)) : 1e9;
+      return (ra - rb) || a.localeCompare(b, "zh-Hant");
+    });
+  }else{
+    cats = catsUnordered.sort((a,b)=> a.localeCompare(b, "zh-Hant"));
+  }
 
   sel.innerHTML = "";
   const oAll = document.createElement("option");
