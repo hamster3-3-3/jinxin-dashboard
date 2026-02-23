@@ -363,6 +363,12 @@
           </select>
         </div>
         <div class="flex items-center gap-2">
+          <div class="text-slate-500 text-sm font-bold whitespace-nowrap shrink-0 leading-none">品群</div>
+          <select id="kpiGroupFilter" class="select" style="max-width: 12rem;">
+            <option value="all">全部</option>
+          </select>
+        </div>
+        <div class="flex items-center gap-2">
           <div class="text-slate-500 text-sm font-bold whitespace-nowrap shrink-0 leading-none">排序依據</div>
           <select id="lowestRateMode" class="select" style="max-width: 18rem;">
             <option value="human">最低人時達成率（前六）</option>
@@ -4788,6 +4794,39 @@ function refreshLowestRateModeOptions(){
 
 
 
+function refreshKpiGroupFilterOptions(){
+  const sel = $("kpiGroupFilter");
+  if(!sel) return;
+
+  const current = sel.value || "all";
+  const set = new Set();
+  // state.prodIndex already respects current temp + current date selection and excludes '平均'
+  for(const it of (state.prodIndex || [])){
+    const c = cleanText(it.cat || "");
+    if(!c) continue;
+    set.add(c);
+  }
+  const cats = Array.from(set).sort((a,b)=> a.localeCompare(b, "zh-Hant"));
+
+  sel.innerHTML = "";
+  const oAll = document.createElement("option");
+  oAll.value = "all";
+  oAll.textContent = "全部";
+  sel.appendChild(oAll);
+
+  for(const c of cats){
+    const o = document.createElement("option");
+    o.value = c;
+    o.textContent = c;
+    sel.appendChild(o);
+  }
+
+  // keep selection if still available
+  const allowed = new Set(["all", ...cats]);
+  sel.value = allowed.has(current) ? current : "all";
+}
+
+
 function hideProdSuggest(){
   const box = $("prodSuggest");
   if(!box) return;
@@ -4879,7 +4918,7 @@ function _safeNum(v){
   return Number.isFinite(n) ? n : NaN;
 }
 
-function _lowestRateAgg(mode, pairFilter){
+function _lowestRateAgg(mode, pairFilter, catFilter){
   // mode: "human" | "cap"
   const mmddSet = getDateSetInSelection();
   const _daysCount = Math.max(1, (mmddSet && mmddSet.size) ? mmddSet.size : 0);
@@ -4961,6 +5000,11 @@ if(pairFilter === "two"){
       totalQty: (it.qtyCnt>0) ? it.qtySum : NaN,
       avgQtyDay: (it.qtyCnt>0) ? (it.qtySum / _daysCount) : NaN
     });
+  }
+
+  if(catFilter && catFilter !== "all"){
+    const ck = cleanText(catFilter);
+    out = out.filter(x=> cleanText(x.cat||"") === ck);
   }
 
   out.sort((a,b)=>a.avgAch - b.avgAch);
@@ -5062,7 +5106,7 @@ function _isSummaryRowProdName(prod){
 }
 
 // mode=drop：回傳下滑數最高的前 6 名（drop = prevAvgQtyDay - curAvgQtyDay, 僅列 drop>0）
-function _metricDropAgg(metric, pairFilter){
+function _metricDropAgg(metric, pairFilter, catFilter){
   // metric: "qty" | "cap" | "eff"
   const curSet = getDateSetInSelection();
   const prevSet = _getPrevMmddSetForDrop();
@@ -5229,6 +5273,11 @@ function _metricDropAgg(metric, pairFilter){
     });
   }
 
+  if(catFilter && catFilter !== "all"){
+    const ck = cleanText(catFilter);
+    out = out.filter(x=> cleanText(x.cat||"") === ck);
+  }
+
   out.sort((a,b)=> (b.dropVal - a.dropVal) || (b.avgQtyDay - a.avgQtyDay));
   return out.slice(0, 6);
 }
@@ -5241,7 +5290,7 @@ function _prodDropAgg(pairFilter){
 
 
 
-function _metricRiseAgg(metric, pairFilter){
+function _metricRiseAgg(metric, pairFilter, catFilter){
   // metric: "qty" | "cap" | "eff"
   const curSet = getDateSetInSelection();
   const prevSet = _getPrevMmddSetForDrop(); // 與下滑數相同：依視圖取上一期
@@ -5406,6 +5455,11 @@ function _metricRiseAgg(metric, pairFilter){
     });
   }
 
+  if(catFilter && catFilter !== "all"){
+    const ck = cleanText(catFilter);
+    out = out.filter(x=> cleanText(x.cat||"") === ck);
+  }
+
   out.sort((a,b)=> (b.riseVal - a.riseVal) || (b.avgQtyDay - a.avgQtyDay));
   return out.slice(0, 6);
 }
@@ -5417,6 +5471,9 @@ function renderLowestRatePanel(){
 
   const pf = $("pairFilter");
   const pair = (pf && pf.value) ? pf.value : "all";
+
+  const gf = $("kpiGroupFilter");
+  const catFilter = (gf && gf.value) ? gf.value : "all";
 
   const mode = sel.value || (String(state.temp) === "4" ? "human" : "drop_qty");
 
@@ -5430,10 +5487,10 @@ function renderLowestRatePanel(){
       (mode === "drop_cap" || mode === "rise_cap") ? "cap" :
       (mode === "drop_eff" || mode === "rise_eff") ? "eff" :
       "qty";
-    list = isRiseMode ? _metricRiseAgg(metric, pair) : _metricDropAgg(metric, pair);
+    list = isRiseMode ? _metricRiseAgg(metric, pair, catFilter) : _metricDropAgg(metric, pair, catFilter);
     empty.textContent = "目前範圍內未取得可比較的上一期資料。";
   }else{
-    list = _lowestRateAgg(mode, pair);
+    list = _lowestRateAgg(mode, pair, catFilter);
     empty.textContent = "目前範圍內未取得達成率資料。";
   }
 
@@ -5575,6 +5632,12 @@ document.addEventListener("DOMContentLoaded", ()=>{
       renderLowestRatePanel();
     });
   }
+  const gf = $("kpiGroupFilter");
+  if(gf){
+    gf.addEventListener("change", ()=> {
+      renderLowestRatePanel();
+    });
+  }
 });
 
 
@@ -5587,6 +5650,7 @@ function refreshAll(){
   refreshLineSection();
   buildProdIndex();
   refreshLowestRateModeOptions();
+  refreshKpiGroupFilterOptions();
   renderLowestRatePanel();
 }
 
