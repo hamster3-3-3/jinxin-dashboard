@@ -4983,7 +4983,7 @@ if(pairFilter === "two"){
     if(Number.isFinite(c)){ it.capSum += c; it.capCnt += 1; }
   }
 
-  const out = [];
+  let out = [];
   for(const it of map.values()){
     if(it.achCnt <= 0) continue;
     const li = getLaunchDateInfoForProd(it.prod);
