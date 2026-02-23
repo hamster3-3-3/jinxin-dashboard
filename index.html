@@ -3802,6 +3802,7 @@ function listProductsForGroup(catName, lineKeyFilter=""){
 
     const prod = cleanText(rec.product || "");
     if(!prod) continue;
+    if(cleanKey(prod)===cleanKey("平均")) continue;
     set.add(prod);
   }
   return Array.from(set).sort((a,b)=> a.localeCompare(b, "zh-Hant"));
@@ -3946,6 +3947,8 @@ function refreshLineGroupCounts(){
 
     const prod = cleanText(rec.product || "");
     if(!prod) continue;
+
+    if(cleanKey(prod)===cleanKey("平均")) continue;
 
     if(!map.has(cat)) map.set(cat, new Set());
     map.get(cat).add(prod);
@@ -4162,6 +4165,7 @@ function refreshProductSelect(){
     if(cleanKey(rec.line) !== lineKey) continue;
     if(cleanKey(rec.category || "") !== catKey) continue;
     const pk = cleanKey(rec.product);
+    if(pk===cleanKey("平均")) continue;
     if(!prods.has(pk)) prods.set(pk, cleanText(rec.product));
   }
   const __anchorCurSel = getNewProductAnchorMonthEndUTC();
@@ -4707,6 +4711,7 @@ function buildProdIndex(){
     const prodKey = cleanKey(rec.product);
 
     if(!lineKey || !catKey || !prodKey) continue;
+    if(prodKey===cleanKey("平均")) continue;
     if(catKey === "0") continue;
 
     const key = `${lineKey}|${catKey}|${prodKey}`;
