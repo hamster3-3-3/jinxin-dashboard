@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
+  <!-- BUILD: v23 (delta tick labels, minimal) -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -348,10 +349,10 @@
 
   </div>
 
-  <!-- 低達成率品項（當前範圍） -->
+  <!-- 各品項KPI排序（當前範圍） -->
   <div class="card mt-6">
     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div class="h2">低達成率品項（當前範圍）</div>
+      <div class="h2">各品項KPI排序（當前範圍）</div>
       <div class="flex items-center gap-4">
         <div class="flex items-center gap-2">
           <div class="text-slate-500 text-sm font-bold whitespace-nowrap shrink-0 leading-none">配別</div>
@@ -359,6 +360,12 @@
             <option value="all">全部</option>
             <option value="nonTwo">非二配</option>
             <option value="two">二配</option>
+          </select>
+        </div>
+        <div class="flex items-center gap-2">
+          <div class="text-slate-500 text-sm font-bold whitespace-nowrap shrink-0 leading-none">品群</div>
+          <select id="kpiGroupFilter" class="select" style="max-width: 12rem;">
+            <option value="all">全部</option>
           </select>
         </div>
         <div class="flex items-center gap-2">
@@ -576,6 +583,7 @@
   </div>
 
 <script>
+console.log("BUILD v22");
 /* =========================
    解析/圖表套件載入（自動 fallback）
    - 優先使用同資料夾的本地檔（可選）：./xlsx.full.min.js、./chart.umd.min.js
@@ -1062,6 +1070,31 @@ function addDaysUTC(dateObj, days){
   const d = new Date(dateObj.getTime());
   d.setUTCDate(d.getUTCDate()+days);
   return d;
+}
+
+function getMonthWeekWindowsUTC(year, month){
+  // 回傳「該月需顯示的週期」：包含與該月有交集的週（週二～週一）
+  const monthStart = new Date(Date.UTC(Number(year), Number(month)-1, 1));
+  const monthEnd = new Date(Date.UTC(Number(year), Number(month), 0)); // last day of month
+  monthStart.setUTCHours(0,0,0,0);
+  monthEnd.setUTCHours(0,0,0,0);
+
+  let ws = getWeekStartUTC(monthStart);
+  const weeks = [];
+  while(ws.getTime() <= monthEnd.getTime()){
+    const we = addDaysUTC(ws, 6);
+    // 有交集才納入
+    if(we.getTime() >= monthStart.getTime() && ws.getTime() <= monthEnd.getTime()){
+      weeks.push({ start: new Date(ws.getTime()), end: new Date(we.getTime()) });
+    }
+    ws = addDaysUTC(ws, 7);
+  }
+
+  // 供其他地方快速取「該月週視圖」的整段起訖（會跨月）
+  const start = weeks.length ? weeks[0].start : new Date(monthStart.getTime());
+  const end   = weeks.length ? weeks[weeks.length-1].end : new Date(monthEnd.getTime());
+
+  return { monthStart, monthEnd, weeks, start, end };
 }
 function monthKeyFromDate(dateObj){
   return `${dateObj.getUTCFullYear()}-${String(dateObj.getUTCMonth()+1).padStart(2,"0")}`;
@@ -1747,7 +1780,7 @@ async function fetchArrayBufferSmart(fileName){
   const dataDirParam = (params.get("dataDir") || params.get("data") || "").trim();
 
   // Relative prefixes to try
-  const prefixes = ["", "repo/"];
+  const prefixes = ["", "data/", "excel/", "xlsx/", "repo/"];
   if(dataDirParam && !/^https?:\/\//i.test(dataDirParam)){
     let p = dataDirParam.replace(/^\.?\/*/, ""); // remove leading ./ or /
     if(p && !p.endsWith("/")) p += "/";
@@ -2162,12 +2195,17 @@ function summariesInRange(){
     return base.map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
   }
   if(state.rangeMode === "month"){
-    const m = state.month;
-    // 以「週二～週一」為一週；跨月時以週起始日（週二）決定歸屬月份
-    return base.filter(o => (getWeekStartUTC(o.dateObj).getUTCMonth()+1) === m)
-               .map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
+    const m = Number(state.month);
+    // 先確認「所選月」在 base 內至少有一天資料（避免選到完全沒資料月份卻跨月抓到別月）
+    const hasInMonth = base.some(o => (o.dateObj.getUTCMonth()+1) === m);
+    if(!hasInMonth) return [];
+    const wk = getMonthWeekWindowsUTC(state.year, m); // wk.start/wk.end 會跨月
+    return base
+      .filter(o => o.dateObj >= wk.start && o.dateObj <= wk.end)
+      .map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)}))
+      .filter(x => x.summary);
   }
-  if(state.rangeMode === "week"){
+if(state.rangeMode === "week"){
     if(!state.weekStartStr) return [];
     const ws = new Date(state.weekStartStr + "T00:00:00Z");
     const we = addDaysUTC(ws, 6);
@@ -2467,17 +2505,21 @@ function refreshActiveCatCounts(){
   const temp = state.temp;
   const all = getAllDatesForTemp(temp);
 
-  // 月別：以「週歸屬」統計（週一~週日），只要該週的週一落在所選月份，就把整週（含跨月）納入
+  // 月別：以「週視圖」統計（週二～週一），只要該週與所選月份有交集就納入（可跨月）
   // 其他：以目前選取範圍統計
   let mmddSet = new Set();
   if(state.rangeMode === "month"){
-    const m = state.month;
-    all.filter(o => (getWeekStartUTC(o.dateObj).getUTCMonth()+1) === m).forEach(o => mmddSet.add(o.mmdd));
+    const m = Number(state.month);
+    const hasInMonth = all.some(o => (o.dateObj.getUTCMonth()+1) === m);
+    if(hasInMonth){
+      const wk = getMonthWeekWindowsUTC(state.year, m); // wk.start/wk.end 會跨月
+      all.filter(o => o.dateObj >= wk.start && o.dateObj <= wk.end).forEach(o => mmddSet.add(o.mmdd));
+    }
   }else{
     mmddSet = getDateSetInSelection();
   }
 
-  const map = new Map(); // cat -> Set(prod)
+const map = new Map(); // cat -> Set(prod)
 
   for(const rec of state.records.values()){
     if(rec.temp !== temp) continue;
@@ -2489,6 +2531,8 @@ function refreshActiveCatCounts(){
 
     const prod = cleanText(rec.product || "");
     if(!prod) continue;
+    // 品名下拉：移除「平均」彙總列（所有品群皆不顯示）
+    if(cleanKey(prod) === cleanKey("平均")) continue;
 
     if(!map.has(cat)) map.set(cat, new Set());
     map.get(cat).add(prod);
@@ -2513,8 +2557,16 @@ function refreshActiveCatCounts(){
   }
 
   const arr = Array.from(map.entries())
-    .map(([cat, set]) => ({cat, n: set.size}))
-    .sort((a,b)=> b.n - a.n || a.cat.localeCompare(b.cat, "zh-Hant"));
+    .map(([cat, set]) => {
+      const __cost = avgCostOfProducts(set);
+      const __price = (__cost && Number.isFinite(__cost.price)) ? __cost.price : -Infinity;
+      return { cat, n: set.size, __price };
+    })
+    // 依「廠價」由高到低排列（左→右）
+    .sort((a,b)=> (b.__price - a.__price) || (b.n - a.n) || a.cat.localeCompare(b.cat, "zh-Hant"));
+
+  // cache: keep the same ordering for other UI (e.g. KPI品群下拉)
+  state.activeCatsSortedByPrice = arr.map(x=>x.cat);
 
   if(meta){
     meta.textContent = `共 ${arr.length} 群`;
@@ -2649,7 +2701,8 @@ const valueLabelPlugin = {
 
     ctx.save();
     ctx.beginPath();
-    ctx.rect(area.left, area.top, area.right - area.left, area.bottom - area.top);
+    // allow drawing a bit above the chart area for delta labels
+    ctx.rect(area.left, area.top - 48, area.right - area.left, (area.bottom - area.top) + 64);
     ctx.clip();
 
     ctx.fillStyle = opts.color || "#334155";
@@ -2684,6 +2737,130 @@ try{
   }
 }catch(e){}
 
+
+/* =========================
+   Chart delta arcs (adjacent point difference annotation)
+========================= */
+function fmtSigned(num, digits=0){
+  const v = Number(num);
+  if(!Number.isFinite(v)) return "—";
+  const sign = v > 0 ? "+" : (v < 0 ? "−" : "");
+  const abs = Math.abs(v);
+  const s = (digits === 0)
+    ? Math.round(abs).toLocaleString("zh-Hant-TW")
+    : abs.toFixed(digits);
+  return sign + s;
+}
+function fmtDeltaForKpi(kpi, delta){
+  if(["attendance","efficiency","avgPrice"].includes(kpi)) return fmtSigned(delta, 2);
+  return fmtSigned(delta, 0);
+}
+function fmtDeltaForMetric(metric, delta){
+  if(metric === "runMin") return fmtSigned(delta, 1);
+  if(metric === "revenue" || metric === "qty") return fmtSigned(delta, 0);
+  return fmtSigned(delta, 2);
+}
+
+const deltaArcPlugin = {
+  id: "deltaArcs",
+  afterDatasetsDraw(chart, args, opts){
+    if(!opts || opts.enabled === false) return;
+    const area = chart.chartArea;
+    if(!area) return;
+    const ctx = chart.ctx;
+
+    const total = chart.data?.labels?.length || 0;
+    // If too dense, annotate every Nth segment
+    const step = (opts.step && Number.isFinite(opts.step)) ? opts.step : (total > 40 ? 2 : 1);
+
+    const tickLen = (opts.tickLen && Number.isFinite(opts.tickLen)) ? opts.tickLen : 10;  // marker length
+    const textGap = (opts.textGap && Number.isFinite(opts.textGap)) ? opts.textGap : 10;  // distance from marker to text
+
+    ctx.save();
+    // Keep everything inside the plot area (avoid blocking outside UI)
+    ctx.beginPath();
+    ctx.rect(area.left, area.top, area.right - area.left, area.bottom - area.top);
+    ctx.clip();
+
+    ctx.lineWidth = opts.lineWidth || 1.6;
+    ctx.font = `${opts.fontWeight || 700} ${opts.fontSize || 12}px "Noto Sans TC", system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    const formatter = opts.formatter || ((delta, _ds)=>fmtSigned(delta, 0));
+    const colorPos = opts.colorPos || "#16a34a";
+    const colorNeg = opts.colorNeg || "#dc2626";
+    const colorZero = opts.colorZero || "#64748b";
+
+    const clampX = (x)=>Math.max(area.left + 6, Math.min(area.right - 6, x));
+    const clampY = (y)=>Math.max(area.top + 10, Math.min(area.bottom - 10, y));
+
+    chart.data.datasets.forEach((ds, di)=>{
+      const meta = chart.getDatasetMeta(di);
+      if(meta.hidden) return;
+      const pts = meta.data || [];
+      for(let i=1;i<pts.length;i++){
+        if(step > 1 && (i % step) !== 0) continue;
+        const v0 = ds.data[i-1];
+        const v1 = ds.data[i];
+        if(v0 === null || v0 === undefined || v1 === null || v1 === undefined) continue;
+        if(!Number.isFinite(Number(v0)) || !Number.isFinite(Number(v1))) continue;
+
+        const delta = Number(v1) - Number(v0);
+        if(!Number.isFinite(delta) || delta === 0) continue;
+
+        const p0 = pts[i-1];
+        const p1 = pts[i];
+        if(!p0 || !p1) continue;
+
+        // Midpoint on the segment
+        const mx = (p0.x + p1.x) / 2;
+        const my = (p0.y + p1.y) / 2;
+
+        // Segment normal (choose the upward-pointing normal in screen coords)
+        const dx = (p1.x - p0.x);
+        const dy = (p1.y - p0.y);
+        const segLen = Math.hypot(dx, dy) || 1;
+
+        let nx = -dy / segLen, ny = dx / segLen; // normal A
+        // if normal points down (ny>0), flip it so the label sits "above" the segment
+        if(ny > 0){ nx = -nx; ny = -ny; }
+
+        const col = delta > 0 ? colorPos : (delta < 0 ? colorNeg : colorZero);
+        const txt = formatter(delta, ds, i, chart);
+
+        // Small marker (a short tick) crossing the segment at midpoint
+        ctx.strokeStyle = col;
+        const hx = nx * (tickLen/2);
+        const hy = ny * (tickLen/2);
+        ctx.beginPath();
+        ctx.moveTo(clampX(mx - hx), clampY(my - hy));
+        ctx.lineTo(clampX(mx + hx), clampY(my + hy));
+        ctx.stroke();
+
+        // Text just above the segment, close to the tick
+        ctx.fillStyle = col;
+        const tx = clampX(mx + nx * (tickLen/2 + textGap));
+        const ty = clampY(my + ny * (tickLen/2 + textGap));
+        ctx.fillText(String(txt), tx, ty);
+      }
+    });
+
+    ctx.restore();
+  }
+};
+
+// Ensure plugin is registered (Chart.js might load after our script in some deployments) (Chart.js might load after our script in some deployments)
+function ensureDeltaArcs(){
+  try{
+    if(window.Chart && !window.__deltaArcsRegistered){
+      window.Chart.register(deltaArcPlugin);
+      window.__deltaArcsRegistered = true;
+    }
+  }catch(e){}
+}
+// Attempt early registration
+ensureDeltaArcs();
 
 function kpiLabel(k){
   return {
@@ -2755,9 +2932,11 @@ function buildWeeklyOrDailySeries(kpi = state.chartKpi){
   let focus = all;
 
   if(mode === "month"){
-    focus = all.filter(o => o.dateObj.getUTCMonth()+1 === state.month);
+    const wk = getMonthWeekWindowsUTC(state.year, state.month);
+    focus = all.filter(o => o.dateObj >= wk.start && o.dateObj <= wk.end);
     title = `週趨勢（${String(state.month).padStart(2,"0")} 月｜每週平均）`;
   }else if(mode === "week"){
+
     const ws = new Date(state.weekStartStr + "T00:00:00Z");
     const we = addDaysUTC(ws,6);
     focus = all.filter(o => o.dateObj >= ws && o.dateObj <= we);
@@ -2799,35 +2978,18 @@ function buildWeeklyOrDailySeries(kpi = state.chartKpi){
     if(!byWeek.has(wsStr)) byWeek.set(wsStr, []);
     byWeek.get(wsStr).push(it);
   }
-  const weeks = Array.from(byWeek.entries()).sort((a,b)=>a[0].localeCompare(b[0]));
-  const labels = [];
-  const values = [];
-  for(const [wsStr, items] of weeks){
-    let qty=0, rev=0, multi=0, itemSum=0, attSum=0, effSum=0, attCnt=0, effCnt=0, dayCnt=0;
-    for(const it of items){
-      const s = it.summary;
-      const q = toNumber(s.totalQty); if(Number.isFinite(q)) qty += q;
-      const r = toNumber(s.revenue); if(Number.isFinite(r)) rev += r;
-      const mu = toNumber(s.multi); if(Number.isFinite(mu)) multi += mu;
-      const a = toNumber(s.attendance); if(Number.isFinite(a)){ attSum += a; attCnt++; }
-      const e = toNumber(s.efficiency); if(Number.isFinite(e)){ effSum += e; effCnt++; }
-      const dk = `${temp}|${it.mmdd}`;
-      const ic = state.itemCountDaily.get(dk);
-      if(Number.isFinite(ic)) itemSum += ic;
-      dayCnt++;
-    }
-    const dn = Math.max(dayCnt, 1);
-    const weekAvg = {
-      totalQty: qty/dn,
-      revenue: rev/dn,
-      multi: multi/dn,
-      attendance: attCnt ? (attSum/attCnt) : null,
-      efficiency: effCnt ? (effSum/effCnt) : null,
-      avgPrice: (qty>0 && rev>0) ? (rev/qty) : null,
-      itemCount: itemSum/dn
-    };
-    labels.push(wsStr.slice(5));
-    values.push(weekAvg[kpi] ?? null);
+  const wk = (mode==="month") ? getMonthWeekWindowsUTC(state.year, state.month) : null;
+  const labelByStart = wk ? new Map(wk.weeks.map(w=>[w.startStr, w.label])) : null;
+
+  const orderedStarts = (mode==="month")
+    ? wk.weeks.map(w=>w.startStr)
+    : Array.from(byWeek.keys()).sort((a,b)=>a.localeCompare(b));
+
+  const labels=[], values=[];
+  for(const wsStr of orderedStarts){
+    const arr = byWeek.get(wsStr) || [];
+    labels.push(mode==="month" ? (labelByStart.get(wsStr) || wsStr.slice(5)) : wsStr.slice(5));
+    values.push(arr.length ? avg(arr.map(o=>o[metric])) : null);
   }
   return {title, labels, values};
 }
@@ -2915,9 +3077,12 @@ function buildProductSeriesMode(rows, metric, aggMode){
   };
 
   if(mode === "month"){
-    // 以週起始日（週二）歸屬月份
-    focus = items.filter(it => (getWeekStartUTC(it.dateObj).getUTCMonth()+1) === state.month);
-    title = `週別（${String(state.month).padStart(2,"0")} 月｜每週${aggMode==="sum"?"加總":"平均"}）`;
+    const wk = getMonthWeekWindowsUTC(state.year, state.month);
+    const allowed = new Set(wk.weeks.map(w => dateObjToStr(w.start)));
+    focus = items.filter(it => allowed.has(dateObjToStr(getWeekStartUTC(it.dateObj))));
+    title = (aggMode === "sum")
+      ? `週別（${String(state.month).padStart(2,"0")} 月｜每週加總）`
+      : `週別（${String(state.month).padStart(2,"0")} 月｜每週平均）`;
   }
 
   for(const it of focus){
@@ -2927,17 +3092,26 @@ function buildProductSeriesMode(rows, metric, aggMode){
     byWeek.get(wsStr).push(it);
   }
 
-  const weeks = Array.from(byWeek.entries()).sort((a,b)=>a[0].localeCompare(b[0]));
+  const wk = (mode==='month') ? getMonthWeekWindowsUTC(state.year, state.month) : null;
+
+// 月別：wk.weeks 只有 {start,end}，因此這裡自行產生 startStr 與 label
+const labelByStart = wk
+  ? new Map(wk.weeks.map(w=>{
+      const startStr = dateObjToStr(w.start);
+      const label = `${md(w.start)}~${md(w.end)}`;
+      return [startStr, label];
+    }))
+  : null;
+
+const orderedStarts = (mode==='month')
+  ? wk.weeks.map(w=>dateObjToStr(w.start))
+  : Array.from(byWeek.keys()).sort((a,b)=>a.localeCompare(b));
+
   const labels=[], values=[];
-  for(const [wsStr, arr] of weeks){
-    const ws = new Date(wsStr + "T00:00:00Z");
-    const we = addDaysUTC(ws, 6);
-    if(mode === "month"){
-      labels.push(`${md(ws)}～${md(we)}`);
-    }else{
-      labels.push(wsStr.slice(5));
-    }
-    values.push(agg(arr.map(it => it.rec[metric])));
+  for(const wsStr of orderedStarts){
+    const arr = byWeek.get(wsStr) || [];
+    labels.push(mode==='month' ? (labelByStart.get(wsStr) || wsStr.slice(5)) : wsStr.slice(5));
+    values.push(arr.length ? agg(arr.map(it=>it.rec[metric])) : null);
   }
 
   return {title, labels, values};
@@ -3024,6 +3198,7 @@ function renderProductTrend(rows){
     }
 
     const ctx = $(canvasId).getContext("2d");
+    ensureDeltaArcs();
     return new Chart(ctx, {
       type: "line",
       data: { labels, datasets },
@@ -3033,6 +3208,13 @@ function renderProductTrend(rows){
         plugins: {
           legend: { display: true },
           valueLabels: { enabled: false },
+        deltaArcs: {
+          enabled: true,
+          formatter: (delta, ds)=>{
+            const k = ds && ds._metricKey ? ds._metricKey : "qty";
+            return fmtDeltaForMetric(k, delta);
+          }
+        },
           tooltip: {
             callbacks: {
               label: (ctx)=>{
@@ -3418,7 +3600,14 @@ function renderCharts(){
           }
         }
       },
-      decimation: { enabled: true, algorithm: "min-max" }
+      decimation: { enabled: true, algorithm: "min-max" },
+      deltaArcs: {
+        enabled: true,
+        formatter: (delta, ds)=>{
+          const k = ds && ds._kpi ? ds._kpi : leftKpi;
+          return fmtDeltaForKpi(k, delta);
+        }
+      }
     },
     scales: {
       x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 18 } },
@@ -3468,6 +3657,7 @@ function renderCharts(){
     });
   }
 
+  ensureDeltaArcs();
   dailyChart = new Chart(dctx, {
     type: "line",
     data: { labels, datasets: dailyDatasets },
@@ -3497,6 +3687,7 @@ function renderCharts(){
         pointHoverRadius: 5
       });
     }
+    ensureDeltaArcs();
     dailySumChart = new Chart(dctxSum, {
       type: "line",
       data: { labels, datasets: sumDatasets },
@@ -3528,6 +3719,7 @@ function renderCharts(){
     });
   }
 
+  ensureDeltaArcs();
   cumChart = new Chart(cctx, {
     type: "line",
     data: { labels, datasets: cumDatasets },
@@ -3590,13 +3782,19 @@ state.activeGroupCat = "";
 function getActiveGroupMmddSet(){
   const temp = state.temp;
   const all = getAllDatesForTemp(temp);
-  // 月別：以日曆月統計（1~31）；其他：以目前選取範圍統計
+
+  // 月別：以「週視圖」統計（週二～週一），只要該週與所選月份有交集就納入（可跨月）
   if(state.rangeMode === "month"){
-    const m = state.month;
+    const m = Number(state.month);
+    // 若該月在資料中完全沒有一天，避免跨月抓到別月資料
+    const hasInMonth = all.some(o => (o.dateObj.getUTCMonth()+1) === m);
+    if(!hasInMonth) return new Set();
+    const wk = getMonthWeekWindowsUTC(state.year, m); // wk.start/wk.end 會跨月
     const s = new Set();
-    all.filter(o => (o.dateObj.getUTCMonth()+1) === m).forEach(o => s.add(o.mmdd));
+    all.filter(o => o.dateObj >= wk.start && o.dateObj <= wk.end).forEach(o => s.add(o.mmdd));
     return s;
   }
+
   return getDateSetInSelection();
 }
 
@@ -3618,6 +3816,7 @@ function listProductsForGroup(catName, lineKeyFilter=""){
 
     const prod = cleanText(rec.product || "");
     if(!prod) continue;
+    if(cleanKey(prod)===cleanKey("平均")) continue;
     set.add(prod);
   }
   return Array.from(set).sort((a,b)=> a.localeCompare(b, "zh-Hant"));
@@ -3763,6 +3962,8 @@ function refreshLineGroupCounts(){
     const prod = cleanText(rec.product || "");
     if(!prod) continue;
 
+    if(cleanKey(prod)===cleanKey("平均")) continue;
+
     if(!map.has(cat)) map.set(cat, new Set());
     map.get(cat).add(prod);
   }
@@ -3780,8 +3981,13 @@ function refreshLineGroupCounts(){
   }
 
   const arr = Array.from(map.entries())
-    .map(([cat, set]) => ({cat, n: set.size}))
-    .sort((a,b)=> b.n - a.n || a.cat.localeCompare(b.cat, "zh-Hant"));
+    .map(([cat, set]) => {
+      const __cost = avgCostOfProducts(set);
+      const __price = (__cost && Number.isFinite(__cost.price)) ? __cost.price : -Infinity;
+      return { cat, n: set.size, __price };
+    })
+    // 依「廠價」由高到低排列（左→右）
+    .sort((a,b)=> (b.__price - a.__price) || (b.n - a.n) || a.cat.localeCompare(b.cat, "zh-Hant"));
 
   if(meta) meta.textContent = `共 ${arr.length} 群`;
 
@@ -3978,6 +4184,7 @@ function refreshProductSelect(){
     if(cleanKey(rec.line) !== lineKey) continue;
     if(cleanKey(rec.category || "") !== catKey) continue;
     const pk = cleanKey(rec.product);
+    if(pk===cleanKey("平均")) continue;
     if(!prods.has(pk)) prods.set(pk, cleanText(rec.product));
   }
   const __anchorCurSel = getNewProductAnchorMonthEndUTC();
@@ -4018,17 +4225,21 @@ function buildGroupRowsForCat(catName){
   const temp = state.temp;
   const all = getAllDatesForTemp(temp);
 
-  // 月別：以「週歸屬」統計（週一~週日），只要該週的週一落在所選月份，就把整週（含跨月）納入
+  // 月別：以「週視圖」統計（週二～週一），只要該週與所選月份有交集就納入（可跨月）
   // 其他：以目前選取範圍統計
   let mmddSet = new Set();
   if(state.rangeMode === "month"){
-    const m = state.month;
-    all.filter(o => (getWeekStartUTC(o.dateObj).getUTCMonth()+1) === m).forEach(o => mmddSet.add(o.mmdd));
+    const m = Number(state.month);
+    const hasInMonth = all.some(o => (o.dateObj.getUTCMonth()+1) === m);
+    if(hasInMonth){
+      const wk = getMonthWeekWindowsUTC(state.year, m); // wk.start/wk.end 會跨月
+      all.filter(o => o.dateObj >= wk.start && o.dateObj <= wk.end).forEach(o => mmddSet.add(o.mmdd));
+    }
   }else{
     mmddSet = getDateSetInSelection();
   }
 
-  const catKey = cleanKey(cleanText(catName || ""));
+const catKey = cleanKey(cleanText(catName || ""));
   const byDate = new Map(); // dateStr -> agg
 
   for(const rec of state.records.values()){
@@ -4175,7 +4386,9 @@ function buildGroupSeries(rows, metric, viewMode="avg"){
   };
 
   if(mode === "month"){
-    focus = items.filter(it => (getWeekStartUTC(it.dateObj).getUTCMonth()+1) === state.month);
+    const wk = getMonthWeekWindowsUTC(state.year, state.month);
+    const allowed = new Set(wk.weeks.map(w => dateObjToStr(w.start)));
+    focus = items.filter(it => allowed.has(dateObjToStr(getWeekStartUTC(it.dateObj))));
     title = (viewMode === "sum")
       ? `週別（${String(state.month).padStart(2,"0")} 月｜每週加總）`
       : `週別（${String(state.month).padStart(2,"0")} 月｜每週平均）`;
@@ -4312,6 +4525,7 @@ function renderGroupTrend(catName){
   }
 
   const ctx = $("groupTrendCanvas").getContext("2d");
+  ensureDeltaArcs();
   groupChart = new Chart(ctx, {
     type: "line",
     data: { labels, datasets: datasetsAvg },
@@ -4321,6 +4535,13 @@ function renderGroupTrend(catName){
       plugins: {
         legend: { display: true },
         valueLabels: { enabled: false },
+        deltaArcs: {
+          enabled: true,
+          formatter: (delta, ds)=>{
+            const k = ds && ds._metricKey ? ds._metricKey : "qty";
+            return fmtDeltaForMetric(k, delta);
+          }
+        },
         tooltip: {
           callbacks: {
             label: (ctx)=>{
@@ -4352,6 +4573,7 @@ function renderGroupTrend(catName){
 
   const ctxSum = $("groupTrendCanvasSum") ? $("groupTrendCanvasSum").getContext("2d") : null;
   if(ctxSum){
+    ensureDeltaArcs();
     groupChartSum = new Chart(ctxSum, {
       type: "line",
       data: { labels, datasets: datasetsSum },
@@ -4361,6 +4583,13 @@ function renderGroupTrend(catName){
         plugins: {
           legend: { display: true },
           valueLabels: { enabled: false },
+        deltaArcs: {
+          enabled: true,
+          formatter: (delta, ds)=>{
+            const k = ds && ds._metricKey ? ds._metricKey : "qty";
+            return fmtDeltaForMetric(k, delta);
+          }
+        },
           tooltip: {
             callbacks: {
               label: (ctx)=>{
@@ -4501,6 +4730,7 @@ function buildProdIndex(){
     const prodKey = cleanKey(rec.product);
 
     if(!lineKey || !catKey || !prodKey) continue;
+    if(prodKey===cleanKey("平均")) continue;
     if(catKey === "0") continue;
 
     const key = `${lineKey}|${catKey}|${prodKey}`;
@@ -4548,6 +4778,11 @@ function refreshLowestRateModeOptions(){
   opts.push(["drop_cap","產能下滑數（高→低）"]);
   opts.push(["drop_eff","人時性下滑數(平均)（高→低）"]);
 
+  // 上升數（跨線別彙總，以品名為主鍵）
+  opts.push(["rise_qty","生產量上升數（高→低）"]);
+  opts.push(["rise_cap","產能上升數（高→低）"]);
+  opts.push(["rise_eff","人時性上升數(平均)（高→低）"]);
+
   sel.innerHTML = "";
   for(const [v,t] of opts){
     const o = document.createElement("option");
@@ -4560,6 +4795,52 @@ function refreshLowestRateModeOptions(){
   sel.value = allowed.has(current) ? current : opts[0][0];
 }
 
+
+
+function refreshKpiGroupFilterOptions(){
+  const sel = $("kpiGroupFilter");
+  if(!sel) return;
+
+  const current = sel.value || "all";
+  const set = new Set();
+  // state.prodIndex already respects current temp + current date selection and excludes '平均'
+  for(const it of (state.prodIndex || [])){
+    const c = cleanText(it.cat || "");
+    if(!c) continue;
+    set.add(c);
+  }
+  const catsUnordered = Array.from(set);
+  let cats = catsUnordered;
+
+  // Prefer the same ordering as 「整體品群（當前範圍）」：依廠價高→低
+  if(Array.isArray(state.activeCatsSortedByPrice) && state.activeCatsSortedByPrice.length){
+    const rank = new Map(state.activeCatsSortedByPrice.map((c,i)=>[cleanKey(c), i]));
+    cats = catsUnordered.sort((a,b)=>{
+      const ra = rank.has(cleanKey(a)) ? rank.get(cleanKey(a)) : 1e9;
+      const rb = rank.has(cleanKey(b)) ? rank.get(cleanKey(b)) : 1e9;
+      return (ra - rb) || a.localeCompare(b, "zh-Hant");
+    });
+  }else{
+    cats = catsUnordered.sort((a,b)=> a.localeCompare(b, "zh-Hant"));
+  }
+
+  sel.innerHTML = "";
+  const oAll = document.createElement("option");
+  oAll.value = "all";
+  oAll.textContent = "全部";
+  sel.appendChild(oAll);
+
+  for(const c of cats){
+    const o = document.createElement("option");
+    o.value = c;
+    o.textContent = c;
+    sel.appendChild(o);
+  }
+
+  // keep selection if still available
+  const allowed = new Set(["all", ...cats]);
+  sel.value = allowed.has(current) ? current : "all";
+}
 
 
 function hideProdSuggest(){
@@ -4653,7 +4934,7 @@ function _safeNum(v){
   return Number.isFinite(n) ? n : NaN;
 }
 
-function _lowestRateAgg(mode, pairFilter){
+function _lowestRateAgg(mode, pairFilter, catFilter){
   // mode: "human" | "cap"
   const mmddSet = getDateSetInSelection();
   const _daysCount = Math.max(1, (mmddSet && mmddSet.size) ? mmddSet.size : 0);
@@ -4718,7 +4999,7 @@ if(pairFilter === "two"){
     if(Number.isFinite(c)){ it.capSum += c; it.capCnt += 1; }
   }
 
-  const out = [];
+  let out = [];
   for(const it of map.values()){
     if(it.achCnt <= 0) continue;
     const li = getLaunchDateInfoForProd(it.prod);
@@ -4737,6 +5018,11 @@ if(pairFilter === "two"){
     });
   }
 
+  if(catFilter && catFilter !== "all"){
+    const ck = cleanText(catFilter);
+    out = out.filter(x=> cleanText(x.cat||"") === ck);
+  }
+
   out.sort((a,b)=>a.avgAch - b.avgAch);
   return out.slice(0, 6);
 }
@@ -4747,7 +5033,7 @@ const _dropDatesCacheYear = new Map();
 
 function _getAllDatesForTempAny(temp){
   if(_dropDatesCacheAny.has(temp)) return _dropDatesCacheAny.get(temp);
-  const out = [];
+  let out = [];
   for(const k of state.summaries.keys()){
     const parts = String(k).split("|"); // temp|YYYYMMDD
     if(parts.length < 2) continue;
@@ -4807,12 +5093,8 @@ function _getPrevMmddSetForDrop(){
     let py = Number(state.year);
     let pm = Number(state.month) - 1;
     if(pm <= 0){ pm = 12; py = py - 1; }
-    const all = _getAllDatesForTempYearAny(temp, py);
-    const s = new Set();
-    for(const o of all){
-      if((getWeekStartUTC(o.dateObj).getUTCMonth()+1) === pm) s.add(o.mmdd);
-    }
-    return s;
+    const wk = getMonthWeekWindowsUTC(py, pm); // 前月的週視圖（會跨月）
+    return _buildSetFromRange(temp, wk.start, wk.end);
   }
 
   if(state.rangeMode === "week"){
@@ -4840,7 +5122,7 @@ function _isSummaryRowProdName(prod){
 }
 
 // mode=drop：回傳下滑數最高的前 6 名（drop = prevAvgQtyDay - curAvgQtyDay, 僅列 drop>0）
-function _metricDropAgg(metric, pairFilter){
+function _metricDropAgg(metric, pairFilter, catFilter){
   // metric: "qty" | "cap" | "eff"
   const curSet = getDateSetInSelection();
   const prevSet = _getPrevMmddSetForDrop();
@@ -4929,7 +5211,7 @@ function _metricDropAgg(metric, pairFilter){
   }
 
   const allKeys = new Set([...curMap.keys(), ...prevMap.keys()]);
-  const out = [];
+  let out = [];
 
   for(const prodKey of allKeys){
     const cur = curMap.get(prodKey);
@@ -5007,6 +5289,11 @@ function _metricDropAgg(metric, pairFilter){
     });
   }
 
+  if(catFilter && catFilter !== "all"){
+    const ck = cleanText(catFilter);
+    out = out.filter(x=> cleanText(x.cat||"") === ck);
+  }
+
   out.sort((a,b)=> (b.dropVal - a.dropVal) || (b.avgQtyDay - a.avgQtyDay));
   return out.slice(0, 6);
 }
@@ -5018,6 +5305,180 @@ function _prodDropAgg(pairFilter){
 
 
 
+
+function _metricRiseAgg(metric, pairFilter, catFilter){
+  // metric: "qty" | "cap" | "eff"
+  const curSet = getDateSetInSelection();
+  const prevSet = _getPrevMmddSetForDrop(); // 與下滑數相同：依視圖取上一期
+
+  const curDays = Math.max(1, (curSet && curSet.size) ? curSet.size : 0);
+  const prevDays = Math.max(1, (prevSet && prevSet.size) ? prevSet.size : 0);
+
+  const curMap = new Map();
+  const prevMap = new Map();
+
+  function ensure(map, rec){
+    const prodKey = cleanKey(rec.product);
+    if(!prodKey) return null;
+    if(_isSummaryRowProdName(rec.product)) return null;
+
+    // 配別篩選：以品名前二字是否為「二配」判定
+    if(pairFilter === "two"){
+      if(!isTwoPei(rec.product)) return null;
+    }else if(pairFilter === "nonTwo"){
+      if(isTwoPei(rec.product)) return null;
+    }
+
+    if(!map.has(prodKey)){
+      map.set(prodKey, {
+        prodKey,
+        prod: cleanText(rec.product),
+        // 統計
+        qtySum: 0, qtyCnt: 0,
+        peopleSum: 0, peopleCnt: 0,
+        effSum: 0, effCnt: 0,
+        capSum: 0, capCnt: 0,
+        // 代表線別/品群（用產量加權挑最大的）
+        lineQty: Object.create(null),
+        catQty: Object.create(null),
+        catKeyBy: Object.create(null),
+      });
+    }
+    return map.get(prodKey);
+  }
+
+  function acc(map, rec){
+    const it = ensure(map, rec);
+    if(!it) return;
+
+    const q = _safeNum(rec.qty);
+    if(Number.isFinite(q)){
+      it.qtySum += q; it.qtyCnt++;
+      const lk = cleanKey(rec.line);
+      if(lk){
+        it.lineQty[lk] = (it.lineQty[lk] || 0) + q;
+      }
+      const ck = cleanKey(rec.category || "");
+      if(ck){
+        it.catQty[ck] = (it.catQty[ck] || 0) + q;
+        it.catKeyBy[ck] = cleanText(rec.category || "");
+      }
+    }
+
+    const p = _safeNum(rec.people);
+    if(Number.isFinite(p)){ it.peopleSum += p; it.peopleCnt++; }
+
+    const e = _safeNum(rec.eff);
+    if(Number.isFinite(e)){ it.effSum += e; it.effCnt++; }
+
+    const c = _safeNum(rec.cap);
+    if(Number.isFinite(c)){ it.capSum += c; it.capCnt++; }
+  }
+
+  for(const rec of state.records.values()){
+    if(rec.temp !== state.temp) continue;
+    if(curSet.has(rec.mmdd))  acc(curMap, rec);
+    if(prevSet.has(rec.mmdd)) acc(prevMap, rec);
+  }
+
+  function pickTop(obj){
+    let bestK = "";
+    let bestV = -Infinity;
+    for(const k in obj){
+      const v = obj[k];
+      if(v > bestV){
+        bestV = v;
+        bestK = k;
+      }
+    }
+    return bestK || "";
+  }
+
+  let out = [];
+  const allKeys = new Set([...curMap.keys(), ...prevMap.keys()]);
+  for(const prodKey of allKeys){
+    const cur = curMap.get(prodKey);
+    const prev = prevMap.get(prodKey);
+    const meta = cur || prev;
+    if(!meta) continue;
+
+    // representative line/category: prefer current period, fallback previous
+    const repLineKey = pickTop((cur && cur.lineQty) ? cur.lineQty : (prev ? prev.lineQty : {}));
+    const repCatKey  = pickTop((cur && cur.catQty) ? cur.catQty : (prev ? prev.catQty : {}));
+
+    const repLineName = repLineKey ? displayLineName(repLineKey) : "—";
+    const repCatName  = repCatKey ? (meta.catKeyBy && meta.catKeyBy[repCatKey] ? meta.catKeyBy[repCatKey] : "—") : "—";
+
+    const curQtySum = cur ? cur.qtySum : 0;
+    const prevQtySum = prev ? prev.qtySum : 0;
+
+    const curAvgQtyDay = curQtySum / curDays;
+
+    const curAvgPeople = (cur && cur.peopleCnt>0) ? (cur.peopleSum/cur.peopleCnt) : NaN;
+    const curAvgEff = (cur && cur.effCnt>0) ? (cur.effSum/cur.effCnt) : NaN;
+    const curAvgCap = (cur && cur.capCnt>0) ? (cur.capSum/cur.capCnt) : NaN;
+
+    const prevAvgEff = (prev && prev.effCnt>0) ? (prev.effSum/prev.effCnt) : NaN;
+    const prevAvgCap = (prev && prev.capCnt>0) ? (prev.capSum/prev.capCnt) : NaN;
+
+    let prevVal = NaN, curVal = NaN, riseVal = NaN;
+    if(metric === "qty"){
+      // 生產量上升數：以「期間加總」比較（非平均）
+      prevVal = prevQtySum;
+      curVal = curQtySum;
+      riseVal = curVal - prevVal;
+    }else if(metric === "cap"){
+      prevVal = prevAvgCap;
+      curVal = curAvgCap;
+      riseVal = curVal - prevVal;
+    }else if(metric === "eff"){
+      prevVal = prevAvgEff;
+      curVal = curAvgEff;
+      riseVal = curVal - prevVal;
+    }else{
+      continue;
+    }
+
+    if(!(riseVal > 0) || !Number.isFinite(riseVal)) continue;
+
+    const li = getLaunchDateInfoForProd(meta.prod);
+    const launchStr = (li && li.str) ? li.str : "";
+    const launchDays = _calcLaunchDays(li ? li.date : null);
+
+    out.push({
+      // pick payload for click
+      lineKey: repLineKey || "",
+      catKey: repCatKey || "",
+      prodKey: meta.prodKey || prodKey,
+      line: repLineName,
+      cat: repCatName,
+      prod: meta.prod,
+
+      launchStr, launchDays,
+
+      // current-period metrics (cards)
+      totalQty: curQtySum,
+      avgQtyDay: curAvgQtyDay,
+      avgPeople: curAvgPeople,
+      avgEff: curAvgEff,
+      avgCap: curAvgCap,
+
+      // rise info
+      metric,
+      prevVal,
+      curVal,
+      riseVal
+    });
+  }
+
+  if(catFilter && catFilter !== "all"){
+    const ck = cleanText(catFilter);
+    out = out.filter(x=> cleanText(x.cat||"") === ck);
+  }
+
+  out.sort((a,b)=> (b.riseVal - a.riseVal) || (b.avgQtyDay - a.avgQtyDay));
+  return out.slice(0, 6);
+}
 function renderLowestRatePanel(){
   const sel = $("lowestRateMode");
   const box = $("lowestRateList");
@@ -5027,16 +5488,25 @@ function renderLowestRatePanel(){
   const pf = $("pairFilter");
   const pair = (pf && pf.value) ? pf.value : "all";
 
+  const gf = $("kpiGroupFilter");
+  const catFilter = (gf && gf.value) ? gf.value : "all";
+
   const mode = sel.value || (String(state.temp) === "4" ? "human" : "drop_qty");
 
   let list = [];
   const isDropMode = mode.startsWith("drop_") || mode === "drop";
-  if(isDropMode){
-    const metric = (mode === "drop_cap") ? "cap" : (mode === "drop_eff") ? "eff" : "qty";
-    list = _metricDropAgg(metric, pair);
+  const isRiseMode = mode.startsWith("rise_");
+  const isDiffMode = isDropMode || isRiseMode;
+
+  if(isDiffMode){
+    const metric =
+      (mode === "drop_cap" || mode === "rise_cap") ? "cap" :
+      (mode === "drop_eff" || mode === "rise_eff") ? "eff" :
+      "qty";
+    list = isRiseMode ? _metricRiseAgg(metric, pair, catFilter) : _metricDropAgg(metric, pair, catFilter);
     empty.textContent = "目前範圍內未取得可比較的上一期資料。";
   }else{
-    list = _lowestRateAgg(mode, pair);
+    list = _lowestRateAgg(mode, pair, catFilter);
     empty.textContent = "目前範圍內未取得達成率資料。";
   }
 
@@ -5053,7 +5523,10 @@ function renderLowestRatePanel(){
     drop: "生產量下滑數",
     drop_qty: "生產量下滑數",
     drop_cap: "產能下滑數",
-    drop_eff: "人時性下滑數(平均)"
+    drop_eff: "人時性下滑數(平均)",
+    rise_qty: "生產量上升數",
+    rise_cap: "產能上升數",
+    rise_eff: "人時性上升數(平均)"
   };
   const label = labelMap[mode] || "—";
 
@@ -5068,7 +5541,7 @@ function renderLowestRatePanel(){
     btn.className = "w-full rounded-2xl border border-slate-200 bg-white px-5 py-4 text-left hover:border-slate-300 hover:shadow-sm transition";
 
     // subtitle
-    const sub = isDropMode
+    const sub = isDiffMode
       ? `${it.cat || "—"} ｜ 代表線別：${it.line || "—"}（跨線別彙總）`
       : `${it.cat || "—"} ｜ ${it.line || "—"}`;
 
@@ -5086,13 +5559,14 @@ function renderLowestRatePanel(){
     let metricText = "—";
     let detailLabel = "—";
     let detailValue = "—";
-    if(isDropMode){
+    if(isDiffMode){
       detailLabel = "前→現";
+      const diffVal = isRiseMode ? it.riseVal : it.dropVal;
       if(it.metric === "qty"){
-        metricText = fmtInt(it.dropVal);
+        metricText = fmtInt(diffVal);
         detailValue = `${fmtInt(it.prevVal)} → ${fmtInt(it.curVal)}`;
       }else{
-        metricText = fmtDec(it.dropVal, 2);
+        metricText = fmtDec(diffVal, 2);
         detailValue = `${fmtDec(it.prevVal, 2)} → ${fmtDec(it.curVal, 2)}`;
       }
     }else{
@@ -5101,7 +5575,7 @@ function renderLowestRatePanel(){
       detailValue = (mode === "cap") ? fmtDec(it.avgCap,2) : fmtDec(it.avgEff,2);
     }
 
-        btn.innerHTML = `
+    btn.innerHTML = `
       <div class="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-4 items-start">
         <div class="min-w-0">
           <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
@@ -5174,6 +5648,12 @@ document.addEventListener("DOMContentLoaded", ()=>{
       renderLowestRatePanel();
     });
   }
+  const gf = $("kpiGroupFilter");
+  if(gf){
+    gf.addEventListener("change", ()=> {
+      renderLowestRatePanel();
+    });
+  }
 });
 
 
@@ -5186,6 +5666,7 @@ function refreshAll(){
   refreshLineSection();
   buildProdIndex();
   refreshLowestRateModeOptions();
+  refreshKpiGroupFilterOptions();
   renderLowestRatePanel();
 }
 
