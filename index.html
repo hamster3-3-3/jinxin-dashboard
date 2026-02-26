@@ -3563,16 +3563,18 @@ function renderCharts(){
       x.setDate(x.getDate() - diff);
       return x;
     };
+    const _groupMode = (state.rangeMode === "year") ? "month" : ((state.rangeMode === "month") ? "week" : "day");
+
     for(const o of list){
       const d = o.dateObj;
       if(!d) continue;
-      if(groupMode === "day"){
+      if(_groupMode === "day"){
         const key = String(o.mmdd || "");
         const label = o.dateStr ? o.dateStr.slice(5).replace("-","/") : fmtMMDDSlash(d);
         push(key, label, o);
         continue;
       }
-      if(groupMode === "week"){
+      if(_groupMode === "week"){
         const ws = getWeekStart(d);
         const we = new Date(ws); we.setDate(ws.getDate()+6);
         const key = ws.toISOString().slice(0,10);
@@ -3586,13 +3588,13 @@ function renderCharts(){
       const label = `${m}月`;
       push(key, label, o, {month: m});
     }
-    if(groupMode === "day"){
+    if(_groupMode === "day"){
       _buckets.sort((a,b)=>{
         const ad = dateKeyToDateObj(a.key);
         const bd = dateKeyToDateObj(b.key);
         return (ad && bd) ? (ad - bd) : String(a.key).localeCompare(String(b.key));
       });
-    }else if(groupMode === "week"){
+    }else if(_groupMode === "week"){
       _buckets.sort((a,b)=>(a.weekStart - b.weekStart));
     }else{
       _buckets.sort((a,b)=>(a.month - b.month));
