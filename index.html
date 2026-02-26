@@ -1116,6 +1116,18 @@ function getMonthWeekWindowsUTC(year, month){
 
   return { monthStart, monthEnd, weeks, start, end };
 }
+function getSelectedMonth1Based(){
+  const m = getSelectedMonth1Based();
+  if(!Number.isFinite(m)) return m;
+  // 相容：有些下拉選單可能用 0~11 表示月份（0=1月）
+  if(m >= 0 && m <= 11 && String(state.month).length <= 2 && String(state.month).padStart(2,"0") !== String(m).padStart(2,"0")){
+    // keep as-is if original was like "02"
+    return m;
+  }
+  if(m >= 0 && m <= 11) return m + 1;
+  return m;
+}
+
 function monthKeyFromDate(dateObj){
   return `${dateObj.getUTCFullYear()}-${String(dateObj.getUTCMonth()+1).padStart(2,"0")}`;
 }
@@ -2084,7 +2096,7 @@ function refreshSelectors(){
     opt.textContent = String(m).padStart(2,"0") + (monthsWithData.has(m) ? "" : "（無資料）");
     monthSel.appendChild(opt);
   }
-  if(!state.month || !monthsWithData.has(Number(state.month))){
+  if(!state.month || !monthsWithData.has(getSelectedMonth1Based())){
     const mList = Array.from(monthsWithData).sort((a,b)=>a-b);
     state.month = mList.length ? mList[0] : 1;
   }
@@ -2215,7 +2227,7 @@ function summariesInRange(){
     return base.map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
   }
   if(state.rangeMode === "month"){
-    const m = Number(state.month);
+    const m = getSelectedMonth1Based();
     // 先確認「所選月」在 base 內至少有一天資料（避免選到完全沒資料月份卻跨月抓到別月）
     const hasInMonth = base.some(o => (o.dateObj.getUTCMonth()+1) === m);
     if(!hasInMonth) return [];
@@ -2445,7 +2457,7 @@ function getNewProductBadgeInfo(){
     }
   }else if(mode === 'month'){
     const y = Number(state.year);
-    const m = Number(state.month);
+    const m = getSelectedMonth1Based();
     labelCur = '當月新品';
     labelPrev = '前月新品';
     if(Number.isFinite(y) && Number.isFinite(m) && m>=1 && m<=12){
@@ -2587,7 +2599,7 @@ function getSelectionStartEndUTC(){
     return { start: new Date(Date.UTC(y,0,1)), end: new Date(Date.UTC(y,11,31)) };
   }
   if(mode === "month"){
-    const m = Number(state.month);
+    const m = getSelectedMonth1Based();
     const wk = getMonthWeekWindowsUTC(state.year, m); // 使用「月別週視圖」完整視窗（可跨月）
     return { start: wk.start, end: wk.end };
   }
@@ -2693,7 +2705,7 @@ function refreshActiveCatCounts(){
   // 其他：以目前選取範圍統計
   let mmddSet = new Set();
   if(state.rangeMode === "month"){
-    const m = Number(state.month);
+    const m = getSelectedMonth1Based();
     const hasInMonth = all.some(o => (o.dateObj.getUTCMonth()+1) === m);
     if(hasInMonth){
       const wk = getMonthWeekWindowsUTC(state.year, m); // wk.start/wk.end 會跨月
@@ -4238,7 +4250,7 @@ function getActiveGroupMmddSet(){
 
   // 月別：以「週視圖」統計（週二～週一），只要該週與所選月份有交集就納入（可跨月）
   if(state.rangeMode === "month"){
-    const m = Number(state.month);
+    const m = getSelectedMonth1Based();
     // 若該月在資料中完全沒有一天，避免跨月抓到別月資料
     const hasInMonth = all.some(o => (o.dateObj.getUTCMonth()+1) === m);
     if(!hasInMonth) return new Set();
@@ -4686,7 +4698,7 @@ function buildGroupRowsForCat(catName, mmddSetOverride=null){
   // 其他：以目前選取範圍統計
   let mmddSet = new Set();
   if(state.rangeMode === "month"){
-    const m = Number(state.month);
+    const m = getSelectedMonth1Based();
     const hasInMonth = all.some(o => (o.dateObj.getUTCMonth()+1) === m);
     if(hasInMonth){
       const wk = getMonthWeekWindowsUTC(state.year, m); // wk.start/wk.end 會跨月
@@ -5636,7 +5648,7 @@ function _getPrevMmddSetForDrop(){
 
   if(state.rangeMode === "month"){
     let py = Number(state.year);
-    let pm = Number(state.month) - 1;
+    let pm = getSelectedMonth1Based() - 1;
     if(pm <= 0){ pm = 12; py = py - 1; }
     const wk = getMonthWeekWindowsUTC(py, pm); // 前月的週視圖（會跨月）
     return _buildSetFromRange(temp, wk.start, wk.end);
