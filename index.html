@@ -407,6 +407,30 @@
     </div>
   </div>
 
+
+  <div id="prodCostCard" class="card mt-4">
+    <div class="flex items-center justify-between gap-4">
+      <div class="font-extrabold text-slate-900">成本資訊（材料率／毛利率／廠價）</div>
+      <div id="prodCostMeta" class="text-slate-500 text-sm font-bold"></div>
+    </div>
+
+    <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div class="rounded-2xl border border-slate-200 bg-white p-3">
+        <div class="text-xs text-slate-500 font-bold">材料率</div>
+        <div id="pMatRate" class="text-2xl font-black mono mt-1">—</div>
+      </div>
+      <div class="rounded-2xl border border-slate-200 bg-white p-3">
+        <div class="text-xs text-slate-500 font-bold">毛利率</div>
+        <div id="pGrossRate" class="text-2xl font-black mono mt-1">—</div>
+      </div>
+      <div class="rounded-2xl border border-slate-200 bg-white p-3">
+        <div class="text-xs text-slate-500 font-bold">廠價</div>
+        <div id="pFactoryPrice" class="text-2xl font-black mono mt-1">—</div>
+      </div>
+    </div>
+  </div>
+
+
 <div class="card space-y-4">
       <div class="font-extrabold text-slate-900">線別 / 品類 / 品名</div>
 
@@ -2497,6 +2521,34 @@ function setProdLaunchDateDisplay(prodName){
   const info = getLaunchDateInfoForProd(prodName);
   el.textContent = (info && info.str) ? info.str : "—";
 }
+
+
+function setProdCostDisplay(prodName){
+  const matEl = $("pMatRate");
+  const grossEl = $("pGrossRate");
+  const priceEl = $("pFactoryPrice");
+  const metaEl = $("prodCostMeta");
+  if(!matEl || !grossEl || !priceEl) return;
+
+  if(!prodName){
+    matEl.textContent = "—";
+    grossEl.textContent = "—";
+    priceEl.textContent = "—";
+    if(metaEl) metaEl.textContent = "";
+    return;
+  }
+
+  const cost = getCostOfProduct(prodName);
+  // cost: {mat, gross, price}
+  matEl.textContent = (cost && Number.isFinite(cost.mat)) ? (fmtPct(cost.mat)) : "—";
+  grossEl.textContent = (cost && Number.isFinite(cost.gross)) ? (fmtPct(cost.gross)) : "—";
+  priceEl.textContent = (cost && Number.isFinite(cost.price)) ? (fmtDec(cost.price, 2)) : "—";
+
+  if(metaEl){
+    metaEl.textContent = (costDB && costDB.loaded && costDB.srcPath) ? ("來源：" + costDB.srcPath) : "";
+  }
+}
+
 
 /* =========================
    下架商品（依日報出現/消失）
@@ -4844,10 +4896,11 @@ function refreshProductDetails(){
   const lineKey = $("lineSelect").value || "";
   const catKey = $("catSelect").value || "";
   const prodKey = $("prodSelect").value || "";
-  if(!lineKey || !catKey || !prodKey){ $("prodDetails").classList.add("hidden"); destroyProdChart(); setProdLaunchDateDisplay(""); return; }
+  if(!lineKey || !catKey || !prodKey){ $("prodDetails").classList.add("hidden"); destroyProdChart(); setProdLaunchDateDisplay(""); setProdCostDisplay(""); return; }
 
   const _dispProd = $("prodSelect")?.selectedOptions?.[0]?.textContent || "";
   setProdLaunchDateDisplay(_dispProd);
+  setProdCostDisplay(_dispProd);
 
   const mmddSet = getDateSetInSelection();
   const rows = [];
