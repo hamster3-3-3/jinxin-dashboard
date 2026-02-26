@@ -280,6 +280,7 @@
       <div id="activeCatMeta" class="text-slate-500 text-sm font-bold"></div>
     </div>
     <div id="activeCatCards" class="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3"></div>
+    <div id="delistedProductsCard" class="mt-4"></div>
     <!-- 品群→品名跳轉 -->
     <div id="activeGroupPanel" class="hidden mt-4 p-4 rounded-2xl border border-slate-200 bg-white">
       <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
@@ -2497,6 +2498,145 @@ function setProdLaunchDateDisplay(prodName){
   el.textContent = (info && info.str) ? info.str : "—";
 }
 
+/* =========================
+   下架商品（依日報出現/消失）
+   定義：
+   - 當期下架：上一期出現、本期未出現
+   - 前期下架：上上期出現、上一期未出現
+   期間：依目前視圖（週/月/年）回推；月別/週別視圖使用目前視圖對應的起訖（週二～週一視窗可跨月）。
+========================= */
+function __shiftUTCDateByDays(d, days){
+  const x = new Date(d.getTime());
+  x.setUTCDate(x.getUTCDate() + days);
+  return x;
+}
+function __shiftUTCDateByMonths(d, months){
+  const x = new Date(d.getTime());
+  x.setUTCMonth(x.getUTCMonth() + months);
+  return x;
+}
+function __shiftUTCDateByYears(d, years){
+  const x = new Date(d.getTime());
+  x.setUTCFullYear(x.getUTCFullYear() + years);
+  return x;
+}
+function __setDiff(aSet, bSet){
+  const out = new Set();
+  for(const v of aSet){ if(!bSet.has(v)) out.add(v); }
+  return out;
+}
+function getDelistedLabelsByMode(mode){
+  if(mode === "month") return { curr: "當月下架", prev: "前月下架" };
+  if(mode === "year")  return { curr: "當年下架", prev: "前年下架" };
+  // week/day/custom => 週別口徑
+  return { curr: "當週下架", prev: "前週下架" };
+}
+function getSelectionStartEndUTC(){
+  const mode = state.rangeMode;
+  const dr = getActiveDayRange();
+
+  if(mode === "year"){
+    const y = Number(state.year);
+    return { start: new Date(Date.UTC(y,0,1)), end: new Date(Date.UTC(y,11,31)) };
+  }
+  if(mode === "month"){
+    const m = Number(state.month);
+    const wk = getMonthWeekWindowsUTC(state.year, m); // 使用「月別週視圖」完整視窗（可跨月）
+    return { start: wk.start, end: wk.end };
+  }
+  if(mode === "week"){
+    if(!state.weekStartStr) return { start: null, end: null };
+    const ws = new Date(state.weekStartStr + "T00:00:00Z");
+    return { start: ws, end: addDaysUTC(ws, 6) };
+  }
+  // day（含指定範圍）
+  if(dr){
+    return { start: dr.start, end: dr.end };
+  }
+  if(state.dayStr){
+    const d = new Date(state.dayStr + "T00:00:00Z");
+    return { start: d, end: d };
+  }
+  return { start: null, end: null };
+}
+function getPrevPeriodsUTC(mode, curStart, curEnd){
+  if(!(curStart instanceof Date) || isNaN(curStart) || !(curEnd instanceof Date) || isNaN(curEnd)) {
+    return { prevStart:null, prevEnd:null, prev2Start:null, prev2End:null };
+  }
+  if(mode === "year"){
+    return {
+      prevStart: __shiftUTCDateByYears(curStart, -1),
+      prevEnd:   __shiftUTCDateByYears(curEnd,   -1),
+      prev2Start: __shiftUTCDateByYears(curStart, -2),
+      prev2End:   __shiftUTCDateByYears(curEnd,   -2),
+    };
+  }
+  if(mode === "month"){
+    return {
+      prevStart: __shiftUTCDateByMonths(curStart, -1),
+      prevEnd:   __shiftUTCDateByMonths(curEnd,   -1),
+      prev2Start: __shiftUTCDateByMonths(curStart, -2),
+      prev2End:   __shiftUTCDateByMonths(curEnd,   -2),
+    };
+  }
+  // week/day/custom：以 7 天為一期回推
+  return {
+    prevStart: __shiftUTCDateByDays(curStart, -7),
+    prevEnd:   __shiftUTCDateByDays(curEnd,   -7),
+    prev2Start: __shiftUTCDateByDays(curStart, -14),
+    prev2End:   __shiftUTCDateByDays(curEnd,   -14),
+  };
+}
+function buildCatProdMapForDateRange(temp, startUTC, endUTC){
+  const out = new Map(); // cat -> Set(prod)
+  if(!(startUTC instanceof Date) || isNaN(startUTC) || !(endUTC instanceof Date) || isNaN(endUTC)) return out;
+
+  const s = Date.UTC(startUTC.getUTCFullYear(), startUTC.getUTCMonth(), startUTC.getUTCDate());
+  const e = Date.UTC(endUTC.getUTCFullYear(), endUTC.getUTCMonth(), endUTC.getUTCDate());
+
+  for(const rec of state.records.values()){
+    if(!rec || rec.temp !== temp) continue;
+    const dObj = dateKeyToDateObj(rec.mmdd);
+    if(!dObj) continue;
+    const t = Date.UTC(dObj.getUTCFullYear(), dObj.getUTCMonth(), dObj.getUTCDate());
+    if(t < s || t > e) continue;
+
+    const cat = cleanText(rec.category || "");
+    const catKey = cleanKey(cat);
+    if(!catKey || catKey === "0") continue;
+
+    const prod = cleanText(rec.product || "");
+    if(!prod) continue;
+    if(cleanKey(prod) === cleanKey("平均")) continue;
+
+    if(!out.has(cat)) out.set(cat, new Set());
+    out.get(cat).add(prod);
+  }
+  return out;
+}
+function calcDelistedByCategory(temp){
+  const mode = state.rangeMode;
+  const { start: curStart, end: curEnd } = getSelectionStartEndUTC();
+  const { prevStart, prevEnd, prev2Start, prev2End } = getPrevPeriodsUTC(mode, curStart, curEnd);
+
+  const curr = buildCatProdMapForDateRange(temp, curStart, curEnd);
+  const prev = buildCatProdMapForDateRange(temp, prevStart, prevEnd);
+  const prev2 = buildCatProdMapForDateRange(temp, prev2Start, prev2End);
+
+  const cats = new Set([...curr.keys(), ...prev.keys(), ...prev2.keys()]);
+  const delCurr = new Map();
+  const delPrev = new Map();
+
+  for(const cat of cats){
+    const currSet = curr.get(cat) || new Set();
+    const prevSet = prev.get(cat) || new Set();
+    const prev2Set = prev2.get(cat) || new Set();
+    delCurr.set(cat, __setDiff(prevSet, currSet));   // 當期下架
+    delPrev.set(cat, __setDiff(prev2Set, prevSet));  // 前期下架
+  }
+  return { delCurr, delPrev, labels: getDelistedLabelsByMode(mode) };
+}
+
 function refreshActiveCatCounts(){
   const wrap = $("activeCatCards");
   const meta = $("activeCatMeta");
@@ -2537,6 +2677,8 @@ const map = new Map(); // cat -> Set(prod)
     if(!map.has(cat)) map.set(cat, new Set());
     map.get(cat).add(prod);
   }
+
+  const __delisted = calcDelistedByCategory(temp);
 
   wrap.innerHTML = "";
   if(meta) meta.textContent = "";
@@ -2580,14 +2722,35 @@ const map = new Map(); // cat -> Set(prod)
     const __newCnt = countNewProductsByRange(map.get(x.cat), __badge.curStart, __badge.curEnd);
     const __prevNewCnt = __badge.showPrev ? countNewProductsByRange(map.get(x.cat), __badge.prevStart, __badge.prevEnd) : 0;
 
-    const __badgeHtml = __badge.showPrev
+    const __delCurrCnt = (__delisted.delCurr.get(x.cat) ? __delisted.delCurr.get(x.cat).size : 0);
+    const __delPrevCnt = (__delisted.delPrev.get(x.cat) ? __delisted.delPrev.get(x.cat).size : 0);
+
+    const __newRow = __badge.showPrev
       ? `
-        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__badge.labelCur} <span class="text-slate-900">${__newCnt}</span></div>
-        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__badge.labelPrev} <span class="text-slate-900">${__prevNewCnt}</span></div>
+        <div class="flex gap-1 justify-end">
+          <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__badge.labelCur} <span class="text-slate-900">${__newCnt}</span></div>
+          <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__badge.labelPrev} <span class="text-slate-900">${__prevNewCnt}</span></div>
+        </div>
       `
       : `
-        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__badge.labelCur} <span class="text-slate-900">${__newCnt}</span></div>
+        <div class="flex gap-1 justify-end">
+          <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__badge.labelCur} <span class="text-slate-900">${__newCnt}</span></div>
+        </div>
       `;
+
+    const __delRow = `
+      <div class="flex gap-1 justify-end">
+        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__delisted.labels.curr} <span class="text-slate-900">${__delCurrCnt}</span></div>
+        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__delisted.labels.prev} <span class="text-slate-900">${__delPrevCnt}</span></div>
+      </div>
+    `;
+
+    const __badgeHtml = `
+      <div class="flex flex-col gap-1 items-end">
+        ${__newRow}
+        ${__delRow}
+      </div>
+    `;
 
     const __cost = avgCostOfProducts(map.get(x.cat));
     const __costCards = fmtCostCards(__cost, true);
@@ -2623,6 +2786,59 @@ const onPick = ()=> selectActiveGroup(x.cat);
     frag.appendChild(d);
   }
   wrap.appendChild(frag);
+
+  // 下架商品卡片（顯示各品群下架品名）
+  const delWrap = $("delistedProductsCard");
+  if(delWrap){
+    const catsSorted = arr.map(x=>x.cat);
+    const labelsDel = __delisted.labels;
+
+    const toChips = (setObj, limit=28)=>{
+      const arr = Array.from(setObj || []).sort((a,b)=>a.localeCompare(b,"zh-Hant"));
+      if(!arr.length) return `<span class="text-sm text-slate-500 font-bold">無</span>`;
+      const shown = arr.slice(0, limit);
+      const more = (arr.length > limit) ? `<span class="text-xs text-slate-500 font-bold">…另 ${arr.length-limit} 項</span>` : "";
+      return `
+        <div class="flex flex-wrap gap-2">
+          ${shown.map(x=>`<span class="text-xs px-2 py-1 rounded-full border border-slate-200 bg-white font-bold text-slate-700">${escapeHtml(x)}</span>`).join("")}
+          ${more}
+        </div>
+      `;
+    };
+
+    delWrap.innerHTML = `
+      <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div class="text-slate-900 font-extrabold">下架商品（依整體品群）</div>
+          <div class="text-xs text-slate-500 font-bold">判斷：上一期有出現、本期未出現（期間依目前範圍回推）</div>
+        </div>
+        <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+          ${catsSorted.map(cat=>{
+            const sCurr = __delisted.delCurr.get(cat) || new Set();
+            const sPrev = __delisted.delPrev.get(cat) || new Set();
+            return `
+              <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="font-extrabold text-slate-900">${escapeHtml(cat)}</div>
+                  <div class="text-xs text-slate-600 font-extrabold whitespace-nowrap">
+                    ${labelsDel.curr} ${sCurr.size} ・ ${labelsDel.prev} ${sPrev.size}
+                  </div>
+                </div>
+                <div class="mt-2">
+                  <div class="text-xs text-slate-600 font-extrabold mb-1">${labelsDel.curr}品名</div>
+                  ${toChips(sCurr)}
+                </div>
+                <div class="mt-3">
+                  <div class="text-xs text-slate-600 font-extrabold mb-1">${labelsDel.prev}品名</div>
+                  ${toChips(sPrev)}
+                </div>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    `;
+  }
 
   // If previously selected group is no longer available, hide panel
   if(state.activeGroupCat){
