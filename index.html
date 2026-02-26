@@ -4058,18 +4058,6 @@ const prodSetByDate = new Map();
       pointRadius: (labels.length > 35) ? 0 : 3,
       pointHoverRadius: 5
     });
-  }];
-  if(daily2){
-    dailyDatasets.push({
-      label: `${kpiLabel(kpi2)}（右軸｜${axisLabel}）`,
-      data: daily2,
-      yAxisID: "y1",
-      _kpi: kpi2,
-      spanGaps: true,
-      tension: 0.25,
-      pointRadius: (labels.length > 35) ? 0 : 3,
-      pointHoverRadius: 5
-    });
   }
 
   ensureDeltaArcs();
