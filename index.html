@@ -2719,8 +2719,6 @@ const map = new Map(); // cat -> Set(prod)
     const __newCnt = countNewProductsByRange(map.get(x.cat), __badge.curStart, __badge.curEnd);
     const __prevNewCnt = __badge.showPrev ? countNewProductsByRange(map.get(x.cat), __badge.prevStart, __badge.prevEnd) : 0;
 
-    const __delCurrCnt = (__delisted.delCurr.get(x.cat) ? __delisted.delCurr.get(x.cat).size : 0);
-
     const __pill = (label, val)=>`
       <div class="text-[11px] font-extrabold text-slate-700 bg-white border border-slate-200 rounded-xl px-2 py-1 text-center leading-[1.1] min-w-[72px]">
         <div class="whitespace-nowrap">${label}</div>
@@ -2741,16 +2739,9 @@ const map = new Map(); // cat -> Set(prod)
         </div>
       `;
 
-    const __delRow = `
-      <div class="flex gap-2 justify-end flex-wrap">
-        ${__pill(__delisted.labels.curr, __delCurrCnt)}
-      </div>
-    `;
-
     const __badgeHtml = `
       <div class="flex flex-col gap-2 items-end">
         ${__newRow}
-        ${__delRow}
       </div>
     `;
 
