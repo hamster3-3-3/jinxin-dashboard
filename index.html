@@ -210,13 +210,13 @@
   <div class="flex flex-col gap-1">
     <div class="text-lg sm:text-xl font-extrabold tracking-wide text-slate-900">KPI 趨勢圖</div>
     <div class="hint mt-1">
-      只有在你按下「顯示趨勢圖」後才會建立圖表；更改條件後不會自動重繪，請按「更新趨勢圖」。
+      趨勢圖會隨時間範圍與指標自動更新。
     </div>
   </div>
 
   <div id="chartDirtyHint" class="hint mt-3 hidden text-amber-600 font-bold">條件已變更，請按「更新趨勢圖」。</div>
 
-      <div id="chartArea" class="mt-5 hidden">
+      <div id="chartArea" class="mt-5">
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <!-- 平均 -->
           <div>
@@ -264,12 +264,7 @@
         </select>
     </div>
   </div>
-  <div class="flex gap-2 justify-end">
-    <button id="showChartBtn" class="btn primary">顯示趨勢圖</button>
-    <button id="updateChartBtn" class="btn" disabled>更新趨勢圖</button>
-  </div>
 </div>
-
     </div>
 
     <!-- Drilldown -->
@@ -3416,13 +3411,6 @@ function renderProductTrend(rows){
 
   function makeChart(canvasId, titleElId, s1, s2){
     const labels = (s1 && s1.labels) ? s1.labels : [];
-    const alignValues = (s)=>{
-      const map = new Map();
-      for(let i=0;i<(s.labels||[]).length;i++){
-        map.set(s.labels[i], (s.values||[])[i]);
-      }
-      return labels.map(l => map.has(l) ? map.get(l) : null);
-    };
 
     const values1 = (s1 && s1.values) ? (s1.values||[]).slice() : [];
     const values2 = (s2 && s2.values) ? alignValues(s2) : null;
@@ -3631,7 +3619,7 @@ function renderCharts(){
   if(sumTitleEl) sumTitleEl.textContent = `${axisLabel}（本期：${rangeStr(_sel.start, _sel.end)}）`;
 
   const pad2 = (n)=>String(n).padStart(2,"0");
-  const fmtMMDDSlash = (d)=>`${pad2(d.getMonth()+1)}/${pad2(d.getDate())}`;
+  function fmtMMDDSlash(d){ return `${pad2(d.getMonth()+1)}/${pad2(d.getDate())}`; }
 
   const getWeekStart = (d)=>{
     const x = new Date(d);
@@ -4911,13 +4899,6 @@ function renderGroupTrend(catName){
     for(let i=0;i<(s.labels||[]).length;i++) map.set(s.labels[i], (s.values||[])[i]);
     return baseLabels.map(l => map.has(l) ? map.get(l) : null);
   };
-  const alignValues = (s)=>{
-    const map = new Map();
-    for(let i=0;i<(s.labels||[]).length;i++){
-      map.set(s.labels[i], (s.values||[])[i]);
-    }
-    return labels.map(l => map.has(l) ? map.get(l) : null);
-  };
 
   const prevValues1 = sPrev1 ? (sPrev1.values||[]).slice() : null;
   const prevValues2 = sPrev2 ? alignValuesTo(labelsPrev, sPrev2) : null;
@@ -5423,8 +5404,13 @@ function setupProdSearch(){
 function markChartsDirty(){
   if(!state.chartsVisible) return;
   state.chartsDirty = true;
-  $("chartDirtyHint").classList.remove("hidden");
-  $("updateChartBtn").disabled = false;
+  const hint = $("chartDirtyHint");
+  if(hint) hint.classList.add("hidden");
+  // 自動更新（做一點 debounce，避免連續操作造成重繪過多）
+  clearTimeout(state._chartAutoTimer);
+  state._chartAutoTimer = setTimeout(()=>{
+    try{ renderCharts(); }catch(e){}
+  }, 80);
 }
 
 /* =========================
@@ -6288,18 +6274,11 @@ $("chartKpiSelect2").addEventListener("change", ()=>{
 });
 
 
-$("showChartBtn").addEventListener("click", ()=>{
-  state.chartsVisible = true;
-  $("chartArea").classList.remove("hidden");
-  $("updateChartBtn").disabled = false;
-  $("showChartBtn").disabled = true;
-  renderCharts();
-});
-
-$("updateChartBtn").addEventListener("click", ()=>{
-  if(!state.chartsVisible) return;
-  renderCharts();
-});
+// 趨勢圖：預設直接顯示並自動更新（不需要手動按鈕）
+state.chartsVisible = true;
+const _chartArea = $("chartArea");
+if(_chartArea) _chartArea.classList.remove("hidden");
+renderCharts();
 
 const _fileInput = $("fileInput");
 const _importBtn = $("importBtn");
@@ -6336,8 +6315,8 @@ state.records.clear();
   state.chartsVisible = false;
   state.chartsDirty = true;
   $("chartArea").classList.add("hidden");
-  $("showChartBtn").disabled = false;
-  $("updateChartBtn").disabled = true;
+  document.getElementById("showChartBtn").disabled = false;
+  const _ub=document.getElementById("updateChartBtn"); if(_ub) _ub.disabled = true;
   $("chartDirtyHint").classList.add("hidden");
 
   setDataChip("warn", "尚未載入資料");
