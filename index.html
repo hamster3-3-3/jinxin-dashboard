@@ -332,13 +332,13 @@
           <div id="groupChartTitle" class="text-slate-600 text-sm font-bold mb-2"></div>
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div>
-              <div class="text-slate-600 text-sm font-bold mb-2">平均</div>
+              <div class="text-slate-600 text-sm font-bold mb-2">前一期間</div>
               <div class="relative w-full" style="height: 360px;">
                 <canvas id="groupTrendCanvas"></canvas>
               </div>
             </div>
             <div>
-              <div class="text-slate-600 text-sm font-bold mb-2">加總</div>
+              <div class="text-slate-600 text-sm font-bold mb-2">本期</div>
               <div class="relative w-full" style="height: 360px;">
                 <canvas id="groupTrendCanvasSum"></canvas>
               </div>
@@ -3518,11 +3518,35 @@ function renderCharts(){
   // 以「目前視圖 +（可選）指定範圍」篩出的每日資料作為趨勢基礎
   const dailyList = summariesInRange().slice().sort((a,b)=>a.dateObj-b.dateObj);
 
+  // 前一期間（週：前週、月：前月、年：前年）— 用於左圖對照
+  const tempForPrev = state.temp;
+  const _sel = (typeof getSelectionStartEndUTC === "function") ? getSelectionStartEndUTC() : {start:null,end:null};
+  const _prev = (typeof getPrevPeriodsUTC === "function") ? getPrevPeriodsUTC(state.rangeMode, _sel.start, _sel.end) : {prevStart:null, prevEnd:null};
+  const prevStart = _prev.prevStart, prevEnd = _prev.prevEnd;
+
+  const buildSummariesForStartEnd = (startUTC, endUTC)=>{
+    if(!(startUTC instanceof Date) || isNaN(startUTC) || !(endUTC instanceof Date) || isNaN(endUTC)) return [];
+    const allDates = getAllDatesForTemp(tempForPrev);
+    if(!allDates || !allDates.length) return [];
+    // month mode: 使用同口徑的跨月週視圖，因此 start/end 已經是視窗；仍確保該月有資料避免誤抓
+    if(state.rangeMode === "month"){
+      const m = startUTC.getUTCMonth()+1;
+      const hasInMonth = allDates.some(o => (o.dateObj.getUTCMonth()+1) === m);
+      if(!hasInMonth) return [];
+    }
+    return allDates
+      .filter(o => o.dateObj >= startUTC && o.dateObj <= endUTC)
+      .map(o => ({...o, summary: getSummaryForDay(tempForPrev, o.mmdd)}))
+      .filter(x => x.summary);
+  };
+
+  const prevDailyList = buildSummariesForStartEnd(prevStart, prevEnd).slice().sort((a,b)=>a.dateObj-b.dateObj);
+
   if(!dailyList.length){
     destroyCharts();
-    $("dailyChartTitle").textContent = "日別（日平均）";
+    $("dailyChartTitle").textContent = "前一期間（對照）";
     const _sumTitleEl0 = document.getElementById("dailyChartSumTitle");
-    if(_sumTitleEl0) _sumTitleEl0.textContent = "日別（加總）";
+    if(_sumTitleEl0) _sumTitleEl0.textContent = "本期（對照）";
     const _cumTitleEl2 = document.getElementById("cumChartTitle");
     if(_cumTitleEl2) _cumTitleEl2.textContent = "累計";
     state.chartsDirty = false;
@@ -3533,9 +3557,16 @@ function renderCharts(){
   // 年別：X=月；月別：X=週；其餘：X=日
   const groupMode = (state.rangeMode === "year") ? "month" : ((state.rangeMode === "month") ? "week" : "day");
   const axisLabel = (groupMode === "month") ? "月別" : ((groupMode === "week") ? "週別" : "日別");
-  $("dailyChartTitle").textContent = `${axisLabel}（日平均）`;
+  // 左：前一期間；右：本期（兩圖 X 軸一致）
+  const rangeStr = (s,e)=>{
+    if(!(s instanceof Date) || isNaN(s) || !(e instanceof Date) || isNaN(e)) return "";
+    const ss = dateObjToStr(s);
+    const ee = dateObjToStr(e);
+    return `${ss}~${ee}`;
+  };
+  $("dailyChartTitle").textContent = `${axisLabel}（前一期間：${rangeStr(prevStart, prevEnd)}）`;
   const sumTitleEl = document.getElementById("dailyChartSumTitle");
-  if(sumTitleEl) sumTitleEl.textContent = `${axisLabel}（加總）`;
+  if(sumTitleEl) sumTitleEl.textContent = `${axisLabel}（本期：${rangeStr(_sel.start, _sel.end)}）`;
 
   const pad2 = (n)=>String(n).padStart(2,"0");
   const fmtMMDDSlash = (d)=>`${pad2(d.getMonth()+1)}/${pad2(d.getDate())}`;
@@ -3674,7 +3705,65 @@ function renderCharts(){
   };
 
   // 預先建索引：dateKey(mmdd) -> Set(product)（供累計品名數）
-  const prodSetByDate = new Map();
+  
+  // prevBuckets：前一期間的 bucket（用於左圖），但 X 軸採用當期 buckets 的 labels 長度對齊
+  const prevBuckets = (function(){
+    const list = prevDailyList || [];
+    const _buckets = [];
+    const _bucketByKey = new Map();
+    const push = (key, label, item, meta={})=>{
+      let b = _bucketByKey.get(key);
+      if(!b){
+        b = { key, label, items: [], ...meta };
+        _bucketByKey.set(key, b);
+        _buckets.push(b);
+      }
+      b.items.push(item);
+    };
+    const getWeekStart = (d)=>{
+      const x = new Date(d.getTime());
+      const diff = (x.getDay() - 2 + 7) % 7;
+      x.setDate(x.getDate() - diff);
+      return x;
+    };
+    for(const o of list){
+      const d = o.dateObj;
+      if(!d) continue;
+      if(groupMode === "day"){
+        const key = String(o.mmdd || "");
+        const label = o.dateStr ? o.dateStr.slice(5).replace("-","/") : fmtMMDDSlash(d);
+        push(key, label, o);
+        continue;
+      }
+      if(groupMode === "week"){
+        const ws = getWeekStart(d);
+        const we = new Date(ws); we.setDate(ws.getDate()+6);
+        const key = ws.toISOString().slice(0,10);
+        const label = `${fmtMMDDSlash(ws)}~${fmtMMDDSlash(we)}`;
+        push(key, label, o, {weekStart: ws});
+        continue;
+      }
+      const y = d.getFullYear();
+      const m = d.getMonth()+1;
+      const key = `${y}-${pad2(m)}`;
+      const label = `${m}月`;
+      push(key, label, o, {month: m});
+    }
+    if(groupMode === "day"){
+      _buckets.sort((a,b)=>{
+        const ad = dateKeyToDateObj(a.key);
+        const bd = dateKeyToDateObj(b.key);
+        return (ad && bd) ? (ad - bd) : String(a.key).localeCompare(String(b.key));
+      });
+    }else if(groupMode === "week"){
+      _buckets.sort((a,b)=>(a.weekStart - b.weekStart));
+    }else{
+      _buckets.sort((a,b)=>(a.month - b.month));
+    }
+    return _buckets;
+  })();
+
+const prodSetByDate = new Map();
   if(kpi1 === "itemCount" || kpi2 === "itemCount"){
     const temp = state.temp;
     for(const rec of state.records.values()){
@@ -3815,6 +3904,64 @@ function renderCharts(){
   const daily2 = kpi2 ? getDailySeries(kpi2) : null;
   const sum1 = getSumSeries(kpi1);
   const sum2 = kpi2 ? getSumSeries(kpi2) : null;
+
+  // 前一期間 series（左圖）：依同規則（加總/加權平均）計算，但以 prevBuckets 為資料來源
+  const __sumSeriesOn = (kpi, _buckets)=>{
+    if(kpi === "avgPrice"){
+      return _buckets.map(b=>{
+        let sumRev = 0, sumQty = 0;
+        let any = false;
+        for(const o of b.items){
+          const s = (o && o.summary) ? o.summary : {};
+          const q = toNumber(s.totalQty);
+          const r = toNumber(s.revenue);
+          if(Number.isFinite(r)){ sumRev += r; any = true; }
+          if(Number.isFinite(q) && q > 0){ sumQty += q; any = true; }
+        }
+        return (any && sumQty > 0) ? (sumRev / sumQty) : null;
+      });
+    }
+    if(kpi === "efficiency"){
+      return _buckets.map(b=>{
+        let wSum = 0, w = 0;
+        let any = false;
+        for(const o of b.items){
+          const s = (o && o.summary) ? o.summary : {};
+          const e = toNumber(s.efficiency);
+          if(!Number.isFinite(e)) continue;
+          let wt = toNumber(s.attendance);
+          if(!Number.isFinite(wt) || wt <= 0) wt = 1;
+          wSum += e * wt;
+          w += wt;
+          any = true;
+        }
+        return (any && w > 0) ? (wSum / w) : null;
+      });
+    }
+    if(kpi === "itemCount"){
+      return _buckets.map(b=>{
+        const set = new Set();
+        for(const o of b.items){
+          const dk = o.mmdd;
+          const s = prodSetByDate.get(dk);
+          if(s){ for(const p of s) set.add(p); }
+        }
+        return set.size;
+      });
+    }
+    return _buckets.map(b=>bucketSum(kpi, b));
+  };
+
+  const prevSum1 = __sumSeriesOn(kpi1, prevBuckets);
+  const prevSum2 = kpi2 ? __sumSeriesOn(kpi2, prevBuckets) : null;
+
+  const alignByIndex = (arr, len)=>{
+    const out = new Array(len).fill(null);
+    for(let i=0;i<len;i++){
+      out[i] = (arr && i < arr.length) ? arr[i] : null;
+    }
+    return out;
+  };
   const cum1   = getCumulativeSeries(kpi1);
   const cum2   = kpi2 ? getCumulativeSeries(kpi2) : null;
 
@@ -3891,14 +4038,26 @@ function renderCharts(){
   const cctx = cumCanvasEl ? cumCanvasEl.getContext("2d") : null;
 
   const dailyDatasets = [{
-    label: `${kpiLabel(kpi1)}（${axisLabel}）`,
-    data: daily1,
+    label: `${kpiLabel(kpi1)}（前一期間｜${axisLabel}）`,
+    data: alignByIndex(prevSum1, labels.length),
     yAxisID: "y",
     _kpi: kpi1,
     spanGaps: true,
     tension: 0.25,
     pointRadius: (labels.length > 35) ? 0 : 3,
     pointHoverRadius: 5
+  }];
+  if(prevSum2){
+    dailyDatasets.push({
+      label: `${kpiLabel(kpi2)}（前一期間｜右軸｜${axisLabel}）`,
+      data: alignByIndex(prevSum2, labels.length),
+      yAxisID: "y1",
+      _kpi: kpi2,
+      spanGaps: true,
+      tension: 0.25,
+      pointRadius: (labels.length > 35) ? 0 : 3,
+      pointHoverRadius: 5
+    });
   }];
   if(daily2){
     dailyDatasets.push({
@@ -3922,7 +4081,7 @@ function renderCharts(){
 
   if(dctxSum){
     const sumDatasets = [{
-      label: `${kpiLabel(kpi1)}（${axisLabel}加總）`,
+      label: `${kpiLabel(kpi1)}（本期｜${axisLabel}）`,
       data: sum1,
       yAxisID: "y",
       _kpi: kpi1,
@@ -3933,7 +4092,7 @@ function renderCharts(){
     }];
     if(sum2){
       sumDatasets.push({
-        label: `${kpiLabel(kpi2)}（右軸｜${axisLabel}加總）`,
+        label: `${kpiLabel(kpi2)}（本期｜右軸｜${axisLabel}）`,
         data: sum2,
         yAxisID: "y1",
         _kpi: kpi2,
@@ -4477,7 +4636,7 @@ function destroyGroupChart(){
   if(groupChartSum){ groupChartSum.destroy(); groupChartSum = null; }
 }
 
-function buildGroupRowsForCat(catName){
+function buildGroupRowsForCat(catName, mmddSetOverride=null){
   const temp = state.temp;
   const all = getAllDatesForTemp(temp);
 
@@ -4493,6 +4652,10 @@ function buildGroupRowsForCat(catName){
     }
   }else{
     mmddSet = getDateSetInSelection();
+  }
+
+  if(mmddSetOverride && mmddSetOverride instanceof Set){
+    mmddSet = mmddSetOverride;
   }
 
 const catKey = cleanKey(cleanText(catName || ""));
@@ -4670,7 +4833,33 @@ function buildGroupSeries(rows, metric, viewMode="avg"){
 function renderGroupTrend(catName){
   if(!$("groupTrendCanvas")) return;
 
-  const rows = buildGroupRowsForCat(catName);
+  // 本期/前一期間的日期集合（用於左右圖）
+  const _sel2 = (typeof getSelectionStartEndUTC === "function") ? getSelectionStartEndUTC() : {start:null,end:null};
+  const _prev2 = (typeof getPrevPeriodsUTC === "function") ? getPrevPeriodsUTC(state.rangeMode, _sel2.start, _sel2.end) : {prevStart:null, prevEnd:null};
+  const prevStart2 = _prev2.prevStart, prevEnd2 = _prev2.prevEnd;
+
+  const buildMmddSetByStartEnd = (startUTC, endUTC)=>{
+    if(!(startUTC instanceof Date) || isNaN(startUTC) || !(endUTC instanceof Date) || isNaN(endUTC)) return new Set();
+    const all = getAllDatesForTemp(state.temp);
+    const set = new Set();
+    if(!all || !all.length) return set;
+    // month mode：確保該月有資料
+    if(state.rangeMode === "month"){
+      const m = startUTC.getUTCMonth()+1;
+      const hasInMonth = all.some(o => (o.dateObj.getUTCMonth()+1) === m);
+      if(!hasInMonth) return set;
+    }
+    for(const o of all){
+      if(o.dateObj >= startUTC && o.dateObj <= endUTC) set.add(o.mmdd);
+    }
+    return set;
+  };
+
+  const mmddSetCur = buildMmddSetByStartEnd(_sel2.start, _sel2.end);
+  const mmddSetPrev = buildMmddSetByStartEnd(prevStart2, prevEnd2);
+
+  const rows = buildGroupRowsForCat(catName, mmddSetCur);
+  const rowsPrev = buildGroupRowsForCat(catName, mmddSetPrev);
 
   const sel1 = $("groupChartMetric");
   const metric1 = sel1 ? sel1.value : "qty";
@@ -4682,12 +4871,12 @@ function renderGroupTrend(catName){
     if(sel2) sel2.value = "";
   }
 
-  const sAvg1 = buildGroupSeries(rows, metric1, "avg");
-  const sAvg2 = metric2 ? buildGroupSeries(rows, metric2, "avg") : null;
-  const sSum1 = buildGroupSeries(rows, metric1, "sum");
-  const sSum2 = metric2 ? buildGroupSeries(rows, metric2, "sum") : null;
+  const sCur1 = buildGroupSeries(rows, metric1, "sum");
+  const sCur2 = metric2 ? buildGroupSeries(rows, metric2, "sum") : null;
+  const sPrev1 = buildGroupSeries(rowsPrev, metric1, "sum");
+  const sPrev2 = metric2 ? buildGroupSeries(rowsPrev, metric2, "sum") : null;
 
-  const labels = sAvg1.labels || [];
+  const labels = (sCur1.labels || []);
   const alignValues = (s)=>{
     const map = new Map();
     for(let i=0;i<(s.labels||[]).length;i++){
@@ -4696,10 +4885,10 @@ function renderGroupTrend(catName){
     return labels.map(l => map.has(l) ? map.get(l) : null);
   };
 
-  const avgValues1 = (sAvg1.values||[]).slice();
-  const avgValues2 = sAvg2 ? alignValues(sAvg2) : null;
-  const sumValues1 = sSum1 ? alignValues(sSum1) : null;
-  const sumValues2 = sSum2 ? alignValues(sSum2) : null;
+  const prevValues1 = sPrev1 ? alignValues(sPrev1) : null;
+  const prevValues2 = sPrev2 ? alignValues(sPrev2) : null;
+  const curValues1 = sCur1 ? alignValues(sCur1) : null;
+  const curValues2 = sCur2 ? alignValues(sCur2) : null;
 
   const metricName = (k)=>{
     if(k==="qty") return "生產量";
@@ -4710,7 +4899,7 @@ function renderGroupTrend(catName){
     return k;
   };
 
-  $("groupChartTitle").textContent = `${catName || "品群"}｜${sAvg1.title || "趨勢"}`;
+  $("groupChartTitle").textContent = `${catName || "品群"}｜${sCur1.title || "趨勢"}`;
   const hintEl = $("groupChartHint");
   if(hintEl){
     hintEl.textContent = `彙總規則：符合該品群的日別明細加總（產能/時以「總產量 ÷ 總稼動(小時)」推算）。`;
