@@ -4960,7 +4960,7 @@ function renderGroupTrend(catName){
 
   const datasetsAvg = [{
     label: metricName(metric1),
-    data: avgValues1,
+    data: prevValues1,
     tension: 0.25,
     pointRadius: 3,
     pointHoverRadius: 5,
@@ -4969,10 +4969,10 @@ function renderGroupTrend(catName){
     _metricKey: metric1
   }];
 
-  if(metric2 && avgValues2){
+  if(metric2 && prevValues2){
     datasetsAvg.push({
       label: metricName(metric2),
-      data: avgValues2,
+      data: prevValues2,
       tension: 0.25,
       pointRadius: 3,
       pointHoverRadius: 5,
@@ -4984,7 +4984,7 @@ function renderGroupTrend(catName){
 
   const datasetsSum = [{
     label: metricName(metric1),
-    data: sumValues1,
+    data: curValues1,
     tension: 0.25,
     pointRadius: 3,
     pointHoverRadius: 5,
@@ -4992,10 +4992,10 @@ function renderGroupTrend(catName){
     yAxisID: "y",
     _metricKey: metric1
   }];
-  if(metric2 && sumValues2){
+  if(metric2 && curValues2){
     datasetsSum.push({
       label: metricName(metric2),
-      data: sumValues2,
+      data: curValues2,
       tension: 0.25,
       pointRadius: 3,
       pointHoverRadius: 5,
