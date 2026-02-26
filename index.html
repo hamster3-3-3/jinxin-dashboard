@@ -3368,7 +3368,7 @@ const orderedStarts = (mode==='month')
   return {title, labels, values};
 }
 
-function renderProductTrend(rows){
+function renderProductTrend(rowsCur, rowsPrev){
   if(!$("prodTrendCanvas")) return;
 
   const sel1 = $("prodChartMetric");
@@ -3381,13 +3381,13 @@ function renderProductTrend(rows){
     if(sel2) sel2.value = "";
   }
 
-  // 平均（左）
-  const s1Avg = buildProductSeriesMode(rows, metric1, "avg");
-  const s2Avg = metric2 ? buildProductSeriesMode(rows, metric2, "avg") : null;
+  // 前一期間（左）
+  const s1Prev = buildProductSeriesMode(rowsPrev||[], metric1, "sum");
+  const s2Prev = metric2 ? buildProductSeriesMode(rowsPrev||[], metric2, "sum") : null;
 
-  // 加總（右）－對「qty/revenue/people/runMin」用加總，其餘維持平均（避免比率指標失真）
-  const s1Sum = buildProductSeriesMode(rows, metric1, "sum");
-  const s2Sum = metric2 ? buildProductSeriesMode(rows, metric2, "sum") : null;
+  // 本期（右）
+  const s1Cur = buildProductSeriesMode(rowsCur||[], metric1, "sum");
+  const s2Cur = metric2 ? buildProductSeriesMode(rowsCur||[], metric2, "sum") : null;
 
   destroyProdChart();
 
@@ -3409,7 +3409,28 @@ function renderProductTrend(rows){
   const label1 = sel1 ? sel1.selectedOptions[0].textContent : "指標1";
   const label2 = (metric2 && sel2) ? sel2.selectedOptions[0].textContent : "";
 
-  function makeChart(canvasId, titleElId, s1, s2){
+  
+  // 統一左右兩張圖的 Y 軸刻度範圍（依前期/本期一起計算）
+  const __calcMinMaxP = (arrs)=>{
+    let mn = Infinity, mx = -Infinity;
+    for(const arr of (arrs||[])){
+      if(!arr) continue;
+      for(const v of arr){
+        const n = Number(v);
+        if(!Number.isFinite(n)) continue;
+        if(n < mn) mn = n;
+        if(n > mx) mx = n;
+      }
+    }
+    if(!Number.isFinite(mn) || !Number.isFinite(mx)) return null;
+    if(mn === mx) return { min: mn - 1, max: mx + 1 };
+    const pad = (mx - mn) * 0.06;
+    return { min: mn - pad, max: mx + pad };
+  };
+  const __yP = __calcMinMaxP([ (s1Prev&&s1Prev.values)||[], (s1Cur&&s1Cur.values)||[] ]);
+  const __y1P = metric2 ? __calcMinMaxP([ (s2Prev&&s2Prev.values)||[], (s2Cur&&s2Cur.values)||[] ]) : null;
+
+function makeChart(canvasId, titleElId, s1, s2){
     const labels = (s1 && s1.labels) ? s1.labels : [];
 
     const values1 = (s1 && s1.values) ? (s1.values||[]).slice() : [];
@@ -3473,6 +3494,7 @@ function renderProductTrend(rows){
             y: {
               position: "left",
               beginAtZero: false,
+              ...(__yP ? { min: __yP.min, max: __yP.max } : {}),
               ticks: { callback: (v)=>formatTick(metric1, v) }
             }
           };
@@ -3481,6 +3503,7 @@ function renderProductTrend(rows){
               position: "right",
               beginAtZero: false,
               grid: { drawOnChartArea: false },
+              ...(__y1P ? { min: __y1P.min, max: __y1P.max } : {}),
               ticks: { callback: (v)=>formatTick(metric2, v) }
             };
           }
@@ -3490,11 +3513,11 @@ function renderProductTrend(rows){
     });
   }
 
-  // 左：平均
-  prodChart = makeChart("prodTrendCanvas", "prodChartTitle", s1Avg, s2Avg);
-  // 右：加總
+  // 左：前一期間
+  prodChart = makeChart("prodTrendCanvas", "prodChartTitle", s1Prev, s2Prev);
+  // 右：本期
   if($("prodTrendCanvasSum")){
-    prodSumChart = makeChart("prodTrendCanvasSum", "prodChartSumTitle", s1Sum, s2Sum);
+    prodSumChart = makeChart("prodTrendCanvasSum", "prodChartSumTitle", s1Cur, s2Cur);
   }
 }
 
@@ -4317,7 +4340,11 @@ function selectActiveGroup(catName){
   }
   // 同步更新品群趨勢圖
   refreshActiveGroupTrend();
+  // 自動跳轉到「品群趨勢圖」區塊
+  const gt = document.getElementById("groupTrendPanel");
+  if(gt) gt.scrollIntoView({behavior:"smooth", block:"start"});
 }
+
 
 function jumpToGroupProduct(prodName){
   if(!state.activeGroupCat || !prodName) return;
@@ -5129,6 +5156,20 @@ function refreshProductDetails(){
   setProdCostDisplay(_dispProd);
 
   const mmddSet = getDateSetInSelection();
+
+  // 前一期間日期集合（左圖）：週→前週、月→前月、年→前年（依目前範圍回推）
+  const _selP = (typeof getSelectionStartEndUTC === "function") ? getSelectionStartEndUTC() : {start:null,end:null};
+  const _prevP = (typeof getPrevPeriodsUTC === "function") ? getPrevPeriodsUTC(state.rangeMode, _selP.start, _selP.end) : {prevStart:null, prevEnd:null};
+  const prevMmddSet = (function(){
+    const set = new Set();
+    if(!(_prevP.prevStart instanceof Date) || isNaN(_prevP.prevStart) || !(_prevP.prevEnd instanceof Date) || isNaN(_prevP.prevEnd)) return set;
+    const all = getAllDatesForTemp(state.temp);
+    for(const o of all){
+      if(o.dateObj >= _prevP.prevStart && o.dateObj <= _prevP.prevEnd) set.add(o.mmdd);
+    }
+    return set;
+  })();
+
   const rows = [];
   for(const rec of state.records.values()){
     if(rec.temp !== state.temp) continue;
@@ -5194,7 +5235,23 @@ $("pChange").textContent = changeCnt ? fmtDec(changeSum/changeCnt, 1) : "—";
   }
 
   $("prodDetails").classList.remove("hidden");
-  renderProductTrend(rows);
+  
+  // 前一期間 rows（用於左圖）
+  const prevRows = [];
+  for(const rec of state.records.values()){
+    if(rec.temp !== state.temp) continue;
+    if(!prevMmddSet.has(rec.mmdd)) continue;
+    if(cleanKey(rec.line) !== lineKey) continue;
+    if(cleanKey(rec.category || "") !== catKey) continue;
+    if(cleanKey(rec.product) !== prodKey) continue;
+
+    const d2 = dateKeyToDateObj(rec.mmdd);
+    const ds2 = d2 ? dateObjToStr(d2) : rec.mmdd;
+    prevRows.push({dateStr: ds2, rec});
+  }
+  prevRows.sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
+
+renderProductTrend(rows, prevRows);
 }
 
 /* =========================
