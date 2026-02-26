@@ -2526,10 +2526,10 @@ function __setDiff(aSet, bSet){
   return out;
 }
 function getDelistedLabelsByMode(mode){
-  if(mode === "month") return { curr: "當月下架", prev: "前月下架" };
-  if(mode === "year")  return { curr: "當年下架", prev: "前年下架" };
-  // week/day/custom => 週別口徑
-  return { curr: "當週下架", prev: "前週下架" };
+  // 名稱調整：原「前週下架」改為「前週下架」（邏輯不變：上一期有、本期無）
+  if(mode === "month") return { curr: "前月下架" };
+  if(mode === "year")  return { curr: "前年下架" };
+  return { curr: "前週下架" };
 }
 function getSelectionStartEndUTC(){
   const mode = state.rangeMode;
@@ -2617,25 +2617,22 @@ function buildCatProdMapForDateRange(temp, startUTC, endUTC){
 function calcDelistedByCategory(temp){
   const mode = state.rangeMode;
   const { start: curStart, end: curEnd } = getSelectionStartEndUTC();
-  const { prevStart, prevEnd, prev2Start, prev2End } = getPrevPeriodsUTC(mode, curStart, curEnd);
+  const { prevStart, prevEnd } = getPrevPeriodsUTC(mode, curStart, curEnd);
 
   const curr = buildCatProdMapForDateRange(temp, curStart, curEnd);
   const prev = buildCatProdMapForDateRange(temp, prevStart, prevEnd);
-  const prev2 = buildCatProdMapForDateRange(temp, prev2Start, prev2End);
 
-  const cats = new Set([...curr.keys(), ...prev.keys(), ...prev2.keys()]);
-  const delCurr = new Map();
-  const delPrev = new Map();
+  const cats = new Set([...curr.keys(), ...prev.keys()]);
+  const delCurr = new Map(); // 這裡的「delCurr」= 原本的「前週下架」邏輯（上一期有、本期無）
 
   for(const cat of cats){
     const currSet = curr.get(cat) || new Set();
     const prevSet = prev.get(cat) || new Set();
-    const prev2Set = prev2.get(cat) || new Set();
-    delCurr.set(cat, __setDiff(prevSet, currSet));   // 當期下架
-    delPrev.set(cat, __setDiff(prev2Set, prevSet));  // 前期下架
+    delCurr.set(cat, __setDiff(prevSet, currSet)); // 前週下架（原邏輯不變）
   }
-  return { delCurr, delPrev, labels: getDelistedLabelsByMode(mode) };
+  return { delCurr, labels: getDelistedLabelsByMode(mode) };
 }
+
 
 function refreshActiveCatCounts(){
   const wrap = $("activeCatCards");
@@ -2723,30 +2720,35 @@ const map = new Map(); // cat -> Set(prod)
     const __prevNewCnt = __badge.showPrev ? countNewProductsByRange(map.get(x.cat), __badge.prevStart, __badge.prevEnd) : 0;
 
     const __delCurrCnt = (__delisted.delCurr.get(x.cat) ? __delisted.delCurr.get(x.cat).size : 0);
-    const __delPrevCnt = (__delisted.delPrev.get(x.cat) ? __delisted.delPrev.get(x.cat).size : 0);
+
+    const __pill = (label, val)=>`
+      <div class="text-[11px] font-extrabold text-slate-700 bg-white border border-slate-200 rounded-xl px-2 py-1 text-center leading-[1.1] min-w-[72px]">
+        <div class="whitespace-nowrap">${label}</div>
+        <div class="text-slate-900 text-[12px] font-black">${val}</div>
+      </div>
+    `;
 
     const __newRow = __badge.showPrev
       ? `
-        <div class="flex gap-1 justify-end">
-          <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__badge.labelCur} <span class="text-slate-900">${__newCnt}</span></div>
-          <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__badge.labelPrev} <span class="text-slate-900">${__prevNewCnt}</span></div>
+        <div class="flex gap-2 justify-end flex-wrap">
+          ${__pill(__badge.labelCur, __newCnt)}
+          ${__pill(__badge.labelPrev, __prevNewCnt)}
         </div>
       `
       : `
-        <div class="flex gap-1 justify-end">
-          <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__badge.labelCur} <span class="text-slate-900">${__newCnt}</span></div>
+        <div class="flex gap-2 justify-end flex-wrap">
+          ${__pill(__badge.labelCur, __newCnt)}
         </div>
       `;
 
     const __delRow = `
-      <div class="flex gap-1 justify-end">
-        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__delisted.labels.curr} <span class="text-slate-900">${__delCurrCnt}</span></div>
-        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__delisted.labels.prev} <span class="text-slate-900">${__delPrevCnt}</span></div>
+      <div class="flex gap-2 justify-end flex-wrap">
+        ${__pill(__delisted.labels.curr, __delCurrCnt)}
       </div>
     `;
 
     const __badgeHtml = `
-      <div class="flex flex-col gap-1 items-end">
+      <div class="flex flex-col gap-2 items-end">
         ${__newRow}
         ${__delRow}
       </div>
@@ -2815,22 +2817,17 @@ const onPick = ()=> selectActiveGroup(x.cat);
         <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
           ${catsSorted.map(cat=>{
             const sCurr = __delisted.delCurr.get(cat) || new Set();
-            const sPrev = __delisted.delPrev.get(cat) || new Set();
             return `
               <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                 <div class="flex items-start justify-between gap-3">
                   <div class="font-extrabold text-slate-900">${escapeHtml(cat)}</div>
                   <div class="text-xs text-slate-600 font-extrabold whitespace-nowrap">
-                    ${labelsDel.curr} ${sCurr.size} ・ ${labelsDel.prev} ${sPrev.size}
+                    ${labelsDel.curr} ${sCurr.size}
                   </div>
                 </div>
                 <div class="mt-2">
                   <div class="text-xs text-slate-600 font-extrabold mb-1">${labelsDel.curr}品名</div>
                   ${toChips(sCurr)}
-                </div>
-                <div class="mt-3">
-                  <div class="text-xs text-slate-600 font-extrabold mb-1">${labelsDel.prev}品名</div>
-                  ${toChips(sPrev)}
                 </div>
               </div>
             `;
