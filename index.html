@@ -3636,9 +3636,6 @@ function renderCharts(){
 
   const labels = buckets.map(b=>b.label);
 
-  const prevLabels = prevBuckets.map(b=>b.label);
-
-
   const dayValue = (kpi, o)=>{
     const s = (o && o.summary) ? o.summary : {};
     const q = toNumber(s.totalQty);
@@ -3765,6 +3762,7 @@ function renderCharts(){
     }
     return _buckets;
   })();
+  const prevLabels = prevBuckets.map(b=>b.label);
 
 const prodSetByDate = new Map();
   if(kpi1 === "itemCount" || kpi2 === "itemCount"){
