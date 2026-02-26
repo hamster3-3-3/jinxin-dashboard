@@ -3636,6 +3636,9 @@ function renderCharts(){
 
   const labels = buckets.map(b=>b.label);
 
+  const prevLabels = prevBuckets.map(b=>b.label);
+
+
   const dayValue = (kpi, o)=>{
     const s = (o && o.summary) ? o.summary : {};
     const q = toNumber(s.totalQty);
@@ -4017,6 +4020,11 @@ const prodSetByDate = new Map();
       y: {
         position: "left",
         beginAtZero: false,
+        // 兩張圖共用同一組 Y 軸範圍（若有設定）
+        ...(window.__kpiYScaleOverride && window.__kpiYScaleOverride.y ? {
+          min: window.__kpiYScaleOverride.y.min,
+          max: window.__kpiYScaleOverride.y.max
+        } : {}),
         ticks: { callback: (v)=>formatTick(leftKpi, v) }
       },
       ...(rightKpi ? {
@@ -4024,6 +4032,10 @@ const prodSetByDate = new Map();
           position: "right",
           beginAtZero: false,
           grid: { drawOnChartArea: false },
+          ...(window.__kpiYScaleOverride && window.__kpiYScaleOverride.y1 ? {
+            min: window.__kpiYScaleOverride.y1.min,
+            max: window.__kpiYScaleOverride.y1.max
+          } : {}),
           ticks: { callback: (v)=>formatTick(rightKpi, v) }
         }
       } : {})
@@ -4039,31 +4051,56 @@ const prodSetByDate = new Map();
 
   const dailyDatasets = [{
     label: `${kpiLabel(kpi1)}（前一期間｜${axisLabel}）`,
-    data: alignByIndex(prevSum1, labels.length),
+    data: prevSum1,
     yAxisID: "y",
     _kpi: kpi1,
     spanGaps: true,
     tension: 0.25,
-    pointRadius: (labels.length > 35) ? 0 : 3,
+    pointRadius: (prevLabels.length > 35) ? 0 : 3,
     pointHoverRadius: 5
   }];
   if(prevSum2){
     dailyDatasets.push({
       label: `${kpiLabel(kpi2)}（前一期間｜右軸｜${axisLabel}）`,
-      data: alignByIndex(prevSum2, labels.length),
+      data: prevSum2,
       yAxisID: "y1",
       _kpi: kpi2,
       spanGaps: true,
       tension: 0.25,
-      pointRadius: (labels.length > 35) ? 0 : 3,
+      pointRadius: (prevLabels.length > 35) ? 0 : 3,
       pointHoverRadius: 5
     });
   }
 
+
+  // 統一左右兩張圖的 Y 軸刻度範圍（依左/右資料一起計算）
+  const __calcMinMax = (arrs)=>{
+    let mn = Infinity, mx = -Infinity;
+    for(const arr of (arrs||[])){
+      if(!arr) continue;
+      for(const v of arr){
+        const n = Number(v);
+        if(!Number.isFinite(n)) continue;
+        if(n < mn) mn = n;
+        if(n > mx) mx = n;
+      }
+    }
+    if(!Number.isFinite(mn) || !Number.isFinite(mx)) return null;
+    if(mn === mx){
+      return { min: mn - 1, max: mx + 1 };
+    }
+    const pad = (mx - mn) * 0.06; // 留一點空間
+    return { min: mn - pad, max: mx + pad };
+  };
+  window.__kpiYScaleOverride = {
+    y: __calcMinMax([prevSum1, sum1]),
+    ...( (prevSum2 || sum2) ? { y1: __calcMinMax([prevSum2, sum2]) } : {} )
+  };
+
   ensureDeltaArcs();
   dailyChart = new Chart(dctx, {
     type: "line",
-    data: { labels, datasets: dailyDatasets },
+    data: { labels: prevLabels, datasets: dailyDatasets },
     options: makeOptions(kpi1, kpi2 || "")
   });
 
@@ -4864,7 +4901,14 @@ function renderGroupTrend(catName){
   const sPrev1 = buildGroupSeries(rowsPrev, metric1, "sum");
   const sPrev2 = metric2 ? buildGroupSeries(rowsPrev, metric2, "sum") : null;
 
-  const labels = (sCur1.labels || []);
+  const labelsCur = (sCur1.labels || []);
+  const labelsPrev = (sPrev1 && sPrev1.labels) ? sPrev1.labels : [];
+
+  const alignValuesTo = (baseLabels, s)=>{
+    const map = new Map();
+    for(let i=0;i<(s.labels||[]).length;i++) map.set(s.labels[i], (s.values||[])[i]);
+    return baseLabels.map(l => map.has(l) ? map.get(l) : null);
+  };
   const alignValues = (s)=>{
     const map = new Map();
     for(let i=0;i<(s.labels||[]).length;i++){
@@ -4873,10 +4917,10 @@ function renderGroupTrend(catName){
     return labels.map(l => map.has(l) ? map.get(l) : null);
   };
 
-  const prevValues1 = sPrev1 ? alignValues(sPrev1) : null;
-  const prevValues2 = sPrev2 ? alignValues(sPrev2) : null;
-  const curValues1 = sCur1 ? alignValues(sCur1) : null;
-  const curValues2 = sCur2 ? alignValues(sCur2) : null;
+  const prevValues1 = sPrev1 ? (sPrev1.values||[]).slice() : null;
+  const prevValues2 = sPrev2 ? alignValuesTo(labelsPrev, sPrev2) : null;
+  const curValues1 = sCur1 ? (sCur1.values||[]).slice() : null;
+  const curValues2 = sCur2 ? alignValuesTo(labelsCur, sCur2) : null;
 
   const metricName = (k)=>{
     if(k==="qty") return "生產量";
@@ -4892,6 +4936,27 @@ function renderGroupTrend(catName){
   if(hintEl){
     hintEl.textContent = `彙總規則：符合該品群的日別明細加總（產能/時以「總產量 ÷ 總稼動(小時)」推算）。`;
   }
+
+
+  // 統一左右兩張圖的 Y 軸刻度範圍（依前一期間/本期一起計算）
+  const __calcMinMaxG = (arrs)=>{
+    let mn = Infinity, mx = -Infinity;
+    for(const arr of (arrs||[])){
+      if(!arr) continue;
+      for(const v of arr){
+        const n = Number(v);
+        if(!Number.isFinite(n)) continue;
+        if(n < mn) mn = n;
+        if(n > mx) mx = n;
+      }
+    }
+    if(!Number.isFinite(mn) || !Number.isFinite(mx)) return null;
+    if(mn === mx) return { min: mn - 1, max: mx + 1 };
+    const pad = (mx - mn) * 0.06;
+    return { min: mn - pad, max: mx + pad };
+  };
+  const __yG = __calcMinMaxG([prevValues1, curValues1]);
+  const __y1G = metric2 ? __calcMinMaxG([prevValues2, curValues2]) : null;
 
   destroyGroupChart();
 
@@ -4961,7 +5026,7 @@ function renderGroupTrend(catName){
   ensureDeltaArcs();
   groupChart = new Chart(ctx, {
     type: "line",
-    data: { labels, datasets: datasetsAvg },
+    data: { labels: labelsPrev, datasets: datasetsAvg },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -4987,7 +5052,8 @@ function renderGroupTrend(catName){
       scales: (function(){
         const scales = {
           y: {
-            beginAtZero: true,
+            beginAtZero: false,
+            ...(__yG ? { min: __yG.min, max: __yG.max } : {}),
             ticks: { callback: (v)=>formatTick(metric1, v) }
           }
         };
@@ -5009,7 +5075,7 @@ function renderGroupTrend(catName){
     ensureDeltaArcs();
     groupChartSum = new Chart(ctxSum, {
       type: "line",
-      data: { labels, datasets: datasetsSum },
+      data: { labels: labelsCur, datasets: datasetsSum },
       options: {
         responsive: true,
         maintainAspectRatio: false,
