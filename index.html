@@ -3617,7 +3617,7 @@ function renderCharts(){
   }
 
   // 年別：X=月；月別：X=週；其餘：X=日
-  const groupMode = (state.rangeMode === "year") ? "month" : ((state.rangeMode === "month") ? "week" : "day");
+  var groupMode = (state.rangeMode === "year") ? "month" : ((state.rangeMode === "month") ? "week" : "day");
   const axisLabel = (groupMode === "month") ? "月別" : ((groupMode === "week") ? "週別" : "日別");
   // 左：前一期間；右：本期（兩圖 X 軸一致）
   const rangeStr = (s,e)=>{
