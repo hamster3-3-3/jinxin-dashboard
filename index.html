@@ -1508,18 +1508,21 @@ function fillFallbackAchievements(){
 }
 function getAllDatesForTemp(temp){
   const out = [];
-  const y = String(state.year);
 
   // 只取「該溫層」真正有 summary 的日期，避免 18°C/4°C 日期集合混在一起造成：
   // - 18°C 週別選到但其實那週沒有 18°C 資料（顯示全空）
   // - 週別下拉無法正常建立（因為過濾後為空）
+  //
+  // ⚠️ 注意：不要在這裡用「年份字首」過濾（YYYYMMDD startsWith(state.year)），
+  // 否則「週二~週一」跨年 / 跨月的週窗口（例如 12/30~01/05）在年別/月別視圖會被截斷，
+  // 導致月別週視圖抓不到資料、KPI 趨勢圖變成空白。
   for(const k of state.summaries.keys()){
     const parts = String(k).split("|"); // temp|YYYYMMDD
     if(parts.length < 2) continue;
     const t = parts[0];
     const dk = parts[1];
     if(String(t) !== String(temp)) continue;
-    if(!String(dk).startsWith(y)) continue;
+
     const d = dateKeyToDateObj(dk);
     if(d) out.push({mmdd:dk, dateObj:d, dateStr:dateObjToStr(d)});
   }
@@ -2252,18 +2255,22 @@ function summariesInRange(){
   const base = dr ? all.filter(o => o.dateObj >= dr.start && o.dateObj <= dr.end) : all;
 
   if(state.rangeMode === "year"){
-    return base.map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
+    return base
+      .filter(o => o.dateObj.getUTCFullYear() === Number(state.year))
+      .map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)}))
+      .filter(x=>x.summary);
   }
   if(state.rangeMode === "month"){
     const m = getSelectedMonth1Based();
-    // 先確認「所選月」在 base 內至少有一天資料（避免選到完全沒資料月份卻跨月抓到別月）
-    const hasInMonth = base.some(o => (o.dateObj.getUTCMonth()+1) === m);
-    if(!hasInMonth) return [];
-    const wk = getMonthWeekWindowsUTC(state.year, m); // wk.start/wk.end 會跨月
-    return base
+    const wk = getMonthWeekWindowsUTC(state.year, m); // wk.start/wk.end 會跨月（週二～週一）
+
+    const picked = base
       .filter(o => o.dateObj >= wk.start && o.dateObj <= wk.end)
       .map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)}))
       .filter(x => x.summary);
+
+    // 若該月週窗口內完全沒有資料，才回傳空（避免跨月誤抓）
+    return picked;
   }
 if(state.rangeMode === "week"){
     if(!state.weekStartStr) return [];
