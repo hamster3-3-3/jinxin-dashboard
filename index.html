@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v24_fixed_month_autorender -->
+  <!-- BUILD: v25_debug_charts -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -603,7 +603,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION="v24_fixed_month_autorender";
+window.BUILD_VERSION="v25_debug_charts";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -3596,6 +3596,7 @@ function renderCharts(){
 
   // 以「目前視圖 +（可選）指定範圍」篩出的每日資料作為趨勢基礎
   const dailyList = summariesInRange().slice().sort((a,b)=>a.dateObj-b.dateObj);
+  try{ console.log("[renderCharts] mode=", state.rangeMode, "year=", state.year, "month=", getSelectedMonth1Based?.()||state.month, "temp=", state.temp, "allDates=", getAllDatesForTemp(state.temp).length, "inRange=", dailyList.length); }catch(e){}
 
   // 前一期間（週：前週、月：前月、年：前年）— 用於左圖對照
   const tempForPrev = state.temp;
@@ -4112,8 +4113,11 @@ const prodSetByDate = new Map();
 
   destroyCharts();
 
-  const dctx = $("dailyChart").getContext("2d");
-  const dctxSum = $("dailyChartSum") ? $("dailyChartSum").getContext("2d") : null;
+  const _dc = $("dailyChart");
+  if(!_dc){ console.error("dailyChart canvas not found"); return; }
+  const dctx = _dc.getContext("2d");
+  const _dcs = $("dailyChartSum");
+  const dctxSum = _dcs ? _dcs.getContext("2d") : null;
   const cumCanvasEl = document.getElementById("cumChart");
   const cctx = cumCanvasEl ? cumCanvasEl.getContext("2d") : null;
 
@@ -5521,7 +5525,8 @@ function markChartsDirty(){
   // 自動更新（做一點 debounce，避免連續操作造成重繪過多）
   clearTimeout(state._chartAutoTimer);
   state._chartAutoTimer = setTimeout(()=>{
-    try{ renderCharts(); }catch(e){}
+    try{ renderCharts(); }
+    catch(e){ console.error("[auto renderCharts error]", e); }
   }, 80);
 }
 
@@ -6390,7 +6395,7 @@ $("chartKpiSelect2").addEventListener("change", ()=>{
 state.chartsVisible = true;
 const _chartArea = $("chartArea");
 if(_chartArea) _chartArea.classList.remove("hidden");
-renderCharts();
+try{ renderCharts(); }catch(e){ console.error("[init renderCharts error]", e); }
 
 const _fileInput = $("fileInput");
 const _importBtn = $("importBtn");
