@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v38_group_prev_month_restrict_fix -->
+  <!-- BUILD: v39_group_datekey_fix -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -603,7 +603,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v38_group_prev_month_restrict_fix";
+window.BUILD_VERSION = "v39_group_datekey_fix";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -1171,7 +1171,7 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v38_group_prev_month_restrict_fix";
+const BUILD_VERSION = "v39_group_datekey_fix";
 console.log("Jinxin dashboard build:", BUILD_VERSION);
 
 const state = {
@@ -4749,7 +4749,7 @@ function buildGroupRowsForCat(catName, mmddSetOverride=null){
     // 用「日期區間」生成每日 mmdd，避免只從 summaries 的日期取樣造成缺洞
     const p2 = (n)=> String(n).padStart(2,"0");
     for(let d = new Date(wk.start); d <= wk.end; d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()+1))){
-      mmddSet.add(`${p2(d.getUTCMonth()+1)}/${p2(d.getUTCDate())}`);
+      mmddSet.add(`${d.getUTCFullYear()}${p2(d.getUTCMonth()+1)}${p2(d.getUTCDate())}`);
     }
   }else{
     mmddSet = getDateSetInSelection();
@@ -4951,7 +4951,7 @@ function renderGroupTrend(catName){
     const p2 = (n)=> String(n).padStart(2,"0");
     const set = new Set();
     for(let d = new Date(startUTC); d <= endUTC; d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()+1))){
-      set.add(`${p2(d.getUTCMonth()+1)}/${p2(d.getUTCDate())}`);
+      set.add(`${d.getUTCFullYear()}${p2(d.getUTCMonth()+1)}${p2(d.getUTCDate())}`);
     }
     return set;
   };
