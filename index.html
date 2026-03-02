@@ -3607,10 +3607,7 @@ function renderCharts(){
       b.items.push(item);
     };
     const getWeekStart = (d)=>{
-      const x = new Date(d.getTime());
-      const diff = (x.getDay() - 2 + 7) % 7;
-      x.setDate(x.getDate() - diff);
-      return x;
+      return getWeekStartUTC(d);
     };
     const _groupMode = (state.rangeMode === "year") ? "month" : ((state.rangeMode === "month") ? "week" : "day");
 
@@ -3680,15 +3677,11 @@ function renderCharts(){
   if(sumTitleEl) sumTitleEl.textContent = `${axisLabel}（本期：${rangeStr(_sel.start, _sel.end)}）`;
 
   const pad2 = (n)=>String(n).padStart(2,"0");
-  function fmtMMDDSlash(d){ return `${pad2(d.getMonth()+1)}/${pad2(d.getDate())}`; }
+  function fmtMMDDSlash(d){ return `${pad2(d.getUTCMonth()+1)}/${pad2(d.getUTCDate())}`; }
 
   const getWeekStart = (d)=>{
-    const x = new Date(d);
-    x.setHours(0,0,0,0);
-    // 週二(2)為一週起點
-    const diff = (x.getDay() - 2 + 7) % 7;
-    x.setDate(x.getDate() - diff);
-    return x;
+    // UTC week start (Tue) to avoid timezone shifting
+    return getWeekStartUTC(d);
   };
 
   const buckets = [];
