@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v26_fixed_pad2 -->
+  <!-- BUILD: v28_group_prev_fix -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -603,7 +603,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION="v26_fixed_pad2";
+window.BUILD_VERSION = "v28_group_prev_fix";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -1171,7 +1171,7 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v26_fixed_pad2";
+const BUILD_VERSION = "v28_group_prev_fix";
 console.log("Jinxin dashboard build:", BUILD_VERSION);
 
 const state = {
@@ -4944,12 +4944,6 @@ function renderGroupTrend(catName){
     const all = getAllDatesForTemp(state.temp);
     const set = new Set();
     if(!all || !all.length) return set;
-    // month mode：確保該月有資料
-    if(state.rangeMode === "month"){
-      const m = startUTC.getUTCMonth()+1;
-      const hasInMonth = all.some(o => (o.dateObj.getUTCMonth()+1) === m);
-      if(!hasInMonth) return set;
-    }
     for(const o of all){
       if(o.dateObj >= startUTC && o.dateObj <= endUTC) set.add(o.mmdd);
     }
