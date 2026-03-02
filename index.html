@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v23 (delta tick labels, minimal) -->
+  <!-- BUILD: v23_fixed_month_v7 -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -2261,17 +2261,35 @@ function summariesInRange(){
       .filter(x=>x.summary);
   }
   if(state.rangeMode === "month"){
-    const m = getSelectedMonth1Based();
-    const wk = getMonthWeekWindowsUTC(state.year, m); // wk.start/wk.end 會跨月（週二～週一）
+    const m1 = getSelectedMonth1Based();
+    if(!m1) return [];
+    const yearNum = Number(state.year);
+
+    // 以「週二～週一」為週期：挑出與該月有交集的週，並把那些週的資料全部納入（包含跨月日）
+    const monthStart = new Date(Date.UTC(yearNum, m1-1, 1));
+    const monthEnd   = new Date(Date.UTC(yearNum, m1, 0));
+    monthStart.setUTCHours(0,0,0,0);
+    monthEnd.setUTCHours(0,0,0,0);
+
+    // 標記哪些 weekStart 需要納入
+    const keepWeekStartMs = new Set();
+    for(const o of base){
+      const ws = getWeekStartUTC(o.dateObj);
+      const we = addDaysUTC(ws, 6);
+      if(we.getTime() >= monthStart.getTime() && ws.getTime() <= monthEnd.getTime()){
+        keepWeekStartMs.add(ws.getTime());
+      }
+    }
+    if(!keepWeekStartMs.size) return [];
 
     const picked = base
-      .filter(o => o.dateObj >= wk.start && o.dateObj <= wk.end)
+      .filter(o => keepWeekStartMs.has(getWeekStartUTC(o.dateObj).getTime()))
       .map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)}))
       .filter(x => x.summary);
 
-    // 若該月週窗口內完全沒有資料，才回傳空（避免跨月誤抓）
     return picked;
   }
+
 if(state.rangeMode === "week"){
     if(!state.weekStartStr) return [];
     const ws = new Date(state.weekStartStr + "T00:00:00Z");
