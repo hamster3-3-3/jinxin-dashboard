@@ -716,8 +716,8 @@ function detectGitHubContext(){
 ========================= */
 async function listXlsxFilesFromManifest(){
   const tries = [
-    { url: "./manifest.json", baseDir: "" },
     { url: "./data/manifest.json", baseDir: "data" },
+    { url: "./manifest.json", baseDir: "" },
   ];
   for(const t of tries){
     try{
@@ -2864,6 +2864,21 @@ const onPick = ()=> selectActiveGroup(x.cat);
   }
   wrap.appendChild(frag);
 
+  // 若尚未選擇品群，或目前選擇已不在當前範圍內，預設選第一個品群（避免品群趨勢圖不顯示）
+  const catsNow = arr.map(x=>x.cat);
+  if(catsNow.length){
+    const curKey = cleanKey(cleanText(state.activeGroupCat || ""));
+    const stillExists = catsNow.some(c => cleanKey(cleanText(c)) === curKey);
+    if(!curKey || !stillExists){
+      // 不捲動頁面，僅同步狀態與圖表
+      try{ selectActiveGroup(catsNow[0], {noScroll:true}); }catch(e){ state.activeGroupCat = catsNow[0]; refreshActiveGroupTrend(); }
+    }else{
+      // 已有選擇就只刷新圖表
+      refreshActiveGroupTrend();
+    }
+  }
+
+
   // 下架商品卡片（顯示各品群下架品名）
   const delWrap = $("delistedProductsCard");
   if(delWrap){
@@ -3260,11 +3275,29 @@ function buildWeeklyOrDailySeries(kpi = state.chartKpi){
   }
 
   const byWeek = new Map();
+  // Pre-compute the selected KPI value per day, then aggregate by week.
+  const getDayKpiVal = (o)=>{
+    const s = o.summary || {};
+    const q = toNumber(s.totalQty), r = toNumber(s.revenue), mu = toNumber(s.multi);
+    const a = toNumber(s.attendance), e = toNumber(s.efficiency);
+    const vMap = {
+      totalQty: q,
+      revenue: r,
+      multi: mu,
+      itemCount: (state.itemCountDaily.get(`${temp}|${o.mmdd}`) || 0),
+      attendance: a,
+      efficiency: e,
+      avgPrice: (Number.isFinite(q)&&q>0&&Number.isFinite(r)) ? (r/q) : toNumber(s.avgPrice)
+    };
+    return Number.isFinite(vMap[kpi]) ? vMap[kpi] : null;
+  };
+
   for(const it of focus){
     const ws = getWeekStartUTC(it.dateObj);
     const wsStr = dateObjToStr(ws);
     if(!byWeek.has(wsStr)) byWeek.set(wsStr, []);
-    byWeek.get(wsStr).push(it);
+    const v = getDayKpiVal(it);
+    if(v !== null) byWeek.get(wsStr).push(v);
   }
   const wk = (mode==="month") ? getMonthWeekWindowsUTC(state.year, state.month) : null;
   const labelByStart = wk ? new Map(wk.weeks.map(w=>{
@@ -3281,7 +3314,7 @@ function buildWeeklyOrDailySeries(kpi = state.chartKpi){
   for(const wsStr of orderedStarts){
     const arr = byWeek.get(wsStr) || [];
     labels.push(mode==="month" ? (labelByStart.get(wsStr) || wsStr.slice(5)) : wsStr.slice(5));
-    values.push(arr.length ? avg(arr.map(o=>o[metric])) : null);
+    values.push(arr.length ? avg(arr) : null);
   }
   return {title, labels, values};
 }
@@ -4337,7 +4370,7 @@ function findLatestRecForGroupProduct(catName, prodName, lineKeyFilter=""){
   return best;
 }
 
-function selectActiveGroup(catName){
+function selectActiveGroup(catName, opts={}){
   state.activeGroupCat = catName || "";
   const panel = $("activeGroupPanel");
   const nameEl = $("activeGroupName");
@@ -4383,7 +4416,7 @@ function selectActiveGroup(catName){
   refreshActiveGroupTrend();
   // 自動跳轉到「品群趨勢圖」區塊
   const gt = document.getElementById("groupTrendPanel");
-  if(gt) gt.scrollIntoView({behavior:"smooth", block:"start"});
+  if(gt && !(opts && opts.noScroll)) gt.scrollIntoView({behavior:"smooth", block:"start"});
 }
 
 
