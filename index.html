@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v23_fixed_month_v7 -->
+  <!-- BUILD: v24_fixed_month_autorender -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -603,7 +603,8 @@
   </div>
 
 <script>
-console.log("BUILD v22");
+window.BUILD_VERSION="v24_fixed_month_autorender";
+console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
    - 優先使用同資料夾的本地檔（可選）：./xlsx.full.min.js、./chart.umd.min.js
@@ -1989,6 +1990,7 @@ rebuildAvailableMmdd();
   refreshSelectors();
   setupProdSearch();
   refreshAll();
+  markChartsDirty();
 
   $("clearBtn").disabled = false;
 
@@ -2015,6 +2017,7 @@ async function handleFiles(files){
   rebuildAvailableMmdd();
   refreshSelectors();
   refreshAll();
+  markChartsDirty();
   setDataChip("ok", `已合併載入｜檔案數 ${state.loadedFiles.length}｜日數 ${state.availableMmdd.size}`);
 }
 
