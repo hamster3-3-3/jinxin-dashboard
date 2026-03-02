@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v33_group_label_norm_fix -->
+  <!-- BUILD: v34_group_prev_window_fix -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -603,7 +603,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v33_group_label_norm_fix";
+window.BUILD_VERSION = "v34_group_prev_window_fix";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -1171,8 +1171,8 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v33_group_label_norm_fix";
-console.log("Jinxin dashboard build:", BUILD_VERSION);
+const BUILD_VERSION = "v34_group_prev_window_fix";
+console.log("Jinxin dashboard build: v34_group_prev_window_fix", BUILD_VERSION);
 
 const state = {
   rangeMode: "year",
@@ -2678,6 +2678,12 @@ function getPrevPeriodsUTC(mode, curStart, curEnd){
   if(!(curStart instanceof Date) || isNaN(curStart) || !(curEnd instanceof Date) || isNaN(curEnd)) {
     return { prevStart:null, prevEnd:null, prev2Start:null, prev2End:null };
   }
+
+  // 統一用「同長度視窗往前平移」作為前一期/前二期（避免月別週視窗用 shiftMonth 造成重疊/偏移）
+  const oneDayMs = 24*60*60*1000;
+  const lenDays = Math.max(1, Math.round((Date.UTC(curEnd.getUTCFullYear(),curEnd.getUTCMonth(),curEnd.getUTCDate()) - Date.UTC(curStart.getUTCFullYear(),curStart.getUTCMonth(),curStart.getUTCDate()))/oneDayMs) + 1);
+
+  // year 模式仍採「去年同日區間」做同比
   if(mode === "year"){
     return {
       prevStart: __shiftUTCDateByYears(curStart, -1),
@@ -2686,21 +2692,14 @@ function getPrevPeriodsUTC(mode, curStart, curEnd){
       prev2End:   __shiftUTCDateByYears(curEnd,   -2),
     };
   }
-  if(mode === "month"){
-    return {
-      prevStart: __shiftUTCDateByMonths(curStart, -1),
-      prevEnd:   __shiftUTCDateByMonths(curEnd,   -1),
-      prev2Start: __shiftUTCDateByMonths(curStart, -2),
-      prev2End:   __shiftUTCDateByMonths(curEnd,   -2),
-    };
-  }
-  // week/day/custom：以 7 天為一期回推
-  return {
-    prevStart: __shiftUTCDateByDays(curStart, -7),
-    prevEnd:   __shiftUTCDateByDays(curEnd,   -7),
-    prev2Start: __shiftUTCDateByDays(curStart, -14),
-    prev2End:   __shiftUTCDateByDays(curEnd,   -14),
-  };
+
+  // month/week/day/custom：用同長度視窗往前平移（month 也是「週二~週一」的週視窗，不能用 shiftMonth）
+  const prevEnd = __shiftUTCDateByDays(curStart, -1);
+  const prevStart = __shiftUTCDateByDays(prevEnd, -(lenDays-1));
+  const prev2End = __shiftUTCDateByDays(prevStart, -1);
+  const prev2Start = __shiftUTCDateByDays(prev2End, -(lenDays-1));
+
+  return { prevStart, prevEnd, prev2Start, prev2End };
 }
 function buildCatProdMapForDateRange(temp, startUTC, endUTC){
   const out = new Map(); // cat -> Set(prod)
