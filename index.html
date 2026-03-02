@@ -1117,24 +1117,44 @@ function getMonthWeekWindowsUTC(year, month){
   return { monthStart, monthEnd, weeks, start, end };
 }
 function getSelectedMonth1Based(){
-  // Returns selected month as 1..12.
-  // Prefer UI value when available; fallback to state.month.
-  const ms = document.getElementById("monthSelect");
-  const wms = document.getElementById("weekMonthSelect");
-  let raw = null;
+  // 1~12 month number (1-based)
+  const ids = ["monthSelect","weekMonthSelect"];
+  for(const id of ids){
+    const el = document.getElementById(id);
+    if(!el) continue;
+    const v = String(el.value ?? "").trim();
+    if(!v) continue;
 
-  if(state && state.rangeMode === "week" && wms && wms.value) raw = wms.value;
-  else if(ms && ms.value) raw = ms.value;
-  else if(state && state.month != null) raw = state.month;
+    // accept "2", "02", 2
+    const m1 = v.match(/^0?(\d{1,2})$/);
+    if(m1){
+      const n = Number(m1[1]);
+      if(Number.isFinite(n)){
+        if(n >= 1 && n <= 12) return n;
+        if(n >= 0 && n <= 11) return n + 1; // tolerate 0~11
+      }
+    }
 
-  const m = Number(raw);
-  if(!Number.isFinite(m)) return NaN;
+    const n = Number(v);
+    if(Number.isFinite(n)){
+      if(n >= 1 && n <= 12) return n;
+      if(n >= 0 && n <= 11) return n + 1;
+    }
+  }
 
-  // Compatibility: some legacy code might pass 0..11 (0=Jan). Convert to 1..12.
-  if(m >= 0 && m <= 11) return m + 1;
-  return m;
+  // fallback to state.month
+  const sm = Number(state.month);
+  if(Number.isFinite(sm)){
+    if(sm >= 1 && sm <= 12) return sm;
+    if(sm >= 0 && sm <= 11) return sm + 1;
+  }
+  return null;
 }
 
+
+if(m >= 0 && m <= 11) return m + 1;
+  return m;
+}
 
 function monthKeyFromDate(dateObj){
   return `${dateObj.getUTCFullYear()}-${String(dateObj.getUTCMonth()+1).padStart(2,"0")}`;
