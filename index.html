@@ -210,13 +210,13 @@
   <div class="flex flex-col gap-1">
     <div class="text-lg sm:text-xl font-extrabold tracking-wide text-slate-900">KPI 趨勢圖</div>
     <div class="hint mt-1">
-      只有在你按下「顯示趨勢圖」後才會建立圖表；更改條件後不會自動重繪，請按「更新趨勢圖」。
+      趨勢圖會隨時間範圍與指標自動更新。
     </div>
   </div>
 
   <div id="chartDirtyHint" class="hint mt-3 hidden text-amber-600 font-bold">條件已變更，請按「更新趨勢圖」。</div>
 
-      <div id="chartArea" class="mt-5 hidden">
+      <div id="chartArea" class="mt-5">
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <!-- 平均 -->
           <div>
@@ -264,12 +264,7 @@
         </select>
     </div>
   </div>
-  <div class="flex gap-2 justify-end">
-    <button id="showChartBtn" class="btn primary">顯示趨勢圖</button>
-    <button id="updateChartBtn" class="btn" disabled>更新趨勢圖</button>
-  </div>
 </div>
-
     </div>
 
     <!-- Drilldown -->
@@ -332,13 +327,13 @@
           <div id="groupChartTitle" class="text-slate-600 text-sm font-bold mb-2"></div>
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div>
-              <div class="text-slate-600 text-sm font-bold mb-2">平均</div>
+              <div class="text-slate-600 text-sm font-bold mb-2">前一期間</div>
               <div class="relative w-full" style="height: 360px;">
                 <canvas id="groupTrendCanvas"></canvas>
               </div>
             </div>
             <div>
-              <div class="text-slate-600 text-sm font-bold mb-2">加總</div>
+              <div class="text-slate-600 text-sm font-bold mb-2">本期</div>
               <div class="relative w-full" style="height: 360px;">
                 <canvas id="groupTrendCanvasSum"></canvas>
               </div>
@@ -406,6 +401,30 @@
       </div>
     </div>
   </div>
+
+
+  <div id="prodCostCard" class="card mt-4">
+    <div class="flex items-center justify-between gap-4">
+      <div class="font-extrabold text-slate-900">成本資訊（材料率／毛利率／廠價）</div>
+      <div id="prodCostMeta" class="text-slate-500 text-sm font-bold"></div>
+    </div>
+
+    <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div class="rounded-2xl border border-slate-200 bg-white p-3">
+        <div class="text-xs text-slate-500 font-bold">材料率</div>
+        <div id="pMatRate" class="text-2xl font-black mono mt-1">—</div>
+      </div>
+      <div class="rounded-2xl border border-slate-200 bg-white p-3">
+        <div class="text-xs text-slate-500 font-bold">毛利率</div>
+        <div id="pGrossRate" class="text-2xl font-black mono mt-1">—</div>
+      </div>
+      <div class="rounded-2xl border border-slate-200 bg-white p-3">
+        <div class="text-xs text-slate-500 font-bold">廠價</div>
+        <div id="pFactoryPrice" class="text-2xl font-black mono mt-1">—</div>
+      </div>
+    </div>
+  </div>
+
 
 <div class="card space-y-4">
       <div class="font-extrabold text-slate-900">線別 / 品類 / 品名</div>
@@ -1097,6 +1116,18 @@ function getMonthWeekWindowsUTC(year, month){
 
   return { monthStart, monthEnd, weeks, start, end };
 }
+function getSelectedMonth1Based(){
+  const m = getSelectedMonth1Based();
+  if(!Number.isFinite(m)) return m;
+  // 相容：有些下拉選單可能用 0~11 表示月份（0=1月）
+  if(m >= 0 && m <= 11 && String(state.month).length <= 2 && String(state.month).padStart(2,"0") !== String(m).padStart(2,"0")){
+    // keep as-is if original was like "02"
+    return m;
+  }
+  if(m >= 0 && m <= 11) return m + 1;
+  return m;
+}
+
 function monthKeyFromDate(dateObj){
   return `${dateObj.getUTCFullYear()}-${String(dateObj.getUTCMonth()+1).padStart(2,"0")}`;
 }
@@ -2065,7 +2096,7 @@ function refreshSelectors(){
     opt.textContent = String(m).padStart(2,"0") + (monthsWithData.has(m) ? "" : "（無資料）");
     monthSel.appendChild(opt);
   }
-  if(!state.month || !monthsWithData.has(Number(state.month))){
+  if(!state.month || !monthsWithData.has(getSelectedMonth1Based())){
     const mList = Array.from(monthsWithData).sort((a,b)=>a-b);
     state.month = mList.length ? mList[0] : 1;
   }
@@ -2196,7 +2227,7 @@ function summariesInRange(){
     return base.map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)})).filter(x=>x.summary);
   }
   if(state.rangeMode === "month"){
-    const m = Number(state.month);
+    const m = getSelectedMonth1Based();
     // 先確認「所選月」在 base 內至少有一天資料（避免選到完全沒資料月份卻跨月抓到別月）
     const hasInMonth = base.some(o => (o.dateObj.getUTCMonth()+1) === m);
     if(!hasInMonth) return [];
@@ -2426,7 +2457,7 @@ function getNewProductBadgeInfo(){
     }
   }else if(mode === 'month'){
     const y = Number(state.year);
-    const m = Number(state.month);
+    const m = getSelectedMonth1Based();
     labelCur = '當月新品';
     labelPrev = '前月新品';
     if(Number.isFinite(y) && Number.isFinite(m) && m>=1 && m<=12){
@@ -2498,6 +2529,34 @@ function setProdLaunchDateDisplay(prodName){
   el.textContent = (info && info.str) ? info.str : "—";
 }
 
+
+function setProdCostDisplay(prodName){
+  const matEl = $("pMatRate");
+  const grossEl = $("pGrossRate");
+  const priceEl = $("pFactoryPrice");
+  const metaEl = $("prodCostMeta");
+  if(!matEl || !grossEl || !priceEl) return;
+
+  if(!prodName){
+    matEl.textContent = "—";
+    grossEl.textContent = "—";
+    priceEl.textContent = "—";
+    if(metaEl) metaEl.textContent = "";
+    return;
+  }
+
+  const cost = getCostOfProduct(prodName);
+  // cost: {mat, gross, price}
+  matEl.textContent = (cost && Number.isFinite(cost.mat)) ? (fmtPct(cost.mat)) : "—";
+  grossEl.textContent = (cost && Number.isFinite(cost.gross)) ? (fmtPct(cost.gross)) : "—";
+  priceEl.textContent = (cost && Number.isFinite(cost.price)) ? (fmtDec(cost.price, 2)) : "—";
+
+  if(metaEl){
+    metaEl.textContent = (costDB && costDB.loaded && costDB.srcPath) ? ("來源：" + costDB.srcPath) : "";
+  }
+}
+
+
 /* =========================
    下架商品（依日報出現/消失）
    定義：
@@ -2526,10 +2585,10 @@ function __setDiff(aSet, bSet){
   return out;
 }
 function getDelistedLabelsByMode(mode){
-  if(mode === "month") return { curr: "當月下架", prev: "前月下架" };
-  if(mode === "year")  return { curr: "當年下架", prev: "前年下架" };
-  // week/day/custom => 週別口徑
-  return { curr: "當週下架", prev: "前週下架" };
+  // 名稱調整：原「前週下架」改為「前週下架」（邏輯不變：上一期有、本期無）
+  if(mode === "month") return { curr: "前月下架" };
+  if(mode === "year")  return { curr: "前年下架" };
+  return { curr: "前週下架" };
 }
 function getSelectionStartEndUTC(){
   const mode = state.rangeMode;
@@ -2540,7 +2599,7 @@ function getSelectionStartEndUTC(){
     return { start: new Date(Date.UTC(y,0,1)), end: new Date(Date.UTC(y,11,31)) };
   }
   if(mode === "month"){
-    const m = Number(state.month);
+    const m = getSelectedMonth1Based();
     const wk = getMonthWeekWindowsUTC(state.year, m); // 使用「月別週視圖」完整視窗（可跨月）
     return { start: wk.start, end: wk.end };
   }
@@ -2617,25 +2676,22 @@ function buildCatProdMapForDateRange(temp, startUTC, endUTC){
 function calcDelistedByCategory(temp){
   const mode = state.rangeMode;
   const { start: curStart, end: curEnd } = getSelectionStartEndUTC();
-  const { prevStart, prevEnd, prev2Start, prev2End } = getPrevPeriodsUTC(mode, curStart, curEnd);
+  const { prevStart, prevEnd } = getPrevPeriodsUTC(mode, curStart, curEnd);
 
   const curr = buildCatProdMapForDateRange(temp, curStart, curEnd);
   const prev = buildCatProdMapForDateRange(temp, prevStart, prevEnd);
-  const prev2 = buildCatProdMapForDateRange(temp, prev2Start, prev2End);
 
-  const cats = new Set([...curr.keys(), ...prev.keys(), ...prev2.keys()]);
-  const delCurr = new Map();
-  const delPrev = new Map();
+  const cats = new Set([...curr.keys(), ...prev.keys()]);
+  const delCurr = new Map(); // 這裡的「delCurr」= 原本的「前週下架」邏輯（上一期有、本期無）
 
   for(const cat of cats){
     const currSet = curr.get(cat) || new Set();
     const prevSet = prev.get(cat) || new Set();
-    const prev2Set = prev2.get(cat) || new Set();
-    delCurr.set(cat, __setDiff(prevSet, currSet));   // 當期下架
-    delPrev.set(cat, __setDiff(prev2Set, prevSet));  // 前期下架
+    delCurr.set(cat, __setDiff(prevSet, currSet)); // 前週下架（原邏輯不變）
   }
-  return { delCurr, delPrev, labels: getDelistedLabelsByMode(mode) };
+  return { delCurr, labels: getDelistedLabelsByMode(mode) };
 }
+
 
 function refreshActiveCatCounts(){
   const wrap = $("activeCatCards");
@@ -2649,7 +2705,7 @@ function refreshActiveCatCounts(){
   // 其他：以目前選取範圍統計
   let mmddSet = new Set();
   if(state.rangeMode === "month"){
-    const m = Number(state.month);
+    const m = getSelectedMonth1Based();
     const hasInMonth = all.some(o => (o.dateObj.getUTCMonth()+1) === m);
     if(hasInMonth){
       const wk = getMonthWeekWindowsUTC(state.year, m); // wk.start/wk.end 會跨月
@@ -2722,33 +2778,29 @@ const map = new Map(); // cat -> Set(prod)
     const __newCnt = countNewProductsByRange(map.get(x.cat), __badge.curStart, __badge.curEnd);
     const __prevNewCnt = __badge.showPrev ? countNewProductsByRange(map.get(x.cat), __badge.prevStart, __badge.prevEnd) : 0;
 
-    const __delCurrCnt = (__delisted.delCurr.get(x.cat) ? __delisted.delCurr.get(x.cat).size : 0);
-    const __delPrevCnt = (__delisted.delPrev.get(x.cat) ? __delisted.delPrev.get(x.cat).size : 0);
-
-    const __newRow = __badge.showPrev
-      ? `
-        <div class="flex gap-1 justify-end">
-          <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__badge.labelCur} <span class="text-slate-900">${__newCnt}</span></div>
-          <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__badge.labelPrev} <span class="text-slate-900">${__prevNewCnt}</span></div>
-        </div>
-      `
-      : `
-        <div class="flex gap-1 justify-end">
-          <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__badge.labelCur} <span class="text-slate-900">${__newCnt}</span></div>
-        </div>
-      `;
-
-    const __delRow = `
-      <div class="flex gap-1 justify-end">
-        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__delisted.labels.curr} <span class="text-slate-900">${__delCurrCnt}</span></div>
-        <div class="text-[11px] font-extrabold text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-2 py-0.5 whitespace-normal text-center leading-tight">${__delisted.labels.prev} <span class="text-slate-900">${__delPrevCnt}</span></div>
+    const __pill = (label, val)=>`
+      <div class="text-[11px] font-extrabold text-slate-700 bg-white border border-slate-200 rounded-xl px-2 py-1 text-center leading-[1.1] min-w-[72px]">
+        <div class="whitespace-nowrap">${label}</div>
+        <div class="text-slate-900 text-[12px] font-black">${val}</div>
       </div>
     `;
 
+    const __newRow = __badge.showPrev
+      ? `
+        <div class="flex gap-2 justify-end flex-wrap">
+          ${__pill(__badge.labelCur, __newCnt)}
+          ${__pill(__badge.labelPrev, __prevNewCnt)}
+        </div>
+      `
+      : `
+        <div class="flex gap-2 justify-end flex-wrap">
+          ${__pill(__badge.labelCur, __newCnt)}
+        </div>
+      `;
+
     const __badgeHtml = `
-      <div class="flex flex-col gap-1 items-end">
+      <div class="flex flex-col gap-2 items-end">
         ${__newRow}
-        ${__delRow}
       </div>
     `;
 
@@ -2815,22 +2867,17 @@ const onPick = ()=> selectActiveGroup(x.cat);
         <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
           ${catsSorted.map(cat=>{
             const sCurr = __delisted.delCurr.get(cat) || new Set();
-            const sPrev = __delisted.delPrev.get(cat) || new Set();
             return `
               <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                 <div class="flex items-start justify-between gap-3">
                   <div class="font-extrabold text-slate-900">${escapeHtml(cat)}</div>
                   <div class="text-xs text-slate-600 font-extrabold whitespace-nowrap">
-                    ${labelsDel.curr} ${sCurr.size} ・ ${labelsDel.prev} ${sPrev.size}
+                    ${labelsDel.curr} ${sCurr.size}
                   </div>
                 </div>
                 <div class="mt-2">
                   <div class="text-xs text-slate-600 font-extrabold mb-1">${labelsDel.curr}品名</div>
                   ${toChips(sCurr)}
-                </div>
-                <div class="mt-3">
-                  <div class="text-xs text-slate-600 font-extrabold mb-1">${labelsDel.prev}品名</div>
-                  ${toChips(sPrev)}
                 </div>
               </div>
             `;
@@ -3333,7 +3380,7 @@ const orderedStarts = (mode==='month')
   return {title, labels, values};
 }
 
-function renderProductTrend(rows){
+function renderProductTrend(rowsCur, rowsPrev){
   if(!$("prodTrendCanvas")) return;
 
   const sel1 = $("prodChartMetric");
@@ -3346,13 +3393,13 @@ function renderProductTrend(rows){
     if(sel2) sel2.value = "";
   }
 
-  // 平均（左）
-  const s1Avg = buildProductSeriesMode(rows, metric1, "avg");
-  const s2Avg = metric2 ? buildProductSeriesMode(rows, metric2, "avg") : null;
+  // 前一期間（左）
+  const s1Prev = buildProductSeriesMode(rowsPrev||[], metric1, "sum");
+  const s2Prev = metric2 ? buildProductSeriesMode(rowsPrev||[], metric2, "sum") : null;
 
-  // 加總（右）－對「qty/revenue/people/runMin」用加總，其餘維持平均（避免比率指標失真）
-  const s1Sum = buildProductSeriesMode(rows, metric1, "sum");
-  const s2Sum = metric2 ? buildProductSeriesMode(rows, metric2, "sum") : null;
+  // 本期（右）
+  const s1Cur = buildProductSeriesMode(rowsCur||[], metric1, "sum");
+  const s2Cur = metric2 ? buildProductSeriesMode(rowsCur||[], metric2, "sum") : null;
 
   destroyProdChart();
 
@@ -3374,15 +3421,29 @@ function renderProductTrend(rows){
   const label1 = sel1 ? sel1.selectedOptions[0].textContent : "指標1";
   const label2 = (metric2 && sel2) ? sel2.selectedOptions[0].textContent : "";
 
-  function makeChart(canvasId, titleElId, s1, s2){
-    const labels = (s1 && s1.labels) ? s1.labels : [];
-    const alignValues = (s)=>{
-      const map = new Map();
-      for(let i=0;i<(s.labels||[]).length;i++){
-        map.set(s.labels[i], (s.values||[])[i]);
+  
+  // 統一左右兩張圖的 Y 軸刻度範圍（依前期/本期一起計算）
+  const __calcMinMaxP = (arrs)=>{
+    let mn = Infinity, mx = -Infinity;
+    for(const arr of (arrs||[])){
+      if(!arr) continue;
+      for(const v of arr){
+        const n = Number(v);
+        if(!Number.isFinite(n)) continue;
+        if(n < mn) mn = n;
+        if(n > mx) mx = n;
       }
-      return labels.map(l => map.has(l) ? map.get(l) : null);
-    };
+    }
+    if(!Number.isFinite(mn) || !Number.isFinite(mx)) return null;
+    if(mn === mx) return { min: mn - 1, max: mx + 1 };
+    const pad = (mx - mn) * 0.06;
+    return { min: mn - pad, max: mx + pad };
+  };
+  const __yP = __calcMinMaxP([ (s1Prev&&s1Prev.values)||[], (s1Cur&&s1Cur.values)||[] ]);
+  const __y1P = metric2 ? __calcMinMaxP([ (s2Prev&&s2Prev.values)||[], (s2Cur&&s2Cur.values)||[] ]) : null;
+
+function makeChart(canvasId, titleElId, s1, s2){
+    const labels = (s1 && s1.labels) ? s1.labels : [];
 
     const values1 = (s1 && s1.values) ? (s1.values||[]).slice() : [];
     const values2 = (s2 && s2.values) ? alignValues(s2) : null;
@@ -3445,6 +3506,7 @@ function renderProductTrend(rows){
             y: {
               position: "left",
               beginAtZero: false,
+              ...(__yP ? { min: __yP.min, max: __yP.max } : {}),
               ticks: { callback: (v)=>formatTick(metric1, v) }
             }
           };
@@ -3453,6 +3515,7 @@ function renderProductTrend(rows){
               position: "right",
               beginAtZero: false,
               grid: { drawOnChartArea: false },
+              ...(__y1P ? { min: __y1P.min, max: __y1P.max } : {}),
               ticks: { callback: (v)=>formatTick(metric2, v) }
             };
           }
@@ -3462,11 +3525,11 @@ function renderProductTrend(rows){
     });
   }
 
-  // 左：平均
-  prodChart = makeChart("prodTrendCanvas", "prodChartTitle", s1Avg, s2Avg);
-  // 右：加總
+  // 左：前一期間
+  prodChart = makeChart("prodTrendCanvas", "prodChartTitle", s1Prev, s2Prev);
+  // 右：本期
   if($("prodTrendCanvasSum")){
-    prodSumChart = makeChart("prodTrendCanvasSum", "prodChartSumTitle", s1Sum, s2Sum);
+    prodSumChart = makeChart("prodTrendCanvasSum", "prodChartSumTitle", s1Cur, s2Cur);
   }
 }
 
@@ -3478,11 +3541,97 @@ function renderCharts(){
   // 以「目前視圖 +（可選）指定範圍」篩出的每日資料作為趨勢基礎
   const dailyList = summariesInRange().slice().sort((a,b)=>a.dateObj-b.dateObj);
 
+  // 前一期間（週：前週、月：前月、年：前年）— 用於左圖對照
+  const tempForPrev = state.temp;
+  const _sel = (typeof getSelectionStartEndUTC === "function") ? getSelectionStartEndUTC() : {start:null,end:null};
+  const _prev = (typeof getPrevPeriodsUTC === "function") ? getPrevPeriodsUTC(state.rangeMode, _sel.start, _sel.end) : {prevStart:null, prevEnd:null};
+  const prevStart = _prev.prevStart, prevEnd = _prev.prevEnd;
+
+  const buildSummariesForStartEnd = (startUTC, endUTC)=>{
+    if(!(startUTC instanceof Date) || isNaN(startUTC) || !(endUTC instanceof Date) || isNaN(endUTC)) return [];
+    const allDates = getAllDatesForTemp(tempForPrev);
+    if(!allDates || !allDates.length) return [];
+    // month mode: 使用同口徑的跨月週視圖，因此 start/end 已經是視窗；仍確保該月有資料避免誤抓
+    if(state.rangeMode === "month"){
+      const m = startUTC.getUTCMonth()+1;
+      const hasInMonth = allDates.some(o => (o.dateObj.getUTCMonth()+1) === m);
+      if(!hasInMonth) return [];
+    }
+    return allDates
+      .filter(o => o.dateObj >= startUTC && o.dateObj <= endUTC)
+      .map(o => ({...o, summary: getSummaryForDay(tempForPrev, o.mmdd)}))
+      .filter(x => x.summary);
+  };
+
+  const prevDailyList = buildSummariesForStartEnd(prevStart, prevEnd).slice().sort((a,b)=>a.dateObj-b.dateObj);
+
+  
+  // prevBuckets：前一期間的 bucket（用於左圖），但 X 軸採用當期 buckets 的 labels 長度對齊
+  const prevBuckets = (function(){
+    const list = prevDailyList || [];
+    const _buckets = [];
+    const _bucketByKey = new Map();
+    const push = (key, label, item, meta={})=>{
+      let b = _bucketByKey.get(key);
+      if(!b){
+        b = { key, label, items: [], ...meta };
+        _bucketByKey.set(key, b);
+        _buckets.push(b);
+      }
+      b.items.push(item);
+    };
+    const getWeekStart = (d)=>{
+      const x = new Date(d.getTime());
+      const diff = (x.getDay() - 2 + 7) % 7;
+      x.setDate(x.getDate() - diff);
+      return x;
+    };
+    const _groupMode = (state.rangeMode === "year") ? "month" : ((state.rangeMode === "month") ? "week" : "day");
+
+    for(const o of list){
+      const d = o.dateObj;
+      if(!d) continue;
+      if(_groupMode === "day"){
+        const key = String(o.mmdd || "");
+        const label = o.dateStr ? o.dateStr.slice(5).replace("-","/") : fmtMMDDSlash(d);
+        push(key, label, o);
+        continue;
+      }
+      if(_groupMode === "week"){
+        const ws = getWeekStart(d);
+        const we = new Date(ws); we.setDate(ws.getDate()+6);
+        const key = ws.toISOString().slice(0,10);
+        const label = `${fmtMMDDSlash(ws)}~${fmtMMDDSlash(we)}`;
+        push(key, label, o, {weekStart: ws});
+        continue;
+      }
+      const y = d.getFullYear();
+      const m = d.getMonth()+1;
+      const key = `${y}-${pad2(m)}`;
+      const label = `${m}月`;
+      push(key, label, o, {month: m});
+    }
+    if(_groupMode === "day"){
+      _buckets.sort((a,b)=>{
+        const ad = dateKeyToDateObj(a.key);
+        const bd = dateKeyToDateObj(b.key);
+        return (ad && bd) ? (ad - bd) : String(a.key).localeCompare(String(b.key));
+      });
+    }else if(_groupMode === "week"){
+      _buckets.sort((a,b)=>(a.weekStart - b.weekStart));
+    }else{
+      _buckets.sort((a,b)=>(a.month - b.month));
+    }
+    return _buckets;
+  })();
+  const prevLabels = prevBuckets.map(b=>b.label);
+
+
   if(!dailyList.length){
     destroyCharts();
-    $("dailyChartTitle").textContent = "日別（日平均）";
+    $("dailyChartTitle").textContent = "前一期間（對照）";
     const _sumTitleEl0 = document.getElementById("dailyChartSumTitle");
-    if(_sumTitleEl0) _sumTitleEl0.textContent = "日別（加總）";
+    if(_sumTitleEl0) _sumTitleEl0.textContent = "本期（對照）";
     const _cumTitleEl2 = document.getElementById("cumChartTitle");
     if(_cumTitleEl2) _cumTitleEl2.textContent = "累計";
     state.chartsDirty = false;
@@ -3491,14 +3640,21 @@ function renderCharts(){
   }
 
   // 年別：X=月；月別：X=週；其餘：X=日
-  const groupMode = (state.rangeMode === "year") ? "month" : ((state.rangeMode === "month") ? "week" : "day");
+  var groupMode = (state.rangeMode === "year") ? "month" : ((state.rangeMode === "month") ? "week" : "day");
   const axisLabel = (groupMode === "month") ? "月別" : ((groupMode === "week") ? "週別" : "日別");
-  $("dailyChartTitle").textContent = `${axisLabel}（日平均）`;
+  // 左：前一期間；右：本期（兩圖 X 軸一致）
+  const rangeStr = (s,e)=>{
+    if(!(s instanceof Date) || isNaN(s) || !(e instanceof Date) || isNaN(e)) return "";
+    const ss = dateObjToStr(s);
+    const ee = dateObjToStr(e);
+    return `${ss}~${ee}`;
+  };
+  $("dailyChartTitle").textContent = `${axisLabel}（前一期間：${rangeStr(prevStart, prevEnd)}）`;
   const sumTitleEl = document.getElementById("dailyChartSumTitle");
-  if(sumTitleEl) sumTitleEl.textContent = `${axisLabel}（加總）`;
+  if(sumTitleEl) sumTitleEl.textContent = `${axisLabel}（本期：${rangeStr(_sel.start, _sel.end)}）`;
 
   const pad2 = (n)=>String(n).padStart(2,"0");
-  const fmtMMDDSlash = (d)=>`${pad2(d.getMonth()+1)}/${pad2(d.getDate())}`;
+  function fmtMMDDSlash(d){ return `${pad2(d.getMonth()+1)}/${pad2(d.getDate())}`; }
 
   const getWeekStart = (d)=>{
     const x = new Date(d);
@@ -3634,7 +3790,8 @@ function renderCharts(){
   };
 
   // 預先建索引：dateKey(mmdd) -> Set(product)（供累計品名數）
-  const prodSetByDate = new Map();
+
+const prodSetByDate = new Map();
   if(kpi1 === "itemCount" || kpi2 === "itemCount"){
     const temp = state.temp;
     for(const rec of state.records.values()){
@@ -3775,6 +3932,64 @@ function renderCharts(){
   const daily2 = kpi2 ? getDailySeries(kpi2) : null;
   const sum1 = getSumSeries(kpi1);
   const sum2 = kpi2 ? getSumSeries(kpi2) : null;
+
+  // 前一期間 series（左圖）：依同規則（加總/加權平均）計算，但以 prevBuckets 為資料來源
+  const __sumSeriesOn = (kpi, _buckets)=>{
+    if(kpi === "avgPrice"){
+      return _buckets.map(b=>{
+        let sumRev = 0, sumQty = 0;
+        let any = false;
+        for(const o of b.items){
+          const s = (o && o.summary) ? o.summary : {};
+          const q = toNumber(s.totalQty);
+          const r = toNumber(s.revenue);
+          if(Number.isFinite(r)){ sumRev += r; any = true; }
+          if(Number.isFinite(q) && q > 0){ sumQty += q; any = true; }
+        }
+        return (any && sumQty > 0) ? (sumRev / sumQty) : null;
+      });
+    }
+    if(kpi === "efficiency"){
+      return _buckets.map(b=>{
+        let wSum = 0, w = 0;
+        let any = false;
+        for(const o of b.items){
+          const s = (o && o.summary) ? o.summary : {};
+          const e = toNumber(s.efficiency);
+          if(!Number.isFinite(e)) continue;
+          let wt = toNumber(s.attendance);
+          if(!Number.isFinite(wt) || wt <= 0) wt = 1;
+          wSum += e * wt;
+          w += wt;
+          any = true;
+        }
+        return (any && w > 0) ? (wSum / w) : null;
+      });
+    }
+    if(kpi === "itemCount"){
+      return _buckets.map(b=>{
+        const set = new Set();
+        for(const o of b.items){
+          const dk = o.mmdd;
+          const s = prodSetByDate.get(dk);
+          if(s){ for(const p of s) set.add(p); }
+        }
+        return set.size;
+      });
+    }
+    return _buckets.map(b=>bucketSum(kpi, b));
+  };
+
+  const prevSum1 = __sumSeriesOn(kpi1, prevBuckets);
+  const prevSum2 = kpi2 ? __sumSeriesOn(kpi2, prevBuckets) : null;
+
+  const alignByIndex = (arr, len)=>{
+    const out = new Array(len).fill(null);
+    for(let i=0;i<len;i++){
+      out[i] = (arr && i < arr.length) ? arr[i] : null;
+    }
+    return out;
+  };
   const cum1   = getCumulativeSeries(kpi1);
   const cum2   = kpi2 ? getCumulativeSeries(kpi2) : null;
 
@@ -3830,6 +4045,11 @@ function renderCharts(){
       y: {
         position: "left",
         beginAtZero: false,
+        // 兩張圖共用同一組 Y 軸範圍（若有設定）
+        ...(window.__kpiYScaleOverride && window.__kpiYScaleOverride.y ? {
+          min: window.__kpiYScaleOverride.y.min,
+          max: window.__kpiYScaleOverride.y.max
+        } : {}),
         ticks: { callback: (v)=>formatTick(leftKpi, v) }
       },
       ...(rightKpi ? {
@@ -3837,6 +4057,10 @@ function renderCharts(){
           position: "right",
           beginAtZero: false,
           grid: { drawOnChartArea: false },
+          ...(window.__kpiYScaleOverride && window.__kpiYScaleOverride.y1 ? {
+            min: window.__kpiYScaleOverride.y1.min,
+            max: window.__kpiYScaleOverride.y1.max
+          } : {}),
           ticks: { callback: (v)=>formatTick(rightKpi, v) }
         }
       } : {})
@@ -3851,38 +4075,63 @@ function renderCharts(){
   const cctx = cumCanvasEl ? cumCanvasEl.getContext("2d") : null;
 
   const dailyDatasets = [{
-    label: `${kpiLabel(kpi1)}（${axisLabel}）`,
-    data: daily1,
+    label: `${kpiLabel(kpi1)}（前一期間｜${axisLabel}）`,
+    data: prevSum1,
     yAxisID: "y",
     _kpi: kpi1,
     spanGaps: true,
     tension: 0.25,
-    pointRadius: (labels.length > 35) ? 0 : 3,
+    pointRadius: (prevLabels.length > 35) ? 0 : 3,
     pointHoverRadius: 5
   }];
-  if(daily2){
+  if(prevSum2){
     dailyDatasets.push({
-      label: `${kpiLabel(kpi2)}（右軸｜${axisLabel}）`,
-      data: daily2,
+      label: `${kpiLabel(kpi2)}（前一期間｜右軸｜${axisLabel}）`,
+      data: prevSum2,
       yAxisID: "y1",
       _kpi: kpi2,
       spanGaps: true,
       tension: 0.25,
-      pointRadius: (labels.length > 35) ? 0 : 3,
+      pointRadius: (prevLabels.length > 35) ? 0 : 3,
       pointHoverRadius: 5
     });
   }
 
+
+  // 統一左右兩張圖的 Y 軸刻度範圍（依左/右資料一起計算）
+  const __calcMinMax = (arrs)=>{
+    let mn = Infinity, mx = -Infinity;
+    for(const arr of (arrs||[])){
+      if(!arr) continue;
+      for(const v of arr){
+        const n = Number(v);
+        if(!Number.isFinite(n)) continue;
+        if(n < mn) mn = n;
+        if(n > mx) mx = n;
+      }
+    }
+    if(!Number.isFinite(mn) || !Number.isFinite(mx)) return null;
+    if(mn === mx){
+      return { min: mn - 1, max: mx + 1 };
+    }
+    const pad = (mx - mn) * 0.06; // 留一點空間
+    return { min: mn - pad, max: mx + pad };
+  };
+  window.__kpiYScaleOverride = {
+    y: __calcMinMax([prevSum1, sum1]),
+    ...( (prevSum2 || sum2) ? { y1: __calcMinMax([prevSum2, sum2]) } : {} )
+  };
+
   ensureDeltaArcs();
   dailyChart = new Chart(dctx, {
     type: "line",
-    data: { labels, datasets: dailyDatasets },
+    data: { labels: prevLabels, datasets: dailyDatasets },
     options: makeOptions(kpi1, kpi2 || "")
   });
 
   if(dctxSum){
     const sumDatasets = [{
-      label: `${kpiLabel(kpi1)}（${axisLabel}加總）`,
+      label: `${kpiLabel(kpi1)}（本期｜${axisLabel}）`,
       data: sum1,
       yAxisID: "y",
       _kpi: kpi1,
@@ -3893,7 +4142,7 @@ function renderCharts(){
     }];
     if(sum2){
       sumDatasets.push({
-        label: `${kpiLabel(kpi2)}（右軸｜${axisLabel}加總）`,
+        label: `${kpiLabel(kpi2)}（本期｜右軸｜${axisLabel}）`,
         data: sum2,
         yAxisID: "y1",
         _kpi: kpi2,
@@ -4001,7 +4250,7 @@ function getActiveGroupMmddSet(){
 
   // 月別：以「週視圖」統計（週二～週一），只要該週與所選月份有交集就納入（可跨月）
   if(state.rangeMode === "month"){
-    const m = Number(state.month);
+    const m = getSelectedMonth1Based();
     // 若該月在資料中完全沒有一天，避免跨月抓到別月資料
     const hasInMonth = all.some(o => (o.dateObj.getUTCMonth()+1) === m);
     if(!hasInMonth) return new Set();
@@ -4103,7 +4352,11 @@ function selectActiveGroup(catName){
   }
   // 同步更新品群趨勢圖
   refreshActiveGroupTrend();
+  // 自動跳轉到「品群趨勢圖」區塊
+  const gt = document.getElementById("groupTrendPanel");
+  if(gt) gt.scrollIntoView({behavior:"smooth", block:"start"});
 }
+
 
 function jumpToGroupProduct(prodName){
   if(!state.activeGroupCat || !prodName) return;
@@ -4437,7 +4690,7 @@ function destroyGroupChart(){
   if(groupChartSum){ groupChartSum.destroy(); groupChartSum = null; }
 }
 
-function buildGroupRowsForCat(catName){
+function buildGroupRowsForCat(catName, mmddSetOverride=null){
   const temp = state.temp;
   const all = getAllDatesForTemp(temp);
 
@@ -4445,7 +4698,7 @@ function buildGroupRowsForCat(catName){
   // 其他：以目前選取範圍統計
   let mmddSet = new Set();
   if(state.rangeMode === "month"){
-    const m = Number(state.month);
+    const m = getSelectedMonth1Based();
     const hasInMonth = all.some(o => (o.dateObj.getUTCMonth()+1) === m);
     if(hasInMonth){
       const wk = getMonthWeekWindowsUTC(state.year, m); // wk.start/wk.end 會跨月
@@ -4453,6 +4706,10 @@ function buildGroupRowsForCat(catName){
     }
   }else{
     mmddSet = getDateSetInSelection();
+  }
+
+  if(mmddSetOverride && mmddSetOverride instanceof Set){
+    mmddSet = mmddSetOverride;
   }
 
 const catKey = cleanKey(cleanText(catName || ""));
@@ -4630,7 +4887,33 @@ function buildGroupSeries(rows, metric, viewMode="avg"){
 function renderGroupTrend(catName){
   if(!$("groupTrendCanvas")) return;
 
-  const rows = buildGroupRowsForCat(catName);
+  // 本期/前一期間的日期集合（用於左右圖）
+  const _sel2 = (typeof getSelectionStartEndUTC === "function") ? getSelectionStartEndUTC() : {start:null,end:null};
+  const _prev2 = (typeof getPrevPeriodsUTC === "function") ? getPrevPeriodsUTC(state.rangeMode, _sel2.start, _sel2.end) : {prevStart:null, prevEnd:null};
+  const prevStart2 = _prev2.prevStart, prevEnd2 = _prev2.prevEnd;
+
+  const buildMmddSetByStartEnd = (startUTC, endUTC)=>{
+    if(!(startUTC instanceof Date) || isNaN(startUTC) || !(endUTC instanceof Date) || isNaN(endUTC)) return new Set();
+    const all = getAllDatesForTemp(state.temp);
+    const set = new Set();
+    if(!all || !all.length) return set;
+    // month mode：確保該月有資料
+    if(state.rangeMode === "month"){
+      const m = startUTC.getUTCMonth()+1;
+      const hasInMonth = all.some(o => (o.dateObj.getUTCMonth()+1) === m);
+      if(!hasInMonth) return set;
+    }
+    for(const o of all){
+      if(o.dateObj >= startUTC && o.dateObj <= endUTC) set.add(o.mmdd);
+    }
+    return set;
+  };
+
+  const mmddSetCur = buildMmddSetByStartEnd(_sel2.start, _sel2.end);
+  const mmddSetPrev = buildMmddSetByStartEnd(prevStart2, prevEnd2);
+
+  const rows = buildGroupRowsForCat(catName, mmddSetCur);
+  const rowsPrev = buildGroupRowsForCat(catName, mmddSetPrev);
 
   const sel1 = $("groupChartMetric");
   const metric1 = sel1 ? sel1.value : "qty";
@@ -4642,24 +4925,24 @@ function renderGroupTrend(catName){
     if(sel2) sel2.value = "";
   }
 
-  const sAvg1 = buildGroupSeries(rows, metric1, "avg");
-  const sAvg2 = metric2 ? buildGroupSeries(rows, metric2, "avg") : null;
-  const sSum1 = buildGroupSeries(rows, metric1, "sum");
-  const sSum2 = metric2 ? buildGroupSeries(rows, metric2, "sum") : null;
+  const sCur1 = buildGroupSeries(rows, metric1, "sum");
+  const sCur2 = metric2 ? buildGroupSeries(rows, metric2, "sum") : null;
+  const sPrev1 = buildGroupSeries(rowsPrev, metric1, "sum");
+  const sPrev2 = metric2 ? buildGroupSeries(rowsPrev, metric2, "sum") : null;
 
-  const labels = sAvg1.labels || [];
-  const alignValues = (s)=>{
+  const labelsCur = (sCur1.labels || []);
+  const labelsPrev = (sPrev1 && sPrev1.labels) ? sPrev1.labels : [];
+
+  const alignValuesTo = (baseLabels, s)=>{
     const map = new Map();
-    for(let i=0;i<(s.labels||[]).length;i++){
-      map.set(s.labels[i], (s.values||[])[i]);
-    }
-    return labels.map(l => map.has(l) ? map.get(l) : null);
+    for(let i=0;i<(s.labels||[]).length;i++) map.set(s.labels[i], (s.values||[])[i]);
+    return baseLabels.map(l => map.has(l) ? map.get(l) : null);
   };
 
-  const avgValues1 = (sAvg1.values||[]).slice();
-  const avgValues2 = sAvg2 ? alignValues(sAvg2) : null;
-  const sumValues1 = sSum1 ? alignValues(sSum1) : null;
-  const sumValues2 = sSum2 ? alignValues(sSum2) : null;
+  const prevValues1 = sPrev1 ? (sPrev1.values||[]).slice() : null;
+  const prevValues2 = sPrev2 ? alignValuesTo(labelsPrev, sPrev2) : null;
+  const curValues1 = sCur1 ? (sCur1.values||[]).slice() : null;
+  const curValues2 = sCur2 ? alignValuesTo(labelsCur, sCur2) : null;
 
   const metricName = (k)=>{
     if(k==="qty") return "生產量";
@@ -4670,11 +4953,32 @@ function renderGroupTrend(catName){
     return k;
   };
 
-  $("groupChartTitle").textContent = `${catName || "品群"}｜${sAvg1.title || "趨勢"}`;
+  $("groupChartTitle").textContent = `${catName || "品群"}｜${sCur1.title || "趨勢"}`;
   const hintEl = $("groupChartHint");
   if(hintEl){
     hintEl.textContent = `彙總規則：符合該品群的日別明細加總（產能/時以「總產量 ÷ 總稼動(小時)」推算）。`;
   }
+
+
+  // 統一左右兩張圖的 Y 軸刻度範圍（依前一期間/本期一起計算）
+  const __calcMinMaxG = (arrs)=>{
+    let mn = Infinity, mx = -Infinity;
+    for(const arr of (arrs||[])){
+      if(!arr) continue;
+      for(const v of arr){
+        const n = Number(v);
+        if(!Number.isFinite(n)) continue;
+        if(n < mn) mn = n;
+        if(n > mx) mx = n;
+      }
+    }
+    if(!Number.isFinite(mn) || !Number.isFinite(mx)) return null;
+    if(mn === mx) return { min: mn - 1, max: mx + 1 };
+    const pad = (mx - mn) * 0.06;
+    return { min: mn - pad, max: mx + pad };
+  };
+  const __yG = __calcMinMaxG([prevValues1, curValues1]);
+  const __y1G = metric2 ? __calcMinMaxG([prevValues2, curValues2]) : null;
 
   destroyGroupChart();
 
@@ -4695,7 +4999,7 @@ function renderGroupTrend(catName){
 
   const datasetsAvg = [{
     label: metricName(metric1),
-    data: avgValues1,
+    data: prevValues1,
     tension: 0.25,
     pointRadius: 3,
     pointHoverRadius: 5,
@@ -4704,10 +5008,10 @@ function renderGroupTrend(catName){
     _metricKey: metric1
   }];
 
-  if(metric2 && avgValues2){
+  if(metric2 && prevValues2){
     datasetsAvg.push({
       label: metricName(metric2),
-      data: avgValues2,
+      data: prevValues2,
       tension: 0.25,
       pointRadius: 3,
       pointHoverRadius: 5,
@@ -4719,7 +5023,7 @@ function renderGroupTrend(catName){
 
   const datasetsSum = [{
     label: metricName(metric1),
-    data: sumValues1,
+    data: curValues1,
     tension: 0.25,
     pointRadius: 3,
     pointHoverRadius: 5,
@@ -4727,10 +5031,10 @@ function renderGroupTrend(catName){
     yAxisID: "y",
     _metricKey: metric1
   }];
-  if(metric2 && sumValues2){
+  if(metric2 && curValues2){
     datasetsSum.push({
       label: metricName(metric2),
-      data: sumValues2,
+      data: curValues2,
       tension: 0.25,
       pointRadius: 3,
       pointHoverRadius: 5,
@@ -4744,7 +5048,7 @@ function renderGroupTrend(catName){
   ensureDeltaArcs();
   groupChart = new Chart(ctx, {
     type: "line",
-    data: { labels, datasets: datasetsAvg },
+    data: { labels: labelsPrev, datasets: datasetsAvg },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -4770,7 +5074,8 @@ function renderGroupTrend(catName){
       scales: (function(){
         const scales = {
           y: {
-            beginAtZero: true,
+            beginAtZero: false,
+            ...(__yG ? { min: __yG.min, max: __yG.max } : {}),
             ticks: { callback: (v)=>formatTick(metric1, v) }
           }
         };
@@ -4792,7 +5097,7 @@ function renderGroupTrend(catName){
     ensureDeltaArcs();
     groupChartSum = new Chart(ctxSum, {
       type: "line",
-      data: { labels, datasets: datasetsSum },
+      data: { labels: labelsCur, datasets: datasetsSum },
       options: {
         responsive: true,
         maintainAspectRatio: false,
@@ -4856,12 +5161,27 @@ function refreshProductDetails(){
   const lineKey = $("lineSelect").value || "";
   const catKey = $("catSelect").value || "";
   const prodKey = $("prodSelect").value || "";
-  if(!lineKey || !catKey || !prodKey){ $("prodDetails").classList.add("hidden"); destroyProdChart(); setProdLaunchDateDisplay(""); return; }
+  if(!lineKey || !catKey || !prodKey){ $("prodDetails").classList.add("hidden"); destroyProdChart(); setProdLaunchDateDisplay(""); setProdCostDisplay(""); return; }
 
   const _dispProd = $("prodSelect")?.selectedOptions?.[0]?.textContent || "";
   setProdLaunchDateDisplay(_dispProd);
+  setProdCostDisplay(_dispProd);
 
   const mmddSet = getDateSetInSelection();
+
+  // 前一期間日期集合（左圖）：週→前週、月→前月、年→前年（依目前範圍回推）
+  const _selP = (typeof getSelectionStartEndUTC === "function") ? getSelectionStartEndUTC() : {start:null,end:null};
+  const _prevP = (typeof getPrevPeriodsUTC === "function") ? getPrevPeriodsUTC(state.rangeMode, _selP.start, _selP.end) : {prevStart:null, prevEnd:null};
+  const prevMmddSet = (function(){
+    const set = new Set();
+    if(!(_prevP.prevStart instanceof Date) || isNaN(_prevP.prevStart) || !(_prevP.prevEnd instanceof Date) || isNaN(_prevP.prevEnd)) return set;
+    const all = getAllDatesForTemp(state.temp);
+    for(const o of all){
+      if(o.dateObj >= _prevP.prevStart && o.dateObj <= _prevP.prevEnd) set.add(o.mmdd);
+    }
+    return set;
+  })();
+
   const rows = [];
   for(const rec of state.records.values()){
     if(rec.temp !== state.temp) continue;
@@ -4927,7 +5247,23 @@ $("pChange").textContent = changeCnt ? fmtDec(changeSum/changeCnt, 1) : "—";
   }
 
   $("prodDetails").classList.remove("hidden");
-  renderProductTrend(rows);
+  
+  // 前一期間 rows（用於左圖）
+  const prevRows = [];
+  for(const rec of state.records.values()){
+    if(rec.temp !== state.temp) continue;
+    if(!prevMmddSet.has(rec.mmdd)) continue;
+    if(cleanKey(rec.line) !== lineKey) continue;
+    if(cleanKey(rec.category || "") !== catKey) continue;
+    if(cleanKey(rec.product) !== prodKey) continue;
+
+    const d2 = dateKeyToDateObj(rec.mmdd);
+    const ds2 = d2 ? dateObjToStr(d2) : rec.mmdd;
+    prevRows.push({dateStr: ds2, rec});
+  }
+  prevRows.sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
+
+renderProductTrend(rows, prevRows);
 }
 
 /* =========================
@@ -5137,8 +5473,13 @@ function setupProdSearch(){
 function markChartsDirty(){
   if(!state.chartsVisible) return;
   state.chartsDirty = true;
-  $("chartDirtyHint").classList.remove("hidden");
-  $("updateChartBtn").disabled = false;
+  const hint = $("chartDirtyHint");
+  if(hint) hint.classList.add("hidden");
+  // 自動更新（做一點 debounce，避免連續操作造成重繪過多）
+  clearTimeout(state._chartAutoTimer);
+  state._chartAutoTimer = setTimeout(()=>{
+    try{ renderCharts(); }catch(e){}
+  }, 80);
 }
 
 /* =========================
@@ -5307,7 +5648,7 @@ function _getPrevMmddSetForDrop(){
 
   if(state.rangeMode === "month"){
     let py = Number(state.year);
-    let pm = Number(state.month) - 1;
+    let pm = getSelectedMonth1Based() - 1;
     if(pm <= 0){ pm = 12; py = py - 1; }
     const wk = getMonthWeekWindowsUTC(py, pm); // 前月的週視圖（會跨月）
     return _buildSetFromRange(temp, wk.start, wk.end);
@@ -6002,18 +6343,11 @@ $("chartKpiSelect2").addEventListener("change", ()=>{
 });
 
 
-$("showChartBtn").addEventListener("click", ()=>{
-  state.chartsVisible = true;
-  $("chartArea").classList.remove("hidden");
-  $("updateChartBtn").disabled = false;
-  $("showChartBtn").disabled = true;
-  renderCharts();
-});
-
-$("updateChartBtn").addEventListener("click", ()=>{
-  if(!state.chartsVisible) return;
-  renderCharts();
-});
+// 趨勢圖：預設直接顯示並自動更新（不需要手動按鈕）
+state.chartsVisible = true;
+const _chartArea = $("chartArea");
+if(_chartArea) _chartArea.classList.remove("hidden");
+renderCharts();
 
 const _fileInput = $("fileInput");
 const _importBtn = $("importBtn");
@@ -6050,8 +6384,8 @@ state.records.clear();
   state.chartsVisible = false;
   state.chartsDirty = true;
   $("chartArea").classList.add("hidden");
-  $("showChartBtn").disabled = false;
-  $("updateChartBtn").disabled = true;
+  document.getElementById("showChartBtn").disabled = false;
+  const _ub=document.getElementById("updateChartBtn"); if(_ub) _ub.disabled = true;
   $("chartDirtyHint").classList.add("hidden");
 
   setDataChip("warn", "尚未載入資料");
