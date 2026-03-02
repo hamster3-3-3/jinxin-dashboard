@@ -1160,9 +1160,6 @@ function getSelectedMonth1Based(){
   return 1;
 }
 
-  if(m >= 0 && m <= 11) return m + 1;
-  return m;
-}
 
 function monthKeyFromDate(dateObj){
   return `${dateObj.getUTCFullYear()}-${String(dateObj.getUTCMonth()+1).padStart(2,"0")}`;
