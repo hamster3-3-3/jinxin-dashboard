@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v35_week_daily_fix -->
+  <!-- BUILD: v36_week_daily_fix_syntax -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -603,7 +603,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v35_week_daily_fix";
+window.BUILD_VERSION = "v36_week_daily_fix_syntax";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -1171,8 +1171,8 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v35_week_daily_fix";
-console.log("Jinxin dashboard build: v35_week_daily_fix", BUILD_VERSION);
+const BUILD_VERSION = "v36_week_daily_fix_syntax";
+console.log("Jinxin dashboard build: v36_week_daily_fix_syntax", BUILD_VERSION);
 
 const state = {
   rangeMode: "year",
@@ -4995,7 +4995,6 @@ function renderGroupTrend(catName){
   // series 可能只會吐出「有資料的週」，月別時強制對齊到視窗週標籤；週別/日別則直接用日資料點
   const labelsCur = useFixedWeekLabels ? (labelsCurWin.length ? labelsCurWin : (sCur1.labels || [])) : (sCur1.labels || []);
   const labelsPrev = useFixedWeekLabels ? (labelsPrevWin.length ? labelsPrevWin : ((sPrev1 && sPrev1.labels) ? sPrev1.labels : [])) : ((sPrev1 && sPrev1.labels) ? sPrev1.labels : []);
-v1.labels) ? sPrev1.labels : []);
 
 
   const alignValuesTo = (baseLabels, s)=>{
