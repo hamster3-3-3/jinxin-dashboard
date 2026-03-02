@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v37_group_prev_and_yaxis_fix -->
+  <!-- BUILD: v38_group_prev_month_restrict_fix -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -603,7 +603,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v37_group_prev_and_yaxis_fix";
+window.BUILD_VERSION = "v38_group_prev_month_restrict_fix";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -1171,8 +1171,8 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v37_group_prev_and_yaxis_fix";
-console.log("Jinxin dashboard build: v36_week_daily_fix_syntax", BUILD_VERSION);
+const BUILD_VERSION = "v38_group_prev_month_restrict_fix";
+console.log("Jinxin dashboard build:", BUILD_VERSION);
 
 const state = {
   rangeMode: "year",
@@ -4813,8 +4813,11 @@ const catKey = cleanKey(cleanText(catName || ""));
   return rows;
 }
 
-function buildGroupSeries(rows, metric, viewMode="avg"){
-  const mode = state.rangeMode;
+function buildGroupSeries(rows, metric, viewMode="avg", opts=null){
+  const mode = (opts && opts.mode) ? opts.mode : state.rangeMode;
+  const restrictMonthWeeks = (opts && Object.prototype.hasOwnProperty.call(opts,"restrictMonthWeeks")) ? !!opts.restrictMonthWeeks : true;
+  const yearForMonth = (opts && Number.isFinite(opts.year)) ? opts.year : state.year;
+  const monthForMonth = (opts && Number.isFinite(opts.month)) ? opts.month : state.month;
   const items = rows.map(x => {
     const d = new Date(x.dateStr + "T00:00:00Z");
     return {dateObj:d, dateStr:x.dateStr, rec:x.rec};
@@ -4906,12 +4909,15 @@ function buildGroupSeries(rows, metric, viewMode="avg"){
   };
 
   if(mode === "month"){
-    const wk = getMonthWeekWindowsUTC(state.year, state.month);
-    const allowed = new Set(wk.weeks.map(w => dateObjToStr(w.start)));
-    focus = items.filter(it => allowed.has(dateObjToStr(getWeekStartUTC(it.dateObj))));
+    // month 模式：本期需要限制在「該月的週視窗」；前期則不應再用 state.month 的 allowed 週去過濾（會把前期全濾掉）
+    if(restrictMonthWeeks){
+      const wk = getMonthWeekWindowsUTC(yearForMonth, monthForMonth);
+      const allowed = new Set(wk.weeks.map(w => dateObjToStr(w.start)));
+      focus = items.filter(it => allowed.has(dateObjToStr(getWeekStartUTC(it.dateObj))));
+    }
     title = (viewMode === "sum")
-      ? `週別（${String(state.month).padStart(2,"0")} 月｜每週加總）`
-      : `週別（${String(state.month).padStart(2,"0")} 月｜每週平均）`;
+      ? `週別（${String(monthForMonth).padStart(2,"0")} 月｜每週加總）`
+      : `週別（${String(monthForMonth).padStart(2,"0")} 月｜每週平均）`;
   }
 
   for(const it of focus){
@@ -4967,10 +4973,11 @@ function renderGroupTrend(catName){
     if(sel2) sel2.value = "";
   }
 
-  const sCur1 = buildGroupSeries(rows, metric1, "sum");
-  const sCur2 = metric2 ? buildGroupSeries(rows, metric2, "sum") : null;
-  const sPrev1 = buildGroupSeries(rowsPrev, metric1, "sum");
-  const sPrev2 = metric2 ? buildGroupSeries(rowsPrev, metric2, "sum") : null;
+  const _isMonthMode = (state.rangeMode === "month");
+  const sCur1 = _isMonthMode ? buildGroupSeries(rows, metric1, "sum", {mode:"month", restrictMonthWeeks:true, year: state.year, month: state.month}) : buildGroupSeries(rows, metric1, "sum");
+  const sCur2 = metric2 ? (_isMonthMode ? buildGroupSeries(rows, metric2, "sum", {mode:"month", restrictMonthWeeks:true, year: state.year, month: state.month}) : buildGroupSeries(rows, metric2, "sum")) : null;
+  const sPrev1 = _isMonthMode ? buildGroupSeries(rowsPrev, metric1, "sum", {mode:"month", restrictMonthWeeks:false, year: state.year, month: state.month}) : buildGroupSeries(rowsPrev, metric1, "sum");
+  const sPrev2 = metric2 ? (_isMonthMode ? buildGroupSeries(rowsPrev, metric2, "sum", {mode:"month", restrictMonthWeeks:false, year: state.year, month: state.month}) : buildGroupSeries(rowsPrev, metric2, "sum")) : null;
 
   // 以「期間視窗」產生固定週標籤（就算該週沒資料也要顯示，避免左圖只剩一個點）
   const buildWeekLabelsFromRange = (startUTC, endUTC)=>{
