@@ -3586,12 +3586,6 @@ function renderCharts(){
     if(!(startUTC instanceof Date) || isNaN(startUTC) || !(endUTC instanceof Date) || isNaN(endUTC)) return [];
     const allDates = getAllDatesForTemp(tempForPrev);
     if(!allDates || !allDates.length) return [];
-    // month mode: 使用同口徑的跨月週視圖，因此 start/end 已經是視窗；仍確保該月有資料避免誤抓
-    if(state.rangeMode === "month"){
-      const m = startUTC.getUTCMonth()+1;
-      const hasInMonth = allDates.some(o => (o.dateObj.getUTCMonth()+1) === m);
-      if(!hasInMonth) return [];
-    }
     return allDates
       .filter(o => o.dateObj >= startUTC && o.dateObj <= endUTC)
       .map(o => ({...o, summary: getSummaryForDay(tempForPrev, o.mmdd)}))
