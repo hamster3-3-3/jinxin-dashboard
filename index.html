@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v39_group_datekey_fix -->
+  <!-- BUILD: v40_daily_compare_align_fix -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -603,7 +603,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v39_group_datekey_fix";
+window.BUILD_VERSION = "v40_daily_compare_align_fix";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -1171,7 +1171,7 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v39_group_datekey_fix";
+const BUILD_VERSION = "v40_daily_compare_align_fix";
 console.log("Jinxin dashboard build:", BUILD_VERSION);
 
 const state = {
@@ -3497,11 +3497,20 @@ function renderProductTrend(rowsCur, rowsPrev){
   const __yP = __calcMinMaxP([ (s1Prev&&s1Prev.values)||[], (s1Cur&&s1Cur.values)||[] ]);
   const __y1P = metric2 ? __calcMinMaxP([ (s2Prev&&s2Prev.values)||[], (s2Cur&&s2Cur.values)||[] ]) : null;
 
+function alignValuesToLabels(baseLabels, s){
+    const map = new Map();
+    const lbs = (s && s.labels) ? s.labels : [];
+    const vals = (s && s.values) ? s.values : [];
+    const norm = (x)=> String(x ?? "").trim();
+    for(let i=0;i<lbs.length;i++) map.set(norm(lbs[i]), vals[i]);
+    return (baseLabels||[]).map(lb => map.has(norm(lb)) ? map.get(norm(lb)) : null);
+  }
+
 function makeChart(canvasId, titleElId, s1, s2){
     const labels = (s1 && s1.labels) ? s1.labels : [];
 
     const values1 = (s1 && s1.values) ? (s1.values||[]).slice() : [];
-    const values2 = (s2 && s2.values) ? alignValues(s2) : null;
+    const values2 = (s2 && s2.values) ? alignValuesToLabels(labels, s2) : null;
 
     if($(titleElId)) $(titleElId).textContent = (s1 && s1.title) ? s1.title : "趨勢";
 
