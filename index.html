@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v30_group_prev_labels_fix2 -->
+  <!-- BUILD: v31_group_labels_delimiter_fix -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -603,7 +603,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v30_group_prev_labels_fix2";
+window.BUILD_VERSION = "v31_group_labels_delimiter_fix";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -1171,7 +1171,7 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v30_group_prev_labels_fix2";
+const BUILD_VERSION = "v31_group_labels_delimiter_fix";
 console.log("Jinxin dashboard build:", BUILD_VERSION);
 
 const state = {
@@ -4981,7 +4981,7 @@ function renderGroupTrend(catName){
     const out = [];
     for(let d = new Date(s0); d <= e0; d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()+7))){
       const e = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()+6));
-      const lab = `${p2(d.getUTCMonth()+1)}/${p2(d.getUTCDate())}~${p2(e.getUTCMonth()+1)}/${p2(e.getUTCDate())}`;
+      const lab = `${p2(d.getUTCMonth()+1)}/${p2(d.getUTCDate())}～${p2(e.getUTCMonth()+1)}/${p2(e.getUTCDate())}`;
       out.push(lab);
     }
     return out;
