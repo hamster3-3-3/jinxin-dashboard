@@ -3572,29 +3572,33 @@ function renderCharts(){
   const kpi2 = state.chartKpi2 || "";
 
   // 以「目前視圖 +（可選）指定範圍」篩出的每日資料作為趨勢基礎
-  const dailyList = summariesInRange().slice().sort((a,b)=>a.dateObj-b.dateObj);
-
-  // 前一期間（週：前週、月：前月、年：前年）— 用於左圖對照
+  // NOTE: 月別的 KPI 趨勢圖要跟「品群趨勢圖」同口徑（週二~週一的跨月週視圖），
+  // 若沿用 summariesInRange()（通常只保留月份內的日別）會導致月別趨勢圖 buckets 全空。
   const tempForPrev = state.temp;
-  const _sel = (typeof getSelectionStartEndUTC === "function") ? getSelectionStartEndUTC() : {start:null,end:null};
-  const _prev = (typeof getPrevPeriodsUTC === "function") ? getPrevPeriodsUTC(state.rangeMode, _sel.start, _sel.end) : {prevStart:null, prevEnd:null};
-  const prevStart = _prev.prevStart, prevEnd = _prev.prevEnd;
-
   const buildSummariesForStartEnd = (startUTC, endUTC)=>{
     if(!(startUTC instanceof Date) || isNaN(startUTC) || !(endUTC instanceof Date) || isNaN(endUTC)) return [];
     const allDates = getAllDatesForTemp(tempForPrev);
     if(!allDates || !allDates.length) return [];
-    // month mode: 使用同口徑的跨月週視圖，因此 start/end 已經是視窗；仍確保該月有資料避免誤抓
-    if(state.rangeMode === "month"){
-      const m = startUTC.getUTCMonth()+1;
-      const hasInMonth = allDates.some(o => (o.dateObj.getUTCMonth()+1) === m);
-      if(!hasInMonth) return [];
-    }
     return allDates
       .filter(o => o.dateObj >= startUTC && o.dateObj <= endUTC)
       .map(o => ({...o, summary: getSummaryForDay(tempForPrev, o.mmdd)}))
       .filter(x => x.summary);
   };
+
+  let dailyList;
+  if(state.rangeMode === "month"){
+    const mSel = getSelectedMonth1Based();
+    const wk = getMonthWeekWindowsUTC(state.year, mSel);
+    dailyList = buildSummariesForStartEnd(wk.start, wk.end).slice().sort((a,b)=>a.dateObj-b.dateObj);
+  }else{
+    dailyList = summariesInRange().slice().sort((a,b)=>a.dateObj-b.dateObj);
+  }
+
+  // 前一期間（週：前週、月：前月、年：前年）— 用於左圖對照
+  const _sel = (typeof getSelectionStartEndUTC === "function") ? getSelectionStartEndUTC() : {start:null,end:null};
+  const _prev = (typeof getPrevPeriodsUTC === "function") ? getPrevPeriodsUTC(state.rangeMode, _sel.start, _sel.end) : {prevStart:null, prevEnd:null};
+  const prevStart = _prev.prevStart, prevEnd = _prev.prevEnd;
+
 
   const prevDailyList = buildSummariesForStartEnd(prevStart, prevEnd).slice().sort((a,b)=>a.dateObj-b.dateObj);
 
