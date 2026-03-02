@@ -1130,15 +1130,17 @@ function getSelectedMonth1Based(){
     const mt = text.match(/^(\d{1,2})/);
     const textNum = mt ? Number(mt[1]) : null;
 
+    // ✅ 修正：有些月份下拉選單的 option.value 可能只是「索引值(0,1,2...)」
+    // 但顯示文字才是實際月份（例如：文字=02，value=0）。
+    // 因此只要文字可解析出月份，應一律以文字為準。
+    if(textNum && textNum >= 1 && textNum <= 12) return textNum;
+
     if(Number.isFinite(valNum)){
-      // 0-based 判斷：value=1 但文字是 02（或 value=0 文字 01）
-      if(textNum && valNum >= 0 && valNum <= 11 && textNum === (valNum + 1)) return textNum;
       // 一般 1-based
       if(valNum >= 1 && valNum <= 12) return valNum;
       // 0-based 退而求其次
       if(valNum >= 0 && valNum <= 11) return valNum + 1;
     }
-    if(textNum && textNum >= 1 && textNum <= 12) return textNum;
     return null;
   };
 
