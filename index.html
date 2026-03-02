@@ -6283,7 +6283,9 @@ document.querySelectorAll("[data-temp]").forEach(btn=>{
   });
 });
 $("monthSelect").addEventListener("change", ()=>{
-  state.month = Number($("monthSelect").value) || state.month;
+  const mSel = getSelectedMonth1Based();
+  if(Number.isFinite(mSel)) state.month = mSel;
+  else state.month = Number($("monthSelect").value) || state.month;
   const wms = $("weekMonthSelect"); if(wms) wms.value = String(state.month);
   refreshWeekOptions();
   refreshAll();
