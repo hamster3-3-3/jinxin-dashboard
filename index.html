@@ -3701,7 +3701,7 @@ function renderCharts(){
   const sumTitleEl = document.getElementById("dailyChartSumTitle");
   if(sumTitleEl) sumTitleEl.textContent = `${axisLabel}（本期：${rangeStr(_sel.start, _sel.end)}）`;
 
-  const pad2 = (n)=>String(n).padStart(2,"0");
+  function pad2(n){ return String(n).padStart(2,"0"); }
   function fmtMMDDSlash(d){ return `${pad2(d.getUTCMonth()+1)}/${pad2(d.getUTCDate())}`; }
 
   const getWeekStart = (d)=>{
