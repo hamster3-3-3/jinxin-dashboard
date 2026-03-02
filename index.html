@@ -3267,10 +3267,14 @@ function buildWeeklyOrDailySeries(kpi = state.chartKpi){
     byWeek.get(wsStr).push(it);
   }
   const wk = (mode==="month") ? getMonthWeekWindowsUTC(state.year, state.month) : null;
-  const labelByStart = wk ? new Map(wk.weeks.map(w=>[w.startStr, w.label])) : null;
+  const labelByStart = wk ? new Map(wk.weeks.map(w=>{
+    const startStr = dateObjToStr(w.start);
+    const label = `${String(w.start.getUTCMonth()+1).padStart(2,"0")}/${String(w.start.getUTCDate()).padStart(2,"0")}~${String(w.end.getUTCMonth()+1).padStart(2,"0")}/${String(w.end.getUTCDate()).padStart(2,"0")}`;
+    return [startStr, label];
+  })) : null;
 
   const orderedStarts = (mode==="month")
-    ? wk.weeks.map(w=>w.startStr)
+    ? wk.weeks.map(w=>dateObjToStr(w.start))
     : Array.from(byWeek.keys()).sort((a,b)=>a.localeCompare(b));
 
   const labels=[], values=[];
