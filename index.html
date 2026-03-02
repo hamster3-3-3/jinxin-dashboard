@@ -1117,49 +1117,42 @@ function getMonthWeekWindowsUTC(year, month){
   return { monthStart, monthEnd, weeks, start, end };
 }
 function getSelectedMonth1Based(){
-  // Always prefer the visible selectors (monthSelect / weekMonthSelect).
-  // monthSelect / weekMonthSelect are populated with 1..12 (not 0-based).
-  const ms = document.getElementById("monthSelect");
-  const wms = document.getElementById("weekMonthSelect");
-
-  const tryParse = (el)=>{
+  // 以 DOM 選單為準，避免 state 被汙染（0-based / 1-based 混用）
+  const mode = state.rangeMode;
+  const selEl = (mode === "week") ? $("weekMonthSelect") : $("monthSelect");
+  const pickFrom = (el)=>{
     if(!el) return null;
-    const raw = (el.value ?? "").toString().trim();
-    if(!raw) return null;
+    const opt = el.options && el.selectedIndex >= 0 ? el.options[el.selectedIndex] : null;
+    const text = opt ? String(opt.textContent||"").trim() : "";
+    const valRaw = el.value;
+    const valNum = Number(valRaw);
+    // 優先用顯示文字（通常是 01~12）
+    const mt = text.match(/^(\d{1,2})/);
+    const textNum = mt ? Number(mt[1]) : null;
 
-    // If value is numeric month.
-    const n = Number(raw);
-    if(Number.isFinite(n)){
-      // 1..12 (preferred)
-      if(n>=1 && n<=12) return n;
-      // 0..11 (0-based legacy)
-      if(n>=0 && n<=11) return n+1;
+    if(Number.isFinite(valNum)){
+      // 0-based 判斷：value=1 但文字是 02（或 value=0 文字 01）
+      if(textNum && valNum >= 0 && valNum <= 11 && textNum === (valNum + 1)) return textNum;
+      // 一般 1-based
+      if(valNum >= 1 && valNum <= 12) return valNum;
+      // 0-based 退而求其次
+      if(valNum >= 0 && valNum <= 11) return valNum + 1;
     }
-
-    // Sometimes option text is like "02（無資料）"
-    const txt = (el.options && el.selectedIndex>=0) ? (el.options[el.selectedIndex].textContent||"") : "";
-    const m = txt.match(/\b(\d{1,2})\b/);
-    if(m){
-      const mm = Number(m[1]);
-      if(Number.isFinite(mm) && mm>=1 && mm<=12) return mm;
-    }
+    if(textNum && textNum >= 1 && textNum <= 12) return textNum;
     return null;
   };
 
-  const m1 = tryParse(ms);
-  if(m1) return m1;
-  const m2 = tryParse(wms);
-  if(m2) return m2;
+  const picked = pickFrom(selEl);
+  if(picked) return picked;
 
-  // Fallback to state.month
+  // fallback：舊狀態
   const sm = Number(state.month);
   if(Number.isFinite(sm)){
-    if(sm>=1 && sm<=12) return sm;
-    if(sm>=0 && sm<=11) return sm+1;
+    if(sm >= 1 && sm <= 12) return sm;
+    if(sm >= 0 && sm <= 11) return sm + 1;
   }
   return 1;
 }
-
 
 function monthKeyFromDate(dateObj){
   return `${dateObj.getUTCFullYear()}-${String(dateObj.getUTCMonth()+1).padStart(2,"0")}`;
@@ -3572,33 +3565,29 @@ function renderCharts(){
   const kpi2 = state.chartKpi2 || "";
 
   // 以「目前視圖 +（可選）指定範圍」篩出的每日資料作為趨勢基礎
-  // NOTE: 月別的 KPI 趨勢圖要跟「品群趨勢圖」同口徑（週二~週一的跨月週視圖），
-  // 若沿用 summariesInRange()（通常只保留月份內的日別）會導致月別趨勢圖 buckets 全空。
+  const dailyList = summariesInRange().slice().sort((a,b)=>a.dateObj-b.dateObj);
+
+  // 前一期間（週：前週、月：前月、年：前年）— 用於左圖對照
   const tempForPrev = state.temp;
+  const _sel = (typeof getSelectionStartEndUTC === "function") ? getSelectionStartEndUTC() : {start:null,end:null};
+  const _prev = (typeof getPrevPeriodsUTC === "function") ? getPrevPeriodsUTC(state.rangeMode, _sel.start, _sel.end) : {prevStart:null, prevEnd:null};
+  const prevStart = _prev.prevStart, prevEnd = _prev.prevEnd;
+
   const buildSummariesForStartEnd = (startUTC, endUTC)=>{
     if(!(startUTC instanceof Date) || isNaN(startUTC) || !(endUTC instanceof Date) || isNaN(endUTC)) return [];
     const allDates = getAllDatesForTemp(tempForPrev);
     if(!allDates || !allDates.length) return [];
+    // month mode: 使用同口徑的跨月週視圖，因此 start/end 已經是視窗；仍確保該月有資料避免誤抓
+    if(state.rangeMode === "month"){
+      const m = startUTC.getUTCMonth()+1;
+      const hasInMonth = allDates.some(o => (o.dateObj.getUTCMonth()+1) === m);
+      if(!hasInMonth) return [];
+    }
     return allDates
       .filter(o => o.dateObj >= startUTC && o.dateObj <= endUTC)
       .map(o => ({...o, summary: getSummaryForDay(tempForPrev, o.mmdd)}))
       .filter(x => x.summary);
   };
-
-  let dailyList;
-  if(state.rangeMode === "month"){
-    const mSel = getSelectedMonth1Based();
-    const wk = getMonthWeekWindowsUTC(state.year, mSel);
-    dailyList = buildSummariesForStartEnd(wk.start, wk.end).slice().sort((a,b)=>a.dateObj-b.dateObj);
-  }else{
-    dailyList = summariesInRange().slice().sort((a,b)=>a.dateObj-b.dateObj);
-  }
-
-  // 前一期間（週：前週、月：前月、年：前年）— 用於左圖對照
-  const _sel = (typeof getSelectionStartEndUTC === "function") ? getSelectionStartEndUTC() : {start:null,end:null};
-  const _prev = (typeof getPrevPeriodsUTC === "function") ? getPrevPeriodsUTC(state.rangeMode, _sel.start, _sel.end) : {prevStart:null, prevEnd:null};
-  const prevStart = _prev.prevStart, prevEnd = _prev.prevEnd;
-
 
   const prevDailyList = buildSummariesForStartEnd(prevStart, prevEnd).slice().sort((a,b)=>a.dateObj-b.dateObj);
 
@@ -3655,27 +3644,6 @@ function renderCharts(){
         return (ad && bd) ? (ad - bd) : String(a.key).localeCompare(String(b.key));
       });
     }else if(_groupMode === "week"){
-      // month mode: align buckets to the previous month's "week view" windows (Tue~Mon) to match the current-month KPI logic
-      if(state.rangeMode === "month"){
-        const curM = getSelectedMonth1Based();
-        let py = state.year, pm = curM - 1;
-        if(pm <= 0){ pm = 12; py -= 1; }
-        const wk = getMonthWeekWindowsUTC(py, pm);
-        const map = new Map(_buckets.map(b => [b.key, b]));
-        _buckets.length = 0;
-        for(const w of wk.weeks){
-          const k = dateObjToStr(w.start);
-          let b = map.get(k);
-          if(!b){
-            b = { key:k, label:`${fmtMMDDSlash(w.start)}~${fmtMMDDSlash(w.end)}`, items:[], weekStart:w.start };
-          }else{
-            b.label = `${fmtMMDDSlash(w.start)}~${fmtMMDDSlash(w.end)}`;
-            b.weekStart = w.start;
-          }
-          _buckets.push(b);
-        }
-        return _buckets;
-      }
       _buckets.sort((a,b)=>(a.weekStart - b.weekStart));
     }else{
       _buckets.sort((a,b)=>(a.month - b.month));
@@ -3709,15 +3677,7 @@ function renderCharts(){
   };
   $("dailyChartTitle").textContent = `${axisLabel}（前一期間：${rangeStr(prevStart, prevEnd)}）`;
   const sumTitleEl = document.getElementById("dailyChartSumTitle");
-  if(sumTitleEl){
-    if(state.rangeMode === "month"){
-      const mSel = getSelectedMonth1Based();
-      const wk = getMonthWeekWindowsUTC(state.year, mSel);
-      sumTitleEl.textContent = `${axisLabel}（本期：${rangeStr(wk.start, wk.end)}）`;
-    }else{
-      sumTitleEl.textContent = `${axisLabel}（本期：${rangeStr(_sel.start, _sel.end)}）`;
-    }
-  }
+  if(sumTitleEl) sumTitleEl.textContent = `${axisLabel}（本期：${rangeStr(_sel.start, _sel.end)}）`;
 
   const pad2 = (n)=>String(n).padStart(2,"0");
   function fmtMMDDSlash(d){ return `${pad2(d.getMonth()+1)}/${pad2(d.getDate())}`; }
@@ -3780,27 +3740,7 @@ function renderCharts(){
       return (ad && bd) ? (ad - bd) : String(a.key).localeCompare(String(b.key));
     });
   }else if(groupMode === "week"){
-    // month mode: align buckets to the selected month's "week view" windows (Tue~Mon),
-    // so the KPI month chart X-axis follows the same window logic as the category trend chart.
-    if(state.rangeMode === "month"){
-      const mSel = getSelectedMonth1Based();
-      const wk = getMonthWeekWindowsUTC(state.year, mSel);
-      const map = new Map(buckets.map(b => [b.key, b]));
-      buckets.length = 0;
-      for(const w of wk.weeks){
-        const k = dateObjToStr(w.start);
-        let b = map.get(k);
-        if(!b){
-          b = { key:k, label:`${fmtMMDDSlash(w.start)}~${fmtMMDDSlash(w.end)}`, items:[], weekStart:w.start };
-        }else{
-          b.label = `${fmtMMDDSlash(w.start)}~${fmtMMDDSlash(w.end)}`;
-          b.weekStart = w.start;
-        }
-        buckets.push(b);
-      }
-    }else{
-      buckets.sort((a,b)=>(a.weekStart - b.weekStart));
-    }
+    buckets.sort((a,b)=>(a.weekStart - b.weekStart));
   }else{
     buckets.sort((a,b)=>(a.month - b.month));
   }
@@ -6336,9 +6276,7 @@ document.querySelectorAll("[data-temp]").forEach(btn=>{
   });
 });
 $("monthSelect").addEventListener("change", ()=>{
-  const mSel = getSelectedMonth1Based();
-  if(Number.isFinite(mSel)) state.month = mSel;
-  else state.month = Number($("monthSelect").value) || state.month;
+  state.month = Number($("monthSelect").value) || state.month;
   const wms = $("weekMonthSelect"); if(wms) wms.value = String(state.month);
   refreshWeekOptions();
   refreshAll();
