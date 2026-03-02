@@ -1117,16 +1117,24 @@ function getMonthWeekWindowsUTC(year, month){
   return { monthStart, monthEnd, weeks, start, end };
 }
 function getSelectedMonth1Based(){
-  const m = getSelectedMonth1Based();
-  if(!Number.isFinite(m)) return m;
-  // 相容：有些下拉選單可能用 0~11 表示月份（0=1月）
-  if(m >= 0 && m <= 11 && String(state.month).length <= 2 && String(state.month).padStart(2,"0") !== String(m).padStart(2,"0")){
-    // keep as-is if original was like "02"
-    return m;
-  }
+  // Returns selected month as 1..12.
+  // Prefer UI value when available; fallback to state.month.
+  const ms = document.getElementById("monthSelect");
+  const wms = document.getElementById("weekMonthSelect");
+  let raw = null;
+
+  if(state && state.rangeMode === "week" && wms && wms.value) raw = wms.value;
+  else if(ms && ms.value) raw = ms.value;
+  else if(state && state.month != null) raw = state.month;
+
+  const m = Number(raw);
+  if(!Number.isFinite(m)) return NaN;
+
+  // Compatibility: some legacy code might pass 0..11 (0=Jan). Convert to 1..12.
   if(m >= 0 && m <= 11) return m + 1;
   return m;
 }
+
 
 function monthKeyFromDate(dateObj){
   return `${dateObj.getUTCFullYear()}-${String(dateObj.getUTCMonth()+1).padStart(2,"0")}`;
