@@ -1117,32 +1117,55 @@ function getMonthWeekWindowsUTC(year, month){
   return { monthStart, monthEnd, weeks, start, end };
 }
 function getSelectedMonth1Based(){
-  // 1~12 month number (1-based)
+  // Return month in 1~12, robust to select values being either 1~12 or 0~11 while labels show 01~12.
   const ids = ["monthSelect","weekMonthSelect"];
   for(const id of ids){
     const el = document.getElementById(id);
     if(!el) continue;
+
+    // Prefer selected option text if it looks like a month (common when value is 0-based but label is 1-based)
+    try{
+      const opt = el.options && el.selectedIndex >= 0 ? el.options[el.selectedIndex] : null;
+      const t = (opt && opt.textContent != null) ? String(opt.textContent).trim() : "";
+      const tm = t.match(/^0?(\d{1,2})$/);
+      if(tm){
+        const n = Number(tm[1]);
+        if(Number.isFinite(n) && n>=1 && n<=12) return n;
+      }
+    }catch(_e){}
+
     const v = String(el.value ?? "").trim();
     if(!v) continue;
 
-    // accept "2", "02", 2
-    const m1 = v.match(/^0?(\d{1,2})$/);
-    if(m1){
-      const n = Number(m1[1]);
+    const vm = v.match(/^(-?\d+)$/);
+    if(vm){
+      const n = Number(vm[1]);
       if(Number.isFinite(n)){
         if(n >= 1 && n <= 12) return n;
-        if(n >= 0 && n <= 11) return n + 1; // tolerate 0~11
-      }
-    }
 
-    const n = Number(v);
-    if(Number.isFinite(n)){
-      if(n >= 1 && n <= 12) return n;
-      if(n >= 0 && n <= 11) return n + 1;
+        // If the select is configured as 0~11 (0-based), convert to 1~12.
+        if(n >= 0 && n <= 11){
+          const vals = [];
+          try{
+            if(el.options && el.options.length){
+              for(const o of el.options){
+                const ov = String(o.value ?? "").trim();
+                if(/^(-?\d+)$/.test(ov)) vals.push(Number(ov));
+              }
+            }
+          }catch(_e){}
+          const hasZero = vals.includes(0);
+          const maxVal = vals.length ? Math.max(...vals) : NaN;
+          // Heuristic: if options include 0, or max<=11 with 12 options, treat as 0-based.
+          if(hasZero || (vals.length >= 12 && Number.isFinite(maxVal) && maxVal <= 11)) return n + 1;
+          // Otherwise tolerate as 0-based anyway (safer than being off-by-one in month view).
+          return n + 1;
+        }
+      }
     }
   }
 
-  // fallback to state.month
+  // fallback to state.month (may be 0-based or 1-based)
   const sm = Number(state.month);
   if(Number.isFinite(sm)){
     if(sm >= 1 && sm <= 12) return sm;
@@ -2624,7 +2647,8 @@ function getSelectionStartEndUTC(){
     return { start: new Date(Date.UTC(y,0,1)), end: new Date(Date.UTC(y,11,31)) };
   }
   if(mode === "month"){
-    const m = getSelectedMonth1Based();
+    const monthSelEl = document.getElementById("monthSelect");
+    const m = Number((monthSelEl && monthSelEl.value) ? monthSelEl.value : getSelectedMonth1Based());
     const wk = getMonthWeekWindowsUTC(state.year, m); // 使用「月別週視圖」完整視窗（可跨月）
     return { start: wk.start, end: wk.end };
   }
@@ -6330,7 +6354,11 @@ document.querySelectorAll("[data-temp]").forEach(btn=>{
   });
 });
 $("monthSelect").addEventListener("change", ()=>{
-  state.month = Number($("monthSelect").value) || state.month;
+  // Always trust the actual select value (1~12) to avoid off-by-one issues.
+  const ms = document.getElementById("monthSelect");
+  const mv = ms ? Number(ms.value) : NaN;
+  if(Number.isFinite(mv) && mv>=1 && mv<=12) state.month = mv;
+  else state.month = getSelectedMonth1Based() || state.month;
   const wms = $("weekMonthSelect"); if(wms) wms.value = String(state.month);
   refreshWeekOptions();
   refreshAll();
@@ -6339,7 +6367,7 @@ $("monthSelect").addEventListener("change", ()=>{
 const _weekMonthSel = $("weekMonthSelect");
 if(_weekMonthSel){
   _weekMonthSel.addEventListener("change", ()=>{
-    state.month = Number($("weekMonthSelect").value) || state.month;
+    state.month = getSelectedMonth1Based() || state.month;
     $("monthSelect").value = String(state.month);
     refreshWeekOptions();
     refreshAll();
