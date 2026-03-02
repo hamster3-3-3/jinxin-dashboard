@@ -2656,11 +2656,29 @@ function getPrevPeriodsUTC(mode, curStart, curEnd){
     };
   }
   if(mode === "month"){
+    // Month view uses "week windows that intersect the month" (Tue~Mon). We must compute
+    // previous months by month index, NOT by shifting the already-cross-month window.
+    const mCur = getSelectedMonth1Based() || Number(state.month) || 1;
+    const yCur = Number(state.year) || (new Date()).getUTCFullYear();
+
+    const normYM = (y,m)=>{
+      let yy = Number(y), mm = Number(m);
+      while(mm <= 0){ mm += 12; yy -= 1; }
+      while(mm > 12){ mm -= 12; yy += 1; }
+      return {y: yy, m: mm};
+    };
+
+    const p1 = normYM(yCur, mCur - 1);
+    const p2 = normYM(yCur, mCur - 2);
+
+    const wk1 = getMonthWeekWindowsUTC(p1.y, p1.m);
+    const wk2 = getMonthWeekWindowsUTC(p2.y, p2.m);
+
     return {
-      prevStart: __shiftUTCDateByMonths(curStart, -1),
-      prevEnd:   __shiftUTCDateByMonths(curEnd,   -1),
-      prev2Start: __shiftUTCDateByMonths(curStart, -2),
-      prev2End:   __shiftUTCDateByMonths(curEnd,   -2),
+      prevStart: wk1.start,
+      prevEnd:   wk1.end,
+      prev2Start: wk2.start,
+      prev2End:   wk2.end,
     };
   }
   // week/day/custom：以 7 天為一期回推
