@@ -2251,7 +2251,7 @@ function summariesInRange(){
   // 指定範圍（起日～迄日）為「全視圖」的前置過濾：
   // - 日別：顯示期間內每日資料
   // - 週/月/年：先套用指定範圍，再做原本的彙總口徑
-  const dr = getActiveDayRange();
+  const dr = (state.rangeMode === "custom") ? getActiveDayRange() : null;
   const base = dr ? all.filter(o => o.dateObj >= dr.start && o.dateObj <= dr.end) : all;
 
   if(state.rangeMode === "year"){
