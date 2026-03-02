@@ -3651,6 +3651,27 @@ function renderCharts(){
         return (ad && bd) ? (ad - bd) : String(a.key).localeCompare(String(b.key));
       });
     }else if(_groupMode === "week"){
+      // month mode: align buckets to the previous month's "week view" windows (Tue~Mon) to match the current-month KPI logic
+      if(state.rangeMode === "month"){
+        const curM = getSelectedMonth1Based();
+        let py = state.year, pm = curM - 1;
+        if(pm <= 0){ pm = 12; py -= 1; }
+        const wk = getMonthWeekWindowsUTC(py, pm);
+        const map = new Map(_buckets.map(b => [b.key, b]));
+        _buckets.length = 0;
+        for(const w of wk.weeks){
+          const k = dateObjToStr(w.start);
+          let b = map.get(k);
+          if(!b){
+            b = { key:k, label:`${fmtMMDDSlash(w.start)}~${fmtMMDDSlash(w.end)}`, items:[], weekStart:w.start };
+          }else{
+            b.label = `${fmtMMDDSlash(w.start)}~${fmtMMDDSlash(w.end)}`;
+            b.weekStart = w.start;
+          }
+          _buckets.push(b);
+        }
+        return _buckets;
+      }
       _buckets.sort((a,b)=>(a.weekStart - b.weekStart));
     }else{
       _buckets.sort((a,b)=>(a.month - b.month));
@@ -3684,7 +3705,15 @@ function renderCharts(){
   };
   $("dailyChartTitle").textContent = `${axisLabel}（前一期間：${rangeStr(prevStart, prevEnd)}）`;
   const sumTitleEl = document.getElementById("dailyChartSumTitle");
-  if(sumTitleEl) sumTitleEl.textContent = `${axisLabel}（本期：${rangeStr(_sel.start, _sel.end)}）`;
+  if(sumTitleEl){
+    if(state.rangeMode === "month"){
+      const mSel = getSelectedMonth1Based();
+      const wk = getMonthWeekWindowsUTC(state.year, mSel);
+      sumTitleEl.textContent = `${axisLabel}（本期：${rangeStr(wk.start, wk.end)}）`;
+    }else{
+      sumTitleEl.textContent = `${axisLabel}（本期：${rangeStr(_sel.start, _sel.end)}）`;
+    }
+  }
 
   const pad2 = (n)=>String(n).padStart(2,"0");
   function fmtMMDDSlash(d){ return `${pad2(d.getMonth()+1)}/${pad2(d.getDate())}`; }
@@ -3747,7 +3776,27 @@ function renderCharts(){
       return (ad && bd) ? (ad - bd) : String(a.key).localeCompare(String(b.key));
     });
   }else if(groupMode === "week"){
-    buckets.sort((a,b)=>(a.weekStart - b.weekStart));
+    // month mode: align buckets to the selected month's "week view" windows (Tue~Mon),
+    // so the KPI month chart X-axis follows the same window logic as the category trend chart.
+    if(state.rangeMode === "month"){
+      const mSel = getSelectedMonth1Based();
+      const wk = getMonthWeekWindowsUTC(state.year, mSel);
+      const map = new Map(buckets.map(b => [b.key, b]));
+      buckets.length = 0;
+      for(const w of wk.weeks){
+        const k = dateObjToStr(w.start);
+        let b = map.get(k);
+        if(!b){
+          b = { key:k, label:`${fmtMMDDSlash(w.start)}~${fmtMMDDSlash(w.end)}`, items:[], weekStart:w.start };
+        }else{
+          b.label = `${fmtMMDDSlash(w.start)}~${fmtMMDDSlash(w.end)}`;
+          b.weekStart = w.start;
+        }
+        buckets.push(b);
+      }
+    }else{
+      buckets.sort((a,b)=>(a.weekStart - b.weekStart));
+    }
   }else{
     buckets.sort((a,b)=>(a.month - b.month));
   }
