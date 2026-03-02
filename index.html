@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v29_group_prev_labels_fix -->
+  <!-- BUILD: v30_group_prev_labels_fix2 -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -603,7 +603,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v29_group_prev_labels_fix";
+window.BUILD_VERSION = "v30_group_prev_labels_fix2";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -1171,7 +1171,7 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v29_group_prev_labels_fix";
+const BUILD_VERSION = "v30_group_prev_labels_fix2";
 console.log("Jinxin dashboard build:", BUILD_VERSION);
 
 const state = {
@@ -4974,13 +4974,14 @@ function renderGroupTrend(catName){
   // 以「期間視窗」產生固定週標籤（就算該週沒資料也要顯示，避免左圖只剩一個點）
   const buildWeekLabelsFromRange = (startUTC, endUTC)=>{
     if(!(startUTC instanceof Date) || isNaN(startUTC) || !(endUTC instanceof Date) || isNaN(endUTC)) return [];
+    const p2 = (n)=> String(n).padStart(2,"0");
     // 對齊週二起始
     const s0 = (typeof getWeekStartUTC === "function") ? getWeekStartUTC(startUTC) : new Date(Date.UTC(startUTC.getUTCFullYear(), startUTC.getUTCMonth(), startUTC.getUTCDate()));
     const e0 = (typeof getWeekStartUTC === "function") ? getWeekStartUTC(endUTC) : new Date(Date.UTC(endUTC.getUTCFullYear(), endUTC.getUTCMonth(), endUTC.getUTCDate()));
     const out = [];
     for(let d = new Date(s0); d <= e0; d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()+7))){
       const e = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()+6));
-      const lab = `${pad2(d.getUTCMonth()+1)}/${pad2(d.getUTCDate())}~${pad2(e.getUTCMonth()+1)}/${pad2(e.getUTCDate())}`;
+      const lab = `${p2(d.getUTCMonth()+1)}/${p2(d.getUTCDate())}~${p2(e.getUTCMonth()+1)}/${p2(e.getUTCDate())}`;
       out.push(lab);
     }
     return out;
