@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v31_group_labels_delimiter_fix -->
+  <!-- BUILD: v33_group_label_norm_fix -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -603,7 +603,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v31_group_labels_delimiter_fix";
+window.BUILD_VERSION = "v33_group_label_norm_fix";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -1171,7 +1171,7 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v31_group_labels_delimiter_fix";
+const BUILD_VERSION = "v33_group_label_norm_fix";
 console.log("Jinxin dashboard build:", BUILD_VERSION);
 
 const state = {
@@ -4996,9 +4996,17 @@ function renderGroupTrend(catName){
 
 
   const alignValuesTo = (baseLabels, s)=>{
+    const norm = (x)=> String(x||"").replace(/\s+/g,"").replace(/[~～]/g,"~");
     const map = new Map();
-    for(let i=0;i<(s.labels||[]).length;i++) map.set(s.labels[i], (s.values||[])[i]);
-    return baseLabels.map(l => map.has(l) ? map.get(l) : null);
+    const lbs = (s.labels||[]);
+    const vals = (s.values||[]);
+    for(let i=0;i<lbs.length;i++){
+      map.set(norm(lbs[i]), vals[i]);
+    }
+    return baseLabels.map(l => {
+      const k = norm(l);
+      return map.has(k) ? map.get(k) : null;
+    });
   };
 
   const prevValues1 = sPrev1 ? alignValuesTo(labelsPrev, sPrev1) : null;
