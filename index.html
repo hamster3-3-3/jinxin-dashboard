@@ -1727,14 +1727,26 @@ const key = `${temp}|${dateKey}|${cleanKey(currentLine)}|${cleanKey(cat)}|${clea
       // S=19欄(1-based) => 0-based index 18
       // AD=30欄(1-based) => 0-based index 29
       const humanAvg = toNumber(row[18]);
-      const capAvg = toNumber(row[29]);
+const capAvg = toNumber(row[29]);
 
-      if(!Number.isFinite(humanAvg) && !Number.isFinite(capAvg)) continue;
+// 產線配置圖(標準) vs 生產實績(實際) 的「人時性/產能(每小時)」：用來做期間彙總時的加權達成率
+// 依晉欣4°C 分頁常見配置：
+// - K 欄(0-based 10)：產能/時(標準)
+// - L 欄(0-based 11)：人時性(標準)
+// - N 欄(0-based 13)：產能/時(實際)
+// - O 欄(0-based 14)：人時性(實際)
+const stdCap = toNumber(row[10]);
+const stdHuman = toNumber(row[11]);
+const actCap = toNumber(row[13]);
+const actHuman = toNumber(row[14]);
 
-      const line = displayLineName(lineCell);
-      const lk = `4|${dateKey}|${cleanKey(line)}`;
-      upsert(state.lineAvgFromSheets, lk, { mmdd: dateKey, temp:"4", line, humanAvg, capAvg });
-    }
+if(!Number.isFinite(humanAvg) && !Number.isFinite(capAvg) &&
+   !Number.isFinite(stdCap) && !Number.isFinite(stdHuman) &&
+   !Number.isFinite(actCap) && !Number.isFinite(actHuman)) continue;
+
+const line = displayLineName(lineCell);
+const lk = `4|${dateKey}|${cleanKey(line)}`;
+upsert(state.lineAvgFromSheets, lk, { mmdd: dateKey, temp:"4", line, humanAvg, capAvg, stdCap, stdHuman, actCap, actHuman });    }
   }
 }
 
@@ -4261,36 +4273,65 @@ function getDateSetInSelection(){
   return new Set(items.map(x=>x.mmdd));
 }
 function calcLineHumanAvg(lineKey){
-  // 以「達成率平均」為主（lineAvgFromSheets），確保與右側平均卡片一致；
-  // 若缺資料，才回退使用 daily summary 的「達成率」（lineHumanDaily）。
+  // 人時性達成率平均（依 Excel：實際人時性 / 標準人時性）
+  // - 單日：可直接用分頁上的「達成率平均」
+  // - 多日：用「分子分母加總」避免直接平均日達成率造成偏差
   const mmddSet = getDateSetInSelection();
-  const vals = [];
+
+  let sumAct = 0, sumStd = 0;
+  let usedAnyStdAct = false;
+
   for(const mmdd of mmddSet){
     const key = `${state.temp}|${mmdd}|${lineKey}`;
     const recAvg = state.lineAvgFromSheets.get(key);
-    if(recAvg && Number.isFinite(toNumber(recAvg.humanAvg))){
-      vals.push(toNumber(recAvg.humanAvg));
+
+    // 優先用「標準/實際」做加總（4°C）
+    if(recAvg && Number.isFinite(toNumber(recAvg.stdHuman)) && Number.isFinite(toNumber(recAvg.actHuman))){
+      sumStd += toNumber(recAvg.stdHuman);
+      sumAct += toNumber(recAvg.actHuman);
+      usedAnyStdAct = true;
       continue;
     }
+
+    // fallback：用日達成率（不加權）
     const recRate = state.lineHumanDaily.get(key);
-    if(recRate && Number.isFinite(toNumber(recRate.rate))){
-      vals.push(toNumber(recRate.rate));
+    if(!usedAnyStdAct && recRate && Number.isFinite(toNumber(recRate.rate))){
+      // 只有在完全沒有 std/act 時才會走到這個分支
+      sumAct += toNumber(recRate.rate);
+      sumStd += 1;
     }
   }
-  return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : NaN;
+
+  if(usedAnyStdAct){
+    return (sumStd > 0) ? (sumAct / sumStd) : NaN;
+  }
+  // fallback average
+  return (sumStd > 0) ? (sumAct / sumStd) : NaN;
 }
 function calcLineCapAvg(lineKey){
+  // 產能達成率平均（4°C）：實際產能/時 ÷ 標準產能/時
   if(state.temp !== "4") return NaN;
+
   const mmddSet = getDateSetInSelection();
-  const vals = [];
+  let sumAct = 0, sumStd = 0;
+  let usedAny = false;
+
   for(const mmdd of mmddSet){
     const key = `4|${mmdd}|${lineKey}`;
     const recAvg = state.lineAvgFromSheets.get(key);
-    if(recAvg && Number.isFinite(toNumber(recAvg.capAvg))){
-      vals.push(toNumber(recAvg.capAvg));
+    if(recAvg && Number.isFinite(toNumber(recAvg.stdCap)) && Number.isFinite(toNumber(recAvg.actCap))){
+      sumStd += toNumber(recAvg.stdCap);
+      sumAct += toNumber(recAvg.actCap);
+      usedAny = true;
+      continue;
+    }
+    // fallback：若只有達成率平均，才用不加權平均（避免完全空白）
+    if(!usedAny && recAvg && Number.isFinite(toNumber(recAvg.capAvg))){
+      sumAct += toNumber(recAvg.capAvg);
+      sumStd += 1;
     }
   }
-  return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : NaN;
+  return (sumStd > 0) ? (sumAct / sumStd) : NaN;
 }
 
 
