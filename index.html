@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v42_prod_suggest_rates_and_cost_style -->
+  <!-- BUILD: v43_prod_suggest_badges -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -48,6 +48,10 @@
   .suggest button { display:flex; flex-direction:column; gap:.15rem; width:100%; text-align:left; padding:.65rem .8rem; }
   .suggest button:hover { background:#f1f5f9; }
   .suggest .sub { color:#64748b; font-weight:700; font-size:.85rem; }
+  .rate-badges{ display:flex; gap:.4rem; align-items:center; flex-wrap:wrap; }
+  .rate-badge{ font-size:.85rem; font-weight:900; padding:.18rem .5rem; border-radius:.6rem; background:#f1f5f9; color:#334155; border:1px solid #e2e8f0; }
+  .rate-badge.human{ background:#eff6ff; border-color:#bfdbfe; color:#1e3a8a; }
+  .rate-badge.cap{ background:#ecfdf5; border-color:#bbf7d0; color:#065f46; }
 
   #activeCatCounts{white-space:normal; line-height:1.35;}
 
@@ -603,7 +607,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v42_prod_suggest_rates_and_cost_style";
+window.BUILD_VERSION = "v43_prod_suggest_badges";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -1171,7 +1175,7 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v42_prod_suggest_rates_and_cost_style";
+const BUILD_VERSION = "v43_prod_suggest_badges";
 console.log("Jinxin dashboard build:", BUILD_VERSION);
 
 const state = {
@@ -5614,11 +5618,10 @@ function renderProdSuggest(items){
     btn.type = "button";
     const hr = calcProdLineHumanRate(it.lineKey, it.catKey, it.prodKey);
     const cr = calcProdLineCapRate(it.lineKey, it.catKey, it.prodKey);
-    const rateText = [
-      Number.isFinite(hr) ? `人時 ${fmtPct(hr)}` : null,
-      (state.temp==="4" && Number.isFinite(cr)) ? `產能 ${fmtPct(cr)}` : null
-    ].filter(Boolean).join(" ｜ ");
-    btn.innerHTML = `<div class="flex items-center justify-between gap-2"><span>${escapeHtml(it.prod)}</span><span class="mono text-xs font-extrabold text-slate-600">${escapeHtml(rateText || "—")}</span></div><span class="sub">${escapeHtml(it.cat)} ｜ ${escapeHtml(it.line)}</span>`;
+    const badges = [];
+    if(Number.isFinite(hr)) badges.push(`<span class="rate-badge human">人時 ${escapeHtml(fmtPct(hr))}</span>`);
+    if(state.temp==="4" && Number.isFinite(cr)) badges.push(`<span class="rate-badge cap">產能 ${escapeHtml(fmtPct(cr))}</span>`);
+    btn.innerHTML = `<div class="flex items-center justify-between gap-3"><span>${escapeHtml(it.prod)}</span><span class="rate-badges">${badges.join("") || `<span class="rate-badge">—</span>`}</span></div><span class="sub">${escapeHtml(it.cat)} ｜ ${escapeHtml(it.line)}</span>`;
     btn.addEventListener("click", ()=> applyProdPick(it));
     box.appendChild(btn);
   }
