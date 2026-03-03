@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v40_daily_compare_align_fix -->
+  <!-- BUILD: v42_prod_suggest_rates_and_cost_style -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -411,16 +411,16 @@
 
     <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
       <div class="rounded-2xl border border-slate-200 bg-white p-3">
-        <div class="text-xs text-slate-500 font-bold">材料率</div>
-        <div id="pMatRate" class="text-2xl font-black mono mt-1">—</div>
+        <div class="text-sm text-red-600 font-extrabold">材料率</div>
+        <div id="pMatRate" class="text-2xl font-black mono mt-1 text-red-600">—</div>
       </div>
       <div class="rounded-2xl border border-slate-200 bg-white p-3">
-        <div class="text-xs text-slate-500 font-bold">毛利率</div>
-        <div id="pGrossRate" class="text-2xl font-black mono mt-1">—</div>
+        <div class="text-sm text-red-600 font-extrabold">毛利率</div>
+        <div id="pGrossRate" class="text-2xl font-black mono mt-1 text-red-600">—</div>
       </div>
       <div class="rounded-2xl border border-slate-200 bg-white p-3">
-        <div class="text-xs text-slate-500 font-bold">廠價</div>
-        <div id="pFactoryPrice" class="text-2xl font-black mono mt-1">—</div>
+        <div class="text-sm text-red-600 font-extrabold">廠價</div>
+        <div id="pFactoryPrice" class="text-2xl font-black mono mt-1 text-red-600">—</div>
       </div>
     </div>
   </div>
@@ -603,7 +603,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v40_daily_compare_align_fix";
+window.BUILD_VERSION = "v42_prod_suggest_rates_and_cost_style";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -1171,7 +1171,7 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v40_daily_compare_align_fix";
+const BUILD_VERSION = "v42_prod_suggest_rates_and_cost_style";
 console.log("Jinxin dashboard build:", BUILD_VERSION);
 
 const state = {
@@ -1677,8 +1677,15 @@ function parseTempSheet(wb, sheetName, temp, dateKey){
       revenue: toNumber(row[idxRev]),
       multi: toNumber(row[idxMulti]),
       people: (idxPeople>=0) ? toNumber(row[idxPeople]) : NaN,
+      peopleStd: (idxPeopleStd>=0) ? toNumber(row[idxPeopleStd]) : NaN,
+      peopleAct: (idxPeopleAct>=0) ? toNumber(row[idxPeopleAct]) : NaN,
+
       cap: (idxCap>=0) ? toNumber(row[idxCap]) : NaN,
+      capStd: (idxCapStd>=0) ? toNumber(row[idxCapStd]) : NaN,
+      capAct: (idxCapAct>=0) ? toNumber(row[idxCapAct]) : NaN,
       eff: (idxEff>=0) ? toNumber(row[idxEff]) : NaN,
+      effStd: (idxEffStd>=0) ? toNumber(row[idxEffStd]) : NaN,
+      effAct: (idxEffAct>=0) ? toNumber(row[idxEffAct]) : NaN,
       prodStart: (idxProdTime>=0) ? row[idxProdTime] : null,
       prodEnd: (idxProdTime>=0) ? row[idxProdTime+1] : null,
       changeMin: (idxChange>=0) ? toNumber(row[idxChange]) : NaN,
@@ -4334,6 +4341,69 @@ function calcLineCapAvg(lineKey){
   return (sumStd > 0) ? (sumAct / sumStd) : NaN;
 }
 
+function _pctToRatioMaybe(v){
+  const n = toNumber(v);
+  if(!Number.isFinite(n)) return NaN;
+  // if looks like percent (e.g. 82.4), convert to ratio
+  return (n > 1.5) ? (n/100) : n;
+}
+
+function calcProdLineHumanRate(lineKey, catKey, prodKey){
+  // 人時性達成率（期間）：Σ(實際人時性) / Σ(標準人時性)
+  const mmddSet = getDateSetInSelection();
+  let sumStd=0, sumAct=0;
+  let usedStdAct=false;
+
+  for(const mmdd of mmddSet){
+    const k = `${state.temp}|${mmdd}|${lineKey}|${catKey}|${prodKey}`;
+    const rec = state.records.get(k);
+    if(!rec) continue;
+
+    if(Number.isFinite(rec.effStd) && Number.isFinite(rec.effAct)){
+      sumStd += rec.effStd;
+      sumAct += rec.effAct;
+      usedStdAct = true;
+    }else if(!usedStdAct){
+      const r = _pctToRatioMaybe(rec.humanAch);
+      if(Number.isFinite(r)){
+        sumAct += r;
+        sumStd += 1;
+      }
+    }
+  }
+  if(sumStd<=0) return NaN;
+  return sumAct/sumStd;
+}
+
+function calcProdLineCapRate(lineKey, catKey, prodKey){
+  // 產能達成率（期間, 4°C）：Σ(實際產能/時) / Σ(標準產能/時)
+  if(state.temp !== "4") return NaN;
+  const mmddSet = getDateSetInSelection();
+  let sumStd=0, sumAct=0;
+  let usedStdAct=false;
+
+  for(const mmdd of mmddSet){
+    const k = `4|${mmdd}|${lineKey}|${catKey}|${prodKey}`;
+    const rec = state.records.get(k);
+    if(!rec) continue;
+
+    if(Number.isFinite(rec.capStd) && Number.isFinite(rec.capAct)){
+      sumStd += rec.capStd;
+      sumAct += rec.capAct;
+      usedStdAct = true;
+    }else if(!usedStdAct){
+      const r = _pctToRatioMaybe(rec.capAch);
+      if(Number.isFinite(r)){
+        sumAct += r;
+        sumStd += 1;
+      }
+    }
+  }
+  if(sumStd<=0) return NaN;
+  return sumAct/sumStd;
+}
+
+
 
 /* =========================
    Active Group (品群) → 產品跳轉
@@ -5542,7 +5612,13 @@ function renderProdSuggest(items){
   for(const it of items){
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.innerHTML = `<span>${escapeHtml(it.prod)}</span><span class="sub">${escapeHtml(it.cat)} ｜ ${escapeHtml(it.line)}</span>`;
+    const hr = calcProdLineHumanRate(it.lineKey, it.catKey, it.prodKey);
+    const cr = calcProdLineCapRate(it.lineKey, it.catKey, it.prodKey);
+    const rateText = [
+      Number.isFinite(hr) ? `人時 ${fmtPct(hr)}` : null,
+      (state.temp==="4" && Number.isFinite(cr)) ? `產能 ${fmtPct(cr)}` : null
+    ].filter(Boolean).join(" ｜ ");
+    btn.innerHTML = `<div class="flex items-center justify-between gap-2"><span>${escapeHtml(it.prod)}</span><span class="mono text-xs font-extrabold text-slate-600">${escapeHtml(rateText || "—")}</span></div><span class="sub">${escapeHtml(it.cat)} ｜ ${escapeHtml(it.line)}</span>`;
     btn.addEventListener("click", ()=> applyProdPick(it));
     box.appendChild(btn);
   }
