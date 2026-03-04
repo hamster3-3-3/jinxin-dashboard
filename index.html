@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v53_stopline_cards -->
+  <!-- BUILD: v55_stopline_label_fix -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -208,7 +208,7 @@
         <div id="kpiMulti" class="val text-2xl mono mt-1">—</div>
 </div>
 <div class="card">
-  <div class="label">異常停線</div>
+  <div class="label">異常停線(5min⬆)</div>
   <div class="mt-2 space-y-1">
     <div class="flex items-baseline justify-between">
       <div class="text-xs font-semibold text-slate-500">時間</div>
@@ -221,11 +221,11 @@
   </div>
 </div>
 <div class="card">
-  <div class="label">短暫停線</div>
+  <div class="label">短暫停線(5min⬇)</div>
   <div class="mt-2 space-y-1">
     <div class="flex items-baseline justify-between">
-      <div class="text-xs font-semibold text-slate-500">時間</div>
-      <div id="kpiShTime" class="val mono text-lg">—</div>
+      <div class="text-xs font-semibold text-slate-500">設備次數</div>
+      <div id="kpiShEquip" class="val mono text-lg">—</div>
     </div>
     <div class="flex items-baseline justify-between">
       <div class="text-xs font-semibold text-slate-500">合計次數</div>
@@ -1277,7 +1277,7 @@ const state = {
   itemCountDaily: new Map(),     // key temp|mmdd -> count of product rows (cat!=0)
   lineHumanDaily: new Map(),    // key temp|mmdd|lineKey
   lineAvgFromSheets: new Map(), // key temp|mmdd|lineKey
-  stoplineDaily: new Map(),     // key YYYYMMDD -> {abCnt,abTime,shCnt,shTime}
+  stoplineDaily: new Map(),     // key YYYYMMDD -> {abCnt,abTime,shCnt,shEquip}
 
   loadedFiles: [],
   availableMmdd: new Set(),
@@ -1902,7 +1902,7 @@ if(Number.isFinite(ab.cnt) || Number.isFinite(ab.time) || Number.isFinite(sh.cnt
     abCnt: Number.isFinite(ab.cnt) ? ab.cnt : 0,
     abTime: Number.isFinite(ab.time) ? ab.time : 0,
     shCnt: Number.isFinite(sh.cnt) ? sh.cnt : 0,
-    shTime: Number.isFinite(sh.time) ? sh.time : 0
+    shEquip: Number.isFinite(sh.time) ? sh.time : 0
   });
 }
 
@@ -2511,7 +2511,7 @@ function calcKpis(){
         const ac = toNumber(st.abCnt); if(Number.isFinite(ac)) abCnt += ac;
         const at = toNumber(st.abTime); if(Number.isFinite(at)) abTime += at;
         const sc = toNumber(st.shCnt); if(Number.isFinite(sc)) shCnt += sc;
-        const stt = toNumber(st.shTime); if(Number.isFinite(stt)) shTime += stt;
+        const stt = toNumber(st.shEquip); if(Number.isFinite(stt)) shEquip += stt;
       }
     }
     const att = attCnt ? (attSum/attCnt) : NaN;
@@ -2528,7 +2528,9 @@ function calcKpis(){
     const qty = toNumber(s.totalQty), rev = toNumber(s.revenue), multi = toNumber(s.multi);
     const att = toNumber(s.attendance), eff = toNumber(s.efficiency);
     const avgPrice = (Number.isFinite(qty)&&qty>0&&Number.isFinite(rev)) ? (rev/qty) : toNumber(s.avgPrice);
-    return {qty, rev, multi, att, eff, avgPrice, hint:`單日（${d.dateStr}）`};
+    const st = state.stoplineDaily.get(d.mmdd) || {abCnt:0,abTime:0,shCnt:0,shEquip:0};
+    const abCnt = toNumber(st.abCnt)||0, abTime = toNumber(st.abTime)||0, shCnt = toNumber(st.shCnt)||0, shTime = toNumber(st.shEquip)||0;
+    return {qty, rev, multi, att, eff, avgPrice, abCnt, abTime, shCnt, shTime, hint:`單日（${d.dateStr}）`};
   }
 
   // 其餘（週/月/年/指定範圍）：全部以「日平均」顯示
@@ -2560,6 +2562,10 @@ function calcKpis(){
     att: base.att,
     eff: base.eff,
     avgPrice: base.avgPrice,
+    abCnt: base.abCnt,
+    abTime: base.abTime,
+    shCnt: base.shCnt,
+    shEquip: base.shTime,
     hint
   };
 }
@@ -3209,7 +3215,7 @@ function refreshKpiCards(){
   // 停線（加總）
   if($("kpiAbTime")) $("kpiAbTime").textContent = Number.isFinite(k.abTime) ? fmtDec(k.abTime, 1) : "—";
   if($("kpiAbCnt"))  $("kpiAbCnt").textContent  = Number.isFinite(k.abCnt) ? fmtInt(k.abCnt) : "—";
-  if($("kpiShTime")) $("kpiShTime").textContent = Number.isFinite(k.shTime) ? fmtDec(k.shTime, 1) : "—";
+  if($("kpiShEquip").textContent = Number.isFinite(k.shEquip) ? fmtInt(k.shEquip) : "—";
   if($("kpiShCnt"))  $("kpiShCnt").textContent  = Number.isFinite(k.shCnt) ? fmtInt(k.shCnt) : "—";
 }
 
