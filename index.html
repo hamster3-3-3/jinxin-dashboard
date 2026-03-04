@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v64_cards_changeover_fix -->
+  <!-- BUILD v66_changeover_colscan_fix -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -1963,45 +1963,65 @@ if(Number.isFinite(ab.cnt) || Number.isFinite(ab.val2) || Number.isFinite(sh.cnt
   });
 }
 
-// 總換線時間（分鐘）：V欄「前置、換線時間/分」加總；若同列 X/Y（休息時間 開始/結束）有值則剔除
-// 0-based column index: V=21, X=23, Y=24
+// 總換線時間（分鐘）：依『晉欣4度CMMDD』分頁抓『前置、換線時間/分』欄位加總；若同列『休息時間』(開始/結束)有值則剔除
 (function(){
-  // 改用「晉欣4度CXXXX」分頁的 V 欄(前置、換線時間/分)加總；若同列 X/Y(休息時間)有值則剔除
   const mmdd = (dateKey||"").slice(4); // YYYYMMDD -> MMDD
-  const candSheets = [
-    `晉欣4度C${mmdd}`,
-    `晉欣18度C${mmdd}`, // 若未提供 4°C 分頁，允許 fallback
-  ];
-  let chg = 0;
-  let got = false;
+  const candSheets = [`晉欣4度C${mmdd}`, `晉欣18度C${mmdd}`];
+
+  let total = 0;
+  let foundAny = false;
+
+  function findCellText(grid, pred, maxR=200, maxC=60){
+    const rMax = min(maxR, grid.length);
+    for(let r=0;r<rMax;r++){
+      const row = grid[r]||[];
+      const cMax = min(maxC, row.length);
+      for(let c=0;c<cMax;c++){
+        const t = cleanText(row[c]);
+        if(t && pred(t)) return {r,c,t};
+      }
+    }
+    return null;
+  }
 
   for(const shName of candSheets){
     const ws2 = wb && wb.Sheets ? wb.Sheets[shName] : null;
     if(!ws2) continue;
 
     const grid2 = XLSX.utils.sheet_to_json(ws2, { header: 1, raw: true, defval: "" });
-    // 找到「前置、換線時間/分」標題所在的列 (通常在 V 欄)
-    let headerRow = -1;
-    for(let r=0; r<grid2.length; r++){
-      const v = cleanText((grid2[r]||[])[21]);
-      if(v && v.includes("換線") && v.includes("時間") && v.includes("/")) { headerRow = r; break; }
-    }
 
-    const startR = headerRow >= 0 ? headerRow + 1 : 0;
+    // 1) 找到『前置、換線時間/分』所在位置（不假設一定是 V 欄）
+    const coHdr = findCellText(grid2, (t)=> t.includes('換線') && t.includes('時間') && (t.includes('/分') || t.includes('／分') || t.includes('/')) );
+    if(!coHdr) continue;
+
+    // 2) 找到『休息時間』(若有)，用來剔除換線時間
+    const restHdr = findCellText(grid2, (t)=> t.includes('休息時間'));
+
+    const coCol = coHdr.c;
+    // 休息開始/結束欄位：優先用 restHdr 的位置；否則用 coCol+2/coCol+3 (V->X/Y)；最後才用固定 23/24
+    let restStartCol = restHdr ? restHdr.c : (coCol + 2);
+    let restEndCol   = restHdr ? (restHdr.c + 1) : (coCol + 3);
+    if(restStartCol < 0 || restStartCol >= 200) restStartCol = 23;
+    if(restEndCol < 0 || restEndCol >= 200) restEndCol = 24;
+
+    // 資料起始列：表頭下一列開始
+    const startR = coHdr.r + 1;
     for(let r=startR; r<grid2.length; r++){
       const row = grid2[r] || [];
-      const v = toNumber(row[21]); // V
+      const v = toNumber(row[coCol]);
       if(!Number.isFinite(v) || v<=0) continue;
-      const x = cleanText(row[23]); // X
-      const y = cleanText(row[24]); // Y
+      const x = cleanText(row[restStartCol]);
+      const y = cleanText(row[restEndCol]);
       if(x || y) continue; // 休息時間，不計入換線
-      chg += v;
-      got = true;
+      total += v;
+      foundAny = true;
     }
-    if(got) break;
+
+    // 只要此分頁有解析到，就不再 fallback
+    break;
   }
 
-  state.changeoverDaily.set(dateKey, Number.isFinite(chg) ? chg : 0);
+  state.changeoverDaily.set(dateKey, foundAny ? total : 0);
 })();
 
   function parseSection(markerText, temp, prefix=""){
