@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v52_fetch_path_fix -->
+  <!-- BUILD: v53_stopline_cards -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -182,7 +182,7 @@
     </div>
 
     <!-- KPI cards -->
-    <div class="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4">
+    <div class="grid grid-cols-1 md:grid-cols-4 xl:grid-cols-8 gap-4">
       <div class="card">
         <div class="label">總生產量</div>
         <div id="kpiQty" class="val text-2xl mono mt-1">—</div>
@@ -206,6 +206,32 @@
       <div class="card">
         <div class="label">多次生產數(平均)</div>
         <div id="kpiMulti" class="val text-2xl mono mt-1">—</div>
+</div>
+<div class="card">
+  <div class="label">異常停線</div>
+  <div class="mt-2 space-y-1">
+    <div class="flex items-baseline justify-between">
+      <div class="text-xs font-semibold text-slate-500">時間</div>
+      <div id="kpiAbTime" class="val mono text-lg">—</div>
+    </div>
+    <div class="flex items-baseline justify-between">
+      <div class="text-xs font-semibold text-slate-500">合計次數</div>
+      <div id="kpiAbCnt" class="val mono text-lg">—</div>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="label">短暫停線</div>
+  <div class="mt-2 space-y-1">
+    <div class="flex items-baseline justify-between">
+      <div class="text-xs font-semibold text-slate-500">時間</div>
+      <div id="kpiShTime" class="val mono text-lg">—</div>
+    </div>
+    <div class="flex items-baseline justify-between">
+      <div class="text-xs font-semibold text-slate-500">合計次數</div>
+      <div id="kpiShCnt" class="val mono text-lg">—</div>
+    </div>
+  </div>
 </div>
     </div>
 
@@ -1251,6 +1277,7 @@ const state = {
   itemCountDaily: new Map(),     // key temp|mmdd -> count of product rows (cat!=0)
   lineHumanDaily: new Map(),    // key temp|mmdd|lineKey
   lineAvgFromSheets: new Map(), // key temp|mmdd|lineKey
+  stoplineDaily: new Map(),     // key YYYYMMDD -> {abCnt,abTime,shCnt,shTime}
 
   loadedFiles: [],
   availableMmdd: new Set(),
@@ -1828,6 +1855,56 @@ function parseDailySummarySheet(wb, sheetName, dateKey){
   const ws = wb.Sheets[sheetName];
   if(!ws) return;
   const grid = sheetToGrid(ws);
+
+
+// 異常停線 / 短暫停線（日期分頁：常見在 N:O 與 P:Q）
+function pickStopBlock(title, fallbackCountCol, fallbackTimeCol){
+  const hit = findCell(grid, (v)=>cleanText(v)===title, 260, 60);
+  let cCnt = fallbackCountCol, cTime = fallbackTimeCol, rHead = -1;
+  if(hit){
+    // 找「合計次數 / 時間」那一列
+    for(let r=hit.r; r<Math.min(grid.length, hit.r+8); r++){
+      const row = grid[r] || [];
+      const hasCnt = row.some(v=> cleanText(v)==="合計次數");
+      const hasTime = row.some(v=> cleanText(v)==="時間");
+      if(hasCnt || hasTime){
+        rHead = r;
+        for(let c=0;c<row.length;c++){
+          const t = cleanText(row[c]);
+          if(t==="合計次數") cCnt = c;
+          if(t==="時間") cTime = c;
+        }
+        break;
+      }
+    }
+  }
+  // 找第一列數字資料
+  let cnt = NaN, time = NaN;
+  const rStart = (rHead>=0) ? (rHead+1) : (hit ? hit.r+1 : 0);
+  for(let r=rStart; r<Math.min(grid.length, rStart+20); r++){
+    const row = grid[r] || [];
+    const vCnt = toNumber(row[cCnt]);
+    const vTime = toNumber(row[cTime]);
+    if(Number.isFinite(vCnt) || Number.isFinite(vTime)){
+      cnt = Number.isFinite(vCnt)? vCnt : cnt;
+      time = Number.isFinite(vTime)? vTime : time;
+      break;
+    }
+  }
+  return {cnt, time};
+}
+
+// 0-based column index: N=13 O=14 P=15 Q=16
+const ab = pickStopBlock("異常停線", 13, 14);
+const sh = pickStopBlock("短暫停線", 15, 16);
+if(Number.isFinite(ab.cnt) || Number.isFinite(ab.time) || Number.isFinite(sh.cnt) || Number.isFinite(sh.time)){
+  state.stoplineDaily.set(dateKey, {
+    abCnt: Number.isFinite(ab.cnt) ? ab.cnt : 0,
+    abTime: Number.isFinite(ab.time) ? ab.time : 0,
+    shCnt: Number.isFinite(sh.cnt) ? sh.cnt : 0,
+    shTime: Number.isFinite(sh.time) ? sh.time : 0
+  });
+}
 
   function parseSection(markerText, temp, prefix=""){
     const marker = findCell(grid, (v)=>cleanText(v)===markerText, 240, 40);
@@ -2421,6 +2498,7 @@ function calcKpis(){
 
   function kpiFromDays(days){
     let qty=0, rev=0, multi=0, attSum=0, effSum=0, attCnt=0, effCnt=0;
+    let abCnt=0, abTime=0, shCnt=0, shTime=0;
     for(const d of days){
       const s = d.summary;
       const q = toNumber(s.totalQty); if(Number.isFinite(q)) qty += q;
@@ -2428,11 +2506,18 @@ function calcKpis(){
       const m = toNumber(s.multi);    if(Number.isFinite(m)) multi += m;
       const a = toNumber(s.attendance); if(Number.isFinite(a)){ attSum += a; attCnt++; }
       const e = toNumber(s.efficiency); if(Number.isFinite(e)){ effSum += e; effCnt++; }
+      const st = state.stoplineDaily.get(d.mmdd);
+      if(st){
+        const ac = toNumber(st.abCnt); if(Number.isFinite(ac)) abCnt += ac;
+        const at = toNumber(st.abTime); if(Number.isFinite(at)) abTime += at;
+        const sc = toNumber(st.shCnt); if(Number.isFinite(sc)) shCnt += sc;
+        const stt = toNumber(st.shTime); if(Number.isFinite(stt)) shTime += stt;
+      }
     }
     const att = attCnt ? (attSum/attCnt) : NaN;
     const eff = effCnt ? (effSum/effCnt) : NaN;
     const avgPrice = (qty>0 && Number.isFinite(rev)) ? (rev/qty) : NaN;
-    return {qty, rev, multi, att, eff, avgPrice, days: days.length};
+    return {qty, rev, multi, att, eff, avgPrice, abCnt, abTime, shCnt, shTime, days: days.length};
   }
 
   // 單日（無指定範圍）
@@ -3119,7 +3204,14 @@ function refreshKpiCards(){
   $("kpiAtt").textContent = Number.isFinite(k.att) ? fmtDec(k.att, 2) : "—";
   $("kpiEff").textContent = Number.isFinite(k.eff) ? fmtDec(k.eff, 2) : "—";
   $("kpiPrice").textContent = Number.isFinite(k.avgPrice) ? fmtDec(k.avgPrice, 2) : "—";
-  $("kpiMulti").textContent = Number.isFinite(k.multi) ? fmtInt(k.multi) : "—";}
+  $("kpiMulti").textContent = Number.isFinite(k.multi) ? fmtInt(k.multi) : "—";
+
+  // 停線（加總）
+  if($("kpiAbTime")) $("kpiAbTime").textContent = Number.isFinite(k.abTime) ? fmtDec(k.abTime, 1) : "—";
+  if($("kpiAbCnt"))  $("kpiAbCnt").textContent  = Number.isFinite(k.abCnt) ? fmtInt(k.abCnt) : "—";
+  if($("kpiShTime")) $("kpiShTime").textContent = Number.isFinite(k.shTime) ? fmtDec(k.shTime, 1) : "—";
+  if($("kpiShCnt"))  $("kpiShCnt").textContent  = Number.isFinite(k.shCnt) ? fmtInt(k.shCnt) : "—";
+}
 
 /* =========================
    趨勢圖：延後生成 + 手動更新
