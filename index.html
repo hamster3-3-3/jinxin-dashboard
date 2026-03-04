@@ -2616,6 +2616,48 @@ function isNewProductInRange(prodName, start, end){
   return (byLaunch || byFirstSeen);
 }
 
+// --- First-seen helper (global) ---
+// Support both Map-based and plain-object storage.
+// Key format: `${temp}|${cleanKey(prodName)}` and date stored as YYYYMMDD number.
+function _dateToYmdNumUTC(d){
+  if(!(d instanceof Date) || isNaN(d)) return NaN;
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth()+1;
+  const da = d.getUTCDate();
+  return y*10000 + m*100 + da;
+}
+
+function isFirstSeenInRange(prodName, start, end){
+  try{
+    if(!prodName) return false;
+    if(!(start instanceof Date) || isNaN(start) || !(end instanceof Date) || isNaN(end)) return false;
+    const temp = state && state.temp != null ? String(state.temp) : "";
+    const key = temp + "|" + cleanKey(prodName);
+
+    const sNum = _dateToYmdNumUTC(start);
+    const eNum = _dateToYmdNumUTC(end);
+    if(!Number.isFinite(sNum) || !Number.isFinite(eNum)) return false;
+
+    const fs = state && state.firstSeenProd;
+    let firstNum = null;
+
+    if(fs && typeof fs.get === "function"){ // Map-like
+      const v = fs.get(key);
+      const n = Number(v);
+      if(Number.isFinite(n)) firstNum = n;
+    }else if(fs && (typeof fs === "object")){
+      const v = fs[key];
+      const n = Number(v);
+      if(Number.isFinite(n)) firstNum = n;
+    }
+
+    if(firstNum == null) return false;
+    return firstNum >= sNum && firstNum <= eNum;
+  }catch(_e){
+    return false;
+  }
+}
+
 function countNewProductsByRange
 (prodSet, start, end){
   if(!prodSet || !prodSet.forEach) return 0;
