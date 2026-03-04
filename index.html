@@ -1718,7 +1718,7 @@ function updateFirstSeenProd(temp, yyyymmdd, prodKey){
   try{
     if(!temp || !yyyymmdd || !prodKey) return;
     if(!state.firstSeenProd) state.firstSeenProd = {};
-    const key = String(temp) + "|" + String(prodKey);
+    const key = String(temp) + "|" + cleanKey(prodKey);
     const d = Number(String(yyyymmdd).replace(/[^0-9]/g,""));
     if(!Number.isFinite(d)) return;
     const cur = state.firstSeenProd[key];
