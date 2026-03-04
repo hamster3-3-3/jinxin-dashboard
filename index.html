@@ -3215,7 +3215,7 @@ function refreshKpiCards(){
   // 停線（加總）
   if($("kpiAbTime")) $("kpiAbTime").textContent = Number.isFinite(k.abTime) ? fmtDec(k.abTime, 1) : "—";
   if($("kpiAbCnt"))  $("kpiAbCnt").textContent  = Number.isFinite(k.abCnt) ? fmtInt(k.abCnt) : "—";
-  if($("kpiShEquip").textContent = Number.isFinite(k.shEquip) ? fmtInt(k.shEquip) : "—";
+  if($("kpiShEquip")) $("kpiShEquip").textContent = Number.isFinite(k.shEquip) ? fmtInt(k.shEquip) : "—";
   if($("kpiShCnt"))  $("kpiShCnt").textContent  = Number.isFinite(k.shCnt) ? fmtInt(k.shCnt) : "—";
 }
 
