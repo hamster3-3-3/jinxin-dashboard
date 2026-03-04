@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v51_firstseen_rebuild_fix -->
+  <!-- BUILD: v52_fetch_path_fix -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -1907,63 +1907,71 @@ async function parseWorkbookArrayBuffer(buf, filename){
 
 
 async function fetchArrayBufferSmart(fileName){
-
-
-  // 若已是完整 URL，直接 fetch
+  // Full URL -> direct fetch
   if(/^https?:\/\//i.test(fileName)){
     const res = await fetch(fileName, {cache:"no-store"});
     if(!res.ok) throw new Error("HTTP " + res.status + " @ " + fileName);
     return await res.arrayBuffer();
   }
 
-  // 目標：可同時支援
-  // 1) GitHub Pages（與 HTML 同層，或放在 /repo/ 子資料夾）
-  // 2) 使用者誤在 github.com/blob 頁面開啟時，改用 raw.githubusercontent.com 讀取
-  // 3) 透過 ?dataDir=xxx 或 ?data=https://.../ 指定資料來源目錄/URL（優先嘗試）
+  // Normalize
+  fileName = String(fileName||"").replace(/^\.\/+/, "");
 
+  // Encode but keep slashes
   const encoded = encodeURIComponent(fileName).replace(/%2F/g, "/");
 
   const href = location.href;
   const dir = href.endsWith("/") ? href : href.replace(/\/[^\/]*$/, "/");
 
   const params = new URLSearchParams(location.search);
-  const dataDirParam = (params.get("dataDir") || params.get("data") || "").trim();
+  let dataDirParam = (params.get("dataDir") || params.get("data") || "").trim();
 
-  // Relative prefixes to try
-  const prefixes = ["", "data/", "excel/", "xlsx/", "repo/"];
-  if(dataDirParam && !/^https?:\/\//i.test(dataDirParam)){
-    let p = dataDirParam.replace(/^\.?\/*/, ""); // remove leading ./ or /
-    if(p && !p.endsWith("/")) p += "/";
-    if(p && !prefixes.includes(p)) prefixes.unshift(p); // user-specified first
-  }
+  // Special-case: ?dataDir=repo historically meant "same-origin base" (do NOT prepend repo/)
+  if(/^repo$/i.test(dataDirParam)) dataDirParam = "";
 
   // Base URLs to try
   const baseUrls = [dir];
 
-  // If user supplies a full URL, treat it as a base URL (highest priority)
+  // If user supplies a full URL, treat it as a base URL
   if(dataDirParam && /^https?:\/\//i.test(dataDirParam)){
     let base = dataDirParam;
     if(!base.endsWith("/")) base += "/";
     baseUrls.unshift(base);
+    dataDirParam = "";
   }
 
-  // If opened on github.com (blob/tree), compute raw base URL automatically
+  // If opened on github.com blob/tree, compute raw base URL automatically
   if(location.host === "github.com"){
     const parts = location.pathname.split("/").filter(Boolean);
-    // /<owner>/<repo>/blob/<branch>/<path...>/index.html
     if(parts.length >= 4 && (parts[2] === "blob" || parts[2] === "tree")){
       const owner = parts[0];
-      const repo = parts[1];
-      const branch = parts[3];
+      const repo  = parts[1];
+      const branch = parts[3] || "main";
       const pathParts = parts.slice(4);
-      if(pathParts.length) pathParts.pop(); // remove current file
+      if(pathParts.length) pathParts.pop();
       const basePath = pathParts.length ? pathParts.join("/") + "/" : "";
-      baseUrls.unshift(`https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${basePath}`);
+      baseUrls.unshift("https://raw.githubusercontent.com/" + owner + "/" + repo + "/" + branch + "/" + basePath);
     }
   }
 
+  // Prefixes to try (common folders first)
+  const prefixes = ["", "data/", "excel/", "xlsx/", "repo/data/", "repo/"];
+
+  // User specified relative folder
+  if(dataDirParam){
+    let p = dataDirParam.replace(/^\/*/, "");
+    if(p && !p.endsWith("/")) p += "/";
+    if(p && !prefixes.includes(p)) prefixes.unshift(p);
+  }
+
+  // If fileName already includes a folder, try it as-is first
+  const directFirst = [encoded, "./" + encoded];
+
   const candidates = [];
   for(const base of baseUrls){
+    for(const d of directFirst){
+      candidates.push(new URL(d, base).toString());
+    }
     for(const pre of prefixes){
       candidates.push(new URL(pre + encoded, base).toString());
       candidates.push(new URL("./" + pre + encoded, base).toString());
