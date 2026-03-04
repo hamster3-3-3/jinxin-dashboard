@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v58_stopline_parse_strict -->
+  <!-- BUILD: v59_stopline_parse_nearestcol_fix -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -1858,26 +1858,43 @@ function parseDailySummarySheet(wb, sheetName, dateKey){
 
 
 // 異常停線 / 短暫停線（日期分頁：常見在 N:O 與 P:Q）
+// 重要：同一列可能出現兩個「合計次數」（異常/短暫各一個），所以必須以「靠近標題欄位」為準來抓欄位。
 function pickStopBlock(title, fallbackCountCol, fallbackVal2Col, val2Header="時間"){
   const hit = findCell(grid, (v)=>cleanText(v)===title, 240, 80);
 
-  // 預設欄位（若找不到表頭則不會亂抓其他區塊數字）
+  // 預設欄位
   let cCnt = fallbackCountCol, cVal2 = fallbackVal2Col;
   let rHead = -1;
 
+  const pickNearestCol = (cols, anchor)=>{
+    if(!cols || cols.length===0) return null;
+    let best = cols[0], bestD = Math.abs(cols[0]-anchor);
+    for(const c of cols){
+      const d = Math.abs(c-anchor);
+      if(d < bestD){ best=c; bestD=d; }
+    }
+    return best;
+  };
+
   if(hit){
-    // 只在標題下方小範圍找表頭，避免抓到其他表格的「合計次數」
+    // 只在標題下方小範圍找表頭
     for(let r=hit.r; r<Math.min(grid.length, hit.r+6); r++){
       const row = grid[r] || [];
-      const hasCnt = row.some(v=> cleanText(v)==="合計次數");
-      const hasVal2 = row.some(v=> cleanText(v)===val2Header);
-      if(hasCnt || hasVal2){
+
+      const cntCols = [];
+      const v2Cols  = [];
+      for(let c=0;c<row.length;c++){
+        const t = cleanText(row[c]);
+        if(t==="合計次數") cntCols.push(c);
+        if(t===val2Header) v2Cols.push(c);
+      }
+
+      if(cntCols.length || v2Cols.length){
         rHead = r;
-        for(let c=0;c<row.length;c++){
-          const t = cleanText(row[c]);
-          if(t==="合計次數") cCnt = c;
-          if(t===val2Header) cVal2 = c;
-        }
+        const nearCnt = pickNearestCol(cntCols, hit.c);
+        const nearV2  = pickNearestCol(v2Cols,  hit.c);
+        if(nearCnt!==null) cCnt = nearCnt;
+        if(nearV2!==null)  cVal2 = nearV2;
         break;
       }
     }
@@ -1888,16 +1905,20 @@ function pickStopBlock(title, fallbackCountCol, fallbackVal2Col, val2Header="時
 
   let cnt = NaN, val2 = NaN;
 
-  // 取值列：若有找到表頭，抓表頭下一列；若只靠固定欄位，抓前 8 列內第一列數字
+  // 取值列：若有找到表頭，抓「表頭下方」第一個同欄位有數字的列（允許中間空白列）
   if(rHead >= 0){
-    const r = rHead + 1;
-    const row = grid[r] || [];
-    const vCnt = toNumber(row[cCnt]);
-    const vVal2 = toNumber(row[cVal2]);
-    if(Number.isFinite(vCnt)) cnt = vCnt;
-    if(Number.isFinite(vVal2)) val2 = vVal2;
+    for(let r=rHead+1; r<Math.min(grid.length, rHead+6); r++){
+      const row = grid[r] || [];
+      const vCnt = toNumber(row[cCnt]);
+      const vVal2 = toNumber(row[cVal2]);
+      if(Number.isFinite(vCnt) || Number.isFinite(vVal2)){
+        if(Number.isFinite(vCnt)) cnt = vCnt;
+        if(Number.isFinite(vVal2)) val2 = vVal2;
+        break;
+      }
+    }
   }else if(rHead === -2){
-    for(let r=0; r<Math.min(grid.length, 8); r++){
+    for(let r=0; r<Math.min(grid.length, 12); r++){
       const row = grid[r] || [];
       const vCnt = toNumber(row[cCnt]);
       const vVal2 = toNumber(row[cVal2]);
@@ -1911,7 +1932,7 @@ function pickStopBlock(title, fallbackCountCol, fallbackVal2Col, val2Header="時
   return {cnt, val2};
 }
 
-// 0-based column index: N=13 O=14 P=15 Q=16
+ // 0-based column index: N=13 O=14 P=15 Q=16
 const ab = pickStopBlock("異常停線", 13, 14, "時間");
 const sh = pickStopBlock("短暫停線", 15, 16, "設備次數");
 if(Number.isFinite(ab.cnt) || Number.isFinite(ab.val2) || Number.isFinite(sh.cnt) || Number.isFinite(sh.val2)){
