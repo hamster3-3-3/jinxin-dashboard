@@ -2617,7 +2617,7 @@ function calcKpis(){
     const att = attCnt ? (attSum/attCnt) : NaN;
     const eff = effCnt ? (effSum/effCnt) : NaN;
     const avgPrice = (qty>0 && Number.isFinite(rev)) ? (rev/qty) : NaN;
-    return {qty, rev, multi, att, eff, avgPrice, abCnt, abTime, shCnt, shEquip, days: days.length};
+    return {qty, rev, multi, att, eff, avgPrice, abCnt, abTime, shCnt, shEquip, changeover: chgSum, days: days.length};
   }
 
   // 單日（無指定範圍）
@@ -2630,7 +2630,9 @@ function calcKpis(){
     const avgPrice = (Number.isFinite(qty)&&qty>0&&Number.isFinite(rev)) ? (rev/qty) : toNumber(s.avgPrice);
     const st = state.stoplineDaily.get(d.mmdd) || {abCnt:0,abTime:0,shCnt:0,shEquip:0};
     const abCnt = toNumber(st.abCnt)||0, abTime = toNumber(st.abTime)||0, shCnt = toNumber(st.shCnt)||0, shEquip = toNumber(st.shEquip)||0;
-    return {qty, rev, multi, att, eff, avgPrice, abCnt, abTime, shCnt, shEquip, hint:`單日（${d.dateStr}）`};
+const chg = toNumber(state.changeoverDaily.get(d.mmdd));
+    const changeover = Number.isFinite(chg) ? chg : 0;
+    return {qty, rev, multi, att, eff, avgPrice, abCnt, abTime, shCnt, shEquip, changeover, hint:`單日（${d.dateStr}）`};
   }
 
   // 其餘（週/月/年/指定範圍）：全部以「日平均」顯示
