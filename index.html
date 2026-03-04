@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v59_stopline_parse_nearestcol_fix -->
+  <!-- BUILD: v63_cards_changeover_fix -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -181,71 +181,81 @@
       </div>
     </div>
 
+    
     <!-- KPI cards -->
-    <div class="grid grid-cols-1 md:grid-cols-4 xl:grid-cols-8 gap-4">
-      <div class="card">
-        <div class="label">總生產量</div>
-        <div id="kpiQty" class="val text-2xl mono mt-1">—</div>
-</div>
-      <div class="card">
-        <div class="label">營業額</div>
-        <div id="kpiRev" class="val text-2xl mono mt-1">—</div>
-</div>
-      <div class="card">
-        <div class="label">出勤人數(平均)</div>
-        <div id="kpiAtt" class="val text-2xl mono mt-1">—</div>
-</div>
-      <div class="card">
-        <div class="label">人時性(平均)</div>
-        <div id="kpiEff" class="val text-2xl mono mt-1">—</div>
-</div>
-      <div class="card">
-        <div class="label">平均廠價</div>
-        <div id="kpiPrice" class="val text-2xl mono mt-1">—</div>
-</div>
-      <div class="card">
-        <div class="label">多次生產數(平均)</div>
-        <div id="kpiMulti" class="val text-2xl mono mt-1">—</div>
-</div>
-
-      <div class="card">
-        <div class="label">總換線時間</div>
-        <div class="flex items-baseline gap-2 mt-1">
-          <div id="kpiChg" class="val text-2xl mono">—</div>
-          <div class="text-sm font-semibold text-slate-500">分</div>
+    <div class="space-y-4">
+      <!-- row 1 -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="card">
+          <div class="label">總生產量</div>
+          <div id="kpiQty" class="val text-2xl mono mt-1">—</div>
+        </div>
+        <div class="card">
+          <div class="label">營業額</div>
+          <div id="kpiRev" class="val text-2xl mono mt-1">—</div>
+        </div>
+        <div class="card">
+          <div class="label">出勤人數(平均)</div>
+          <div id="kpiAtt" class="val text-2xl mono mt-1">—</div>
         </div>
       </div>
 
-<div class="card">
-  <div class="label">異常停線(5min⬆)</div>
-  <div class="mt-2 space-y-1">
-    <div class="flex items-baseline justify-between">
-      <div class="text-xs font-semibold text-slate-500">時間</div>
-      <div id="kpiAbTime" class="val mono text-lg">—</div>
-    </div>
-    <div class="flex items-baseline justify-between">
-      <div class="text-xs font-semibold text-slate-500">合計次數</div>
-      <div id="kpiAbCnt" class="val mono text-lg">—</div>
-    </div>
-  </div>
-</div>
-<div class="card">
-  <div class="label">短暫停線(5min⬇)</div>
-  <div class="mt-2 space-y-1">
-    <div class="flex items-baseline justify-between">
-      <div class="text-xs font-semibold text-slate-500">設備次數</div>
-      <div id="kpiShEquip" class="val mono text-lg">—</div>
-    </div>
-    <div class="flex items-baseline justify-between">
-      <div class="text-xs font-semibold text-slate-500">合計次數</div>
-      <div id="kpiShCnt" class="val mono text-lg">—</div>
-    </div>
-  </div>
-</div>
+      <!-- row 2 -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="card">
+          <div class="label">人時性(平均)</div>
+          <div id="kpiEff" class="val text-2xl mono mt-1">—</div>
+        </div>
+        <div class="card">
+          <div class="label">平均廠價</div>
+          <div id="kpiPrice" class="val text-2xl mono mt-1">—</div>
+        </div>
+        <div class="card">
+          <div class="label">多次生產數(平均)</div>
+          <div id="kpiMulti" class="val text-2xl mono mt-1">—</div>
+        </div>
+      </div>
+
+      <!-- row 3 -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="card">
+          <div class="label">總換線時間</div>
+          <div class="flex items-baseline gap-2 mt-1">
+            <div id="kpiChg" class="val text-2xl mono">—</div>
+            <div class="text-sm font-semibold text-slate-500">分</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="label">異常停線(5min⬆)</div>
+          <div class="mt-2 space-y-1">
+            <div class="flex items-baseline justify-between">
+              <div class="text-xs font-semibold text-slate-500">時間</div>
+              <div id="kpiAbTime" class="val mono text-lg">—</div>
+            </div>
+            <div class="flex items-baseline justify-between">
+              <div class="text-xs font-semibold text-slate-500">合計次數</div>
+              <div id="kpiAbCnt" class="val mono text-lg">—</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="label">短暫停線(5min⬇)</div>
+          <div class="mt-2 space-y-1">
+            <div class="flex items-baseline justify-between">
+              <div class="text-xs font-semibold text-slate-500">設備次數</div>
+              <div id="kpiShEquip" class="val mono text-lg">—</div>
+            </div>
+            <div class="flex items-baseline justify-between">
+              <div class="text-xs font-semibold text-slate-500">合計次數</div>
+              <div id="kpiShCnt" class="val mono text-lg">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <!-- Trends (lazy render) -->
-    <div class="card">
   <div class="flex flex-col gap-1">
     <div class="text-lg sm:text-xl font-extrabold tracking-wide text-slate-900">KPI 趨勢圖</div>
     <div class="hint mt-1">
@@ -642,7 +652,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v48_firstseen_fix";
+window.BUILD_VERSION = "v63_cards_changeover_fix";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -1263,8 +1273,8 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v48_firstseen_fix";
-console.log("Jinxin dashboard build:", BUILD_VERSION);
+const BUILD_VERSION = "v63_cards_changeover_fix";
+console.log("Jinxin dashboard build: v63_cards_changeover_fix
 
 const state = {
   rangeMode: "year",
@@ -1957,23 +1967,42 @@ if(Number.isFinite(ab.cnt) || Number.isFinite(ab.val2) || Number.isFinite(sh.cnt
 // 總換線時間（分鐘）：V欄「前置、換線時間/分」加總；若同列 X/Y（休息時間 開始/結束）有值則剔除
 // 0-based column index: V=21, X=23, Y=24
 (function(){
+  // 改用「晉欣4度CXXXX」分頁的 V 欄(前置、換線時間/分)加總；若同列 X/Y(休息時間)有值則剔除
+  const mmdd = (dateKey||"").slice(4); // YYYYMMDD -> MMDD
+  const candSheets = [
+    `晉欣4度C${mmdd}`,
+    `晉欣18度C${mmdd}`, // 若未提供 4°C 分頁，允許 fallback
+  ];
   let chg = 0;
-  const vCol = 21, xCol = 23, yCol = 24;
-  for(let r=0; r<grid.length; r++){
-    const row = grid[r] || [];
-    const v = toNumber(row[vCol]);
-    if(!Number.isFinite(v) || v<=0) continue;
-    const x = cleanText(row[xCol]);
-    const y = cleanText(row[yCol]);
-    if(x || y) continue; // 休息時間，不計入換線
-    chg += v;
+  let got = false;
+
+  for(const shName of candSheets){
+    const ws2 = wb && wb.Sheets ? wb.Sheets[shName] : null;
+    if(!ws2) continue;
+
+    const grid2 = XLSX.utils.sheet_to_json(ws2, { header: 1, raw: true, defval: "" });
+    // 找到「前置、換線時間/分」標題所在的列 (通常在 V 欄)
+    let headerRow = -1;
+    for(let r=0; r<grid2.length; r++){
+      const v = cleanText((grid2[r]||[])[21]);
+      if(v && v.includes("換線") && v.includes("時間") && v.includes("/")) { headerRow = r; break; }
+    }
+
+    const startR = headerRow >= 0 ? headerRow + 1 : 0;
+    for(let r=startR; r<grid2.length; r++){
+      const row = grid2[r] || [];
+      const v = toNumber(row[21]); // V
+      if(!Number.isFinite(v) || v<=0) continue;
+      const x = cleanText(row[23]); // X
+      const y = cleanText(row[24]); // Y
+      if(x || y) continue; // 休息時間，不計入換線
+      chg += v;
+      got = true;
+    }
+    if(got) break;
   }
-  if(Number.isFinite(chg) && chg>0){
-    state.changeoverDaily.set(dateKey, chg);
-  }else{
-    // 若該日沒有換線資料，仍寫入 0 以便跨期加總一致
-    state.changeoverDaily.set(dateKey, 0);
-  }
+
+  state.changeoverDaily.set(dateKey, Number.isFinite(chg) ? chg : 0);
 })();
 
   function parseSection(markerText, temp, prefix=""){
