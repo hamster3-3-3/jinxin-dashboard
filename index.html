@@ -207,6 +207,15 @@
         <div class="label">多次生產數(平均)</div>
         <div id="kpiMulti" class="val text-2xl mono mt-1">—</div>
 </div>
+
+      <div class="card">
+        <div class="label">總換線時間</div>
+        <div class="flex items-baseline gap-2 mt-1">
+          <div id="kpiChg" class="val text-2xl mono">—</div>
+          <div class="text-sm font-semibold text-slate-500">分</div>
+        </div>
+      </div>
+
 <div class="card">
   <div class="label">異常停線(5min⬆)</div>
   <div class="mt-2 space-y-1">
@@ -1278,6 +1287,7 @@ const state = {
   lineHumanDaily: new Map(),    // key temp|mmdd|lineKey
   lineAvgFromSheets: new Map(), // key temp|mmdd|lineKey
   stoplineDaily: new Map(),     // key YYYYMMDD -> {abCnt,abTime,shCnt,shEquip}
+  changeoverDaily: new Map(),   // key YYYYMMDD -> total changeover minutes (exclude rest time)
 
   loadedFiles: [],
   availableMmdd: new Set(),
@@ -1944,6 +1954,28 @@ if(Number.isFinite(ab.cnt) || Number.isFinite(ab.val2) || Number.isFinite(sh.cnt
   });
 }
 
+// 總換線時間（分鐘）：V欄「前置、換線時間/分」加總；若同列 X/Y（休息時間 開始/結束）有值則剔除
+// 0-based column index: V=21, X=23, Y=24
+(function(){
+  let chg = 0;
+  const vCol = 21, xCol = 23, yCol = 24;
+  for(let r=0; r<grid.length; r++){
+    const row = grid[r] || [];
+    const v = toNumber(row[vCol]);
+    if(!Number.isFinite(v) || v<=0) continue;
+    const x = cleanText(row[xCol]);
+    const y = cleanText(row[yCol]);
+    if(x || y) continue; // 休息時間，不計入換線
+    chg += v;
+  }
+  if(Number.isFinite(chg) && chg>0){
+    state.changeoverDaily.set(dateKey, chg);
+  }else{
+    // 若該日沒有換線資料，仍寫入 0 以便跨期加總一致
+    state.changeoverDaily.set(dateKey, 0);
+  }
+})();
+
   function parseSection(markerText, temp, prefix=""){
     const marker = findCell(grid, (v)=>cleanText(v)===markerText, 240, 40);
     if(!marker) return;
@@ -2535,12 +2567,8 @@ function calcKpis(){
   const dr = getActiveDayRange();
 
   function kpiFromDays(days){
-    // 停線資料自 2025-12-29 起才有（避免 2025 年全年度抓到錯誤區塊）
-    const STOPLINE_START = 20251229;
-    const selectedYear = Number(state.year)||0;
-    const stopEnabled = (selectedYear >= 2026);
     let qty=0, rev=0, multi=0, attSum=0, effSum=0, attCnt=0, effCnt=0;
-    let abCnt=0, abTime=0, shCnt=0, shEquip=0;
+    let abCnt=0, abTime=0, shCnt=0, shEquip=0, chgSum=0;
     for(const d of days){
       const s = d.summary;
       const q = toNumber(s.totalQty); if(Number.isFinite(q)) qty += q;
@@ -2548,21 +2576,16 @@ function calcKpis(){
       const m = toNumber(s.multi);    if(Number.isFinite(m)) multi += m;
       const a = toNumber(s.attendance); if(Number.isFinite(a)){ attSum += a; attCnt++; }
       const e = toNumber(s.efficiency); if(Number.isFinite(e)){ effSum += e; effCnt++; }
-      if(stopEnabled){
-        const ymd = Number(d.mmdd);
-        if(Number.isFinite(ymd) && ymd >= STOPLINE_START){
-          const st = state.stoplineDaily.get(d.mmdd);
-          if(st){
-            const ac = toNumber(st.abCnt); if(Number.isFinite(ac)) abCnt += ac;
-            const at = toNumber(st.abTime); if(Number.isFinite(at)) abTime += at;
-            const sc = toNumber(st.shCnt); if(Number.isFinite(sc)) shCnt += sc;
-            const se = toNumber(st.shEquip); if(Number.isFinite(se)) shEquip += se;
-          }
-        }
+      const st = state.stoplineDaily.get(d.mmdd);
+      if(st){
+        const ac = toNumber(st.abCnt); if(Number.isFinite(ac)) abCnt += ac;
+        const at = toNumber(st.abTime); if(Number.isFinite(at)) abTime += at;
+        const sc = toNumber(st.shCnt); if(Number.isFinite(sc)) shCnt += sc;
+        const se = toNumber(st.shEquip); if(Number.isFinite(se)) shEquip += se;
       }
+      const chg = state.changeoverDaily.get(d.mmdd);
+      const cv = toNumber(chg); if(Number.isFinite(cv)) chgSum += cv;
     }
-    if(!stopEnabled){ abCnt=NaN; abTime=NaN; shCnt=NaN; shEquip=NaN; }
-
     const att = attCnt ? (attSum/attCnt) : NaN;
     const eff = effCnt ? (effSum/effCnt) : NaN;
     const avgPrice = (qty>0 && Number.isFinite(rev)) ? (rev/qty) : NaN;
@@ -2577,17 +2600,8 @@ function calcKpis(){
     const qty = toNumber(s.totalQty), rev = toNumber(s.revenue), multi = toNumber(s.multi);
     const att = toNumber(s.attendance), eff = toNumber(s.efficiency);
     const avgPrice = (Number.isFinite(qty)&&qty>0&&Number.isFinite(rev)) ? (rev/qty) : toNumber(s.avgPrice);
-    const selectedYear = Number(state.year)||0;
-    const stopEnabled = (selectedYear >= 2026);
-    const ymd = Number(d.mmdd);
-    let abCnt = NaN, abTime = NaN, shCnt = NaN, shEquip = NaN;
-    if(stopEnabled && Number.isFinite(ymd) && ymd >= 20251229){
-      const st = state.stoplineDaily.get(d.mmdd) || {abCnt:0,abTime:0,shCnt:0,shEquip:0};
-      abCnt = toNumber(st.abCnt)||0;
-      abTime = toNumber(st.abTime)||0;
-      shCnt = toNumber(st.shCnt)||0;
-      shEquip = toNumber(st.shEquip)||0;
-    }
+    const st = state.stoplineDaily.get(d.mmdd) || {abCnt:0,abTime:0,shCnt:0,shEquip:0};
+    const abCnt = toNumber(st.abCnt)||0, abTime = toNumber(st.abTime)||0, shCnt = toNumber(st.shCnt)||0, shEquip = toNumber(st.shEquip)||0;
     return {qty, rev, multi, att, eff, avgPrice, abCnt, abTime, shCnt, shEquip, hint:`單日（${d.dateStr}）`};
   }
 
@@ -3269,6 +3283,7 @@ function refreshKpiCards(){
   $("kpiEff").textContent = Number.isFinite(k.eff) ? fmtDec(k.eff, 2) : "—";
   $("kpiPrice").textContent = Number.isFinite(k.avgPrice) ? fmtDec(k.avgPrice, 2) : "—";
   $("kpiMulti").textContent = Number.isFinite(k.multi) ? fmtInt(k.multi) : "—";
+  if($("kpiChg")) $("kpiChg").textContent = Number.isFinite(k.changeover) ? fmtInt(k.changeover) : "—";
 
   // 停線（加總）
   if($("kpiAbTime")) $("kpiAbTime").textContent = Number.isFinite(k.abTime) ? fmtDec(k.abTime, 1) : "—";
