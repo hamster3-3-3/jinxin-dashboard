@@ -3562,7 +3562,8 @@ function kpiLabel(k){
     efficiency: "人時性",
     avgPrice: "平均廠價",
     multi: "多次生產數",
-    itemCount: "品項數"
+    itemCount: "品項數",
+    changeoverMin: "換線時間"
   }[k] || k;
 }
 
@@ -4190,9 +4191,8 @@ function isFirstSeenInRange(prodName, start, end){
     if(kpi === "attendance") return Number.isFinite(a) ? a : null;
     if(kpi === "efficiency") return Number.isFinite(e) ? e : null;
 
-    if(kpi === "changeoverMin") {
-      const rec = state.changeoverDaily.get(`${state.temp}|${o.mmdd}`);
-      const v = rec ? toNumber(rec.min) : NaN;
+    if(kpi === "changeoverMin"){
+      const v = toNumber(state.changeoverDaily.get(o.mmdd));
       return Number.isFinite(v) ? v : null;
     }
 
