@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v48_firstseen_fix -->
+  <!-- BUILD: v51_firstseen_rebuild_fix -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -861,6 +861,59 @@ const LINE_WHITELIST_18C = [
 function getLineWhitelistByTemp(tempStr){
   return tempStr === "18" ? LINE_WHITELIST_18C : LINE_WHITELIST_4C;
 }
+// =========================
+// First-seen (新品：首次出現) index (global)
+// Key: `${temp}|${cleanKey(prodName)}`  Value: earliest YYYYMMDD (number)
+// =========================
+function updateFirstSeenProd(temp, yyyymmdd, prodName){
+  try{
+    if(!temp || !yyyymmdd || !prodName) return;
+    if(!state.firstSeenProd) state.firstSeenProd = {};
+    const key = String(temp) + "|" + cleanKey(prodName);
+    const d = Number(String(yyyymmdd).replace(/[^0-9]/g,""));
+    if(!Number.isFinite(d)) return;
+    const cur = state.firstSeenProd[key];
+    if(cur==null || d < cur) state.firstSeenProd[key] = d;
+  }catch(_e){}
+}
+
+function rebuildFirstSeenIndex(){
+  try{
+    state.firstSeenProd = {};
+    const recs = state.records || {};
+    for(const k in recs){
+      const rec = recs[k];
+      if(!rec) continue;
+      const temp = rec.temp || rec.temperature || rec.tempStr || rec.tempKey;
+      const ymd = rec.dateKey || rec.yyyymmdd || rec.date || rec.ymd;
+      const prod = rec.prod || rec.product || rec.prodName || rec.name;
+      const cat = rec.cat || rec.category || rec.catName;
+      if(!temp || !ymd || !prod) continue;
+      // ignore summary/avg rows
+      const c = (cat!=null) ? String(cat) : "";
+      if(c && cleanKey(c)==="0") continue;
+      if(/(平均|合計|小計|總計)/.test(String(prod))) continue;
+      updateFirstSeenProd(temp, ymd, prod);
+    }
+  }catch(_e){}
+}
+
+// Return true if product first-ever appearance date is within [start,end] (YYYYMMDD number)
+function isFirstSeenInRange(temp, prodName, startYmd, endYmd){
+  try{
+    if(!temp || !prodName) return false;
+    if(!state.firstSeenProd) return false;
+    const name = String(prodName).split("|").pop(); // tolerate "cat|prod"
+    const key = String(temp) + "|" + cleanKey(name);
+    const d = state.firstSeenProd[key];
+    if(d==null) return false;
+    const s = Number(String(startYmd).replace(/[^0-9]/g,""));
+    const e = Number(String(endYmd).replace(/[^0-9]/g,""));
+    if(!Number.isFinite(s) || !Number.isFinite(e)) return false;
+    return d >= Math.min(s,e) && d <= Math.max(s,e);
+  }catch(_e){ return false; }
+}
+
 
 
 
@@ -1714,18 +1767,6 @@ const key = `${temp}|${dateKey}|${cleanKey(currentLine)}|${cleanKey(cat)}|${clea
 if(cat && cleanKey(cat) !== "0" && prod && !/(平均|合計|小計|總計)/.test(prod)){
   
 // ---- First-seen (新品：首次出現) tracking ----
-function updateFirstSeenProd(temp, yyyymmdd, prodKey){
-  try{
-    if(!temp || !yyyymmdd || !prodKey) return;
-    if(!state.firstSeenProd) state.firstSeenProd = {};
-    const key = String(temp) + "|" + cleanKey(prodKey);
-    const d = Number(String(yyyymmdd).replace(/[^0-9]/g,""));
-    if(!Number.isFinite(d)) return;
-    const cur = state.firstSeenProd[key];
-    if(cur==null || d < cur) state.firstSeenProd[key] = d;
-  }catch(_e){}
-}
-
 updateFirstSeenProd(temp, dateKey, prod);
 }
 
@@ -6537,6 +6578,7 @@ function refreshAll(){
   // keep month selectors in sync
   const wms = $("weekMonthSelect"); if(wms) wms.value = String(state.month);
   refreshActiveRangeText();
+  rebuildFirstSeenIndex();
   refreshKpiCards();
   refreshLineSection();
   buildProdIndex();
