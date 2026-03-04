@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v55_stopline_label_fix -->
+  <!-- BUILD: v58_stopline_parse_strict -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -1859,11 +1859,15 @@ function parseDailySummarySheet(wb, sheetName, dateKey){
 
 // 異常停線 / 短暫停線（日期分頁：常見在 N:O 與 P:Q）
 function pickStopBlock(title, fallbackCountCol, fallbackVal2Col, val2Header="時間"){
-  const hit = findCell(grid, (v)=>cleanText(v)===title, 240, 60);
-  // 先找標題下方的表頭列（合計次數 / 時間 或 設備次數）
-  let rHead = -1, cCnt = fallbackCountCol, cVal2 = fallbackVal2Col;
+  const hit = findCell(grid, (v)=>cleanText(v)===title, 240, 80);
+
+  // 預設欄位（若找不到表頭則不會亂抓其他區塊數字）
+  let cCnt = fallbackCountCol, cVal2 = fallbackVal2Col;
+  let rHead = -1;
+
   if(hit){
-    for(let r=hit.r; r<Math.min(grid.length, hit.r+8); r++){
+    // 只在標題下方小範圍找表頭，避免抓到其他表格的「合計次數」
+    for(let r=hit.r; r<Math.min(grid.length, hit.r+6); r++){
       const row = grid[r] || [];
       const hasCnt = row.some(v=> cleanText(v)==="合計次數");
       const hasVal2 = row.some(v=> cleanText(v)===val2Header);
@@ -1877,18 +1881,31 @@ function pickStopBlock(title, fallbackCountCol, fallbackVal2Col, val2Header="時
         break;
       }
     }
+  }else{
+    // 沒找到標題：允許使用固定欄位（但只抓非常靠前的一列，避免誤抓）
+    rHead = -2;
   }
-  // 找第一列數字資料
+
   let cnt = NaN, val2 = NaN;
-  const rStart = (rHead>=0) ? (rHead+1) : (hit ? hit.r+1 : 0);
-  for(let r=rStart; r<Math.min(grid.length, rStart+20); r++){
+
+  // 取值列：若有找到表頭，抓表頭下一列；若只靠固定欄位，抓前 8 列內第一列數字
+  if(rHead >= 0){
+    const r = rHead + 1;
     const row = grid[r] || [];
     const vCnt = toNumber(row[cCnt]);
     const vVal2 = toNumber(row[cVal2]);
-    if(Number.isFinite(vCnt) || Number.isFinite(vVal2)){
-      cnt = Number.isFinite(vCnt)? vCnt : cnt;
-      val2 = Number.isFinite(vVal2)? vVal2 : val2;
-      break;
+    if(Number.isFinite(vCnt)) cnt = vCnt;
+    if(Number.isFinite(vVal2)) val2 = vVal2;
+  }else if(rHead === -2){
+    for(let r=0; r<Math.min(grid.length, 8); r++){
+      const row = grid[r] || [];
+      const vCnt = toNumber(row[cCnt]);
+      const vVal2 = toNumber(row[cVal2]);
+      if(Number.isFinite(vCnt) || Number.isFinite(vVal2)){
+        cnt = Number.isFinite(vCnt)? vCnt : cnt;
+        val2 = Number.isFinite(vVal2)? vVal2 : val2;
+        break;
+      }
     }
   }
   return {cnt, val2};
