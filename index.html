@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v45_sum_qty_rev -->
+  <!-- BUILD: v48_firstseen_fix -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -607,7 +607,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v45_sum_qty_rev";
+window.BUILD_VERSION = "v48_firstseen_fix";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -1175,7 +1175,7 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v44_prod_suggest_badges_big";
+const BUILD_VERSION = "v48_firstseen_fix";
 console.log("Jinxin dashboard build:", BUILD_VERSION);
 
 const state = {
@@ -1712,7 +1712,21 @@ const key = `${temp}|${dateKey}|${cleanKey(currentLine)}|${cleanKey(cat)}|${clea
 // New rule: first appearance in daily report data within range => treat as "new product"
 // Track per temp+product (exclude cat==0 / summary rows)
 if(cat && cleanKey(cat) !== "0" && prod && !/(平均|合計|小計|總計)/.test(prod)){
-  updateFirstSeenProd(temp, dateKey, prod);
+  
+// ---- First-seen (新品：首次出現) tracking ----
+function updateFirstSeenProd(temp, yyyymmdd, prodKey){
+  try{
+    if(!temp || !yyyymmdd || !prodKey) return;
+    if(!state.firstSeenProd) state.firstSeenProd = {};
+    const key = String(temp) + "|" + String(prodKey);
+    const d = Number(String(yyyymmdd).replace(/[^0-9]/g,""));
+    if(!Number.isFinite(d)) return;
+    const cur = state.firstSeenProd[key];
+    if(cur==null || d < cur) state.firstSeenProd[key] = d;
+  }catch(_e){}
+}
+
+updateFirstSeenProd(temp, dateKey, prod);
 }
 
 
