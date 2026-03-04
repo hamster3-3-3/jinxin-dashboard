@@ -1194,6 +1194,7 @@ const state = {
 
   summaries: new Map(),         // key temp|mmdd
   records: new Map(),           // key temp|mmdd|line|cat|prod
+  firstSeenProd: new Map(),       // key temp|prod -> first seen YYYYMMDD
   itemCountDaily: new Map(),     // key temp|mmdd -> count of product rows (cat!=0)
   lineHumanDaily: new Map(),    // key temp|mmdd|lineKey
   lineAvgFromSheets: new Map(), // key temp|mmdd|lineKey
@@ -1707,6 +1708,13 @@ if(cat && cleanKey(cat) !== "0" && prod && !/(平均|合計|小計|總計)/.test
 
 const key = `${temp}|${dateKey}|${cleanKey(currentLine)}|${cleanKey(cat)}|${cleanKey(prod)}`;
     upsert(state.records, key, rec);
+
+// New rule: first appearance in daily report data within range => treat as "new product"
+// Track per temp+product (exclude cat==0 / summary rows)
+if(cat && cleanKey(cat) !== "0" && prod && !/(平均|合計|小計|總計)/.test(prod)){
+  updateFirstSeenProd(temp, dateKey, prod);
+}
+
 
     // 4°C: average rows for line-level achievement averages
     if(temp === "4" && prod.includes("平均")){
@@ -2575,15 +2583,27 @@ function getNewProductBadgeInfo(){
   return { mode, labelCur, labelPrev, showPrev, curStart, curEnd, prevStart, prevEnd };
 }
 
+
 function isNewProductInRange(prodName, start, end){
   if(!prodName) return false;
   if(!(start instanceof Date) || isNaN(start) || !(end instanceof Date) || isNaN(end)) return false;
+
+  // Rule A (existing): launch date within range
+  let byLaunch = false;
   const info = getLaunchDateInfoForProd(prodName);
-  if(!info || !(info.date instanceof Date) || isNaN(info.date)) return false;
-  return _isWithinUTC(info.date, start, end);
+  if(info && (info.date instanceof Date) && !isNaN(info.date)){
+    byLaunch = _isWithinUTC(info.date, start, end);
+  }
+
+  // Rule B (new): first appearance in daily report data within range
+  const byFirstSeen = isFirstSeenInRange(prodName, start, end);
+
+  // Union to avoid double counting
+  return (byLaunch || byFirstSeen);
 }
 
-function countNewProductsByRange(prodSet, start, end){
+function countNewProductsByRange
+(prodSet, start, end){
   if(!prodSet || !prodSet.forEach) return 0;
   if(!(start instanceof Date) || isNaN(start) || !(end instanceof Date) || isNaN(end)) return 0;
   let n = 0;
@@ -3734,6 +3754,35 @@ function renderCharts(){
 
   function pad2(n){ return String(n).padStart(2,"0"); }
   function fmtMMDDSlash(d){ return `${pad2(d.getUTCMonth()+1)}/${pad2(d.getUTCDate())}`; }
+
+
+// YYYYMMDD key from UTC date (inclusive range compare)
+function dateToKeyUTC(d){
+  if(!(d instanceof Date) || isNaN(d)) return "";
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth()+1).padStart(2,'0');
+  const dd = String(d.getUTCDate()).padStart(2,'0');
+  return `${y}${m}${dd}`;
+}
+
+// Track first appearance date (YYYYMMDD) for each product within a temp layer
+function updateFirstSeenProd(temp, dateKey, prodName){
+  if(!temp || !dateKey || !prodName) return;
+  const k = `${temp}|${cleanKey(prodName)}`;
+  const cur = state.firstSeenProd.get(k);
+  if(!cur || dateKey < cur) state.firstSeenProd.set(k, dateKey);
+}
+
+function isFirstSeenInRange(prodName, start, end){
+  if(!prodName) return false;
+  if(!(start instanceof Date) || isNaN(start) || !(end instanceof Date) || isNaN(end)) return false;
+  const k = `${state.temp}|${cleanKey(prodName)}`;
+  const first = state.firstSeenProd.get(k);
+  if(!first) return false;
+  const sKey = dateToKeyUTC(start);
+  const eKey = dateToKeyUTC(end);
+  return (first >= sKey && first <= eKey);
+}
 
   const getWeekStart = (d)=>{
     // UTC week start (Tue) to avoid timezone shifting
