@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD: v44_prod_suggest_badges_big -->
+  <!-- BUILD: v45_sum_qty_rev -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -184,11 +184,11 @@
     <!-- KPI cards -->
     <div class="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4">
       <div class="card">
-        <div class="label">總生產量(平均)</div>
+        <div class="label">總生產量</div>
         <div id="kpiQty" class="val text-2xl mono mt-1">—</div>
 </div>
       <div class="card">
-        <div class="label">營業額(平均)</div>
+        <div class="label">營業額</div>
         <div id="kpiRev" class="val text-2xl mono mt-1">—</div>
 </div>
       <div class="card">
@@ -607,7 +607,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v44_prod_suggest_badges_big";
+window.BUILD_VERSION = "v45_sum_qty_rev";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -2339,8 +2339,8 @@ if(state.rangeMode === "week"){
 
 /* KPI：
    年：12個月「月平均」再取平均（只算有資料月份）
-   月：週平均（週內日平均）再取平均（只算有資料週）
-   週：週內日平均
+   月：週平均（週內加總）再取平均（只算有資料週）
+   週：週內加總
    日：單日
 */
 function calcKpis(){
@@ -2382,14 +2382,14 @@ function calcKpis(){
 
   let hint = "";
   if(mode === "week"){
-    hint = `週內日平均（${$("weekSelect").value || ""}）`;
+    hint = `週內加總（${$("weekSelect").value || ""}）`;
   }else if(mode === "month"){
-    hint = `本月日平均（${String(state.month).padStart(2,"0")} 月）`;
+    hint = `本月加總（${String(state.month).padStart(2,"0")} 月）`;
   }else if(mode === "year"){
-    hint = `年別日平均（${state.year} 年）`;
+    hint = `年別加總（${state.year} 年）`;
   }else{
     // day + 指定範圍
-    hint = dr ? `指定期間日平均（${dr.startStr} ～ ${dr.endStr}）` : "日平均";
+    hint = dr ? `指定期間加總（${dr.startStr} ～ ${dr.endStr}）` : "加總";
   }
 
   // 若在非日別視圖也套用了指定範圍，額外標示
@@ -2398,8 +2398,8 @@ function calcKpis(){
   }
 
   return {
-    qty: base.qty/dn,
-    rev: base.rev/dn,
+    qty: base.qty,
+    rev: base.rev,
     multi: base.multi/dn,
     att: base.att,
     eff: base.eff,
@@ -2418,20 +2418,20 @@ function refreshActiveRangeText(){
   // 先建立「視圖」本身的顯示文字
   if(mode === "year"){
     title = `${state.year} 年｜${tempLabel}`;
-    hint = "顯示：年別日平均（範圍內每日資料取平均）";
+    hint = "顯示：年別加總（範圍內每日資料取平均）";
   }else if(mode === "month"){
     title = `${state.year}-${String(state.month).padStart(2,"0")}｜${tempLabel}`;
-    hint = "顯示：本月日平均（範圍內每日資料取平均）";
+    hint = "顯示：本月加總（範圍內每日資料取平均）";
   }else if(mode === "week"){
     const ws = state.weekStartStr ? new Date(state.weekStartStr+"T00:00:00Z") : null;
     const we = ws ? addDaysUTC(ws,6) : null;
     title = ws ? `${dateObjToStr(ws)} ～ ${dateObjToStr(we)}｜${tempLabel}` : `（未選週）｜${tempLabel}`;
-    hint = "顯示：週內日平均";
+    hint = "顯示：週內加總";
   }else{
     // day
     if(dr){
       title = `${dr.startStr} ～ ${dr.endStr}｜${tempLabel}`;
-      hint = "顯示：指定期間日平均（全部指標以每日平均顯示）";
+      hint = "顯示：指定期間加總（全部指標以每日平均顯示）";
     }else{
       title = state.dayStr ? `${state.dayStr}｜${tempLabel}` : `（未選日）｜${tempLabel}`;
       hint = "顯示：單日";
