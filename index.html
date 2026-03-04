@@ -1858,51 +1858,51 @@ function parseDailySummarySheet(wb, sheetName, dateKey){
 
 
 // 異常停線 / 短暫停線（日期分頁：常見在 N:O 與 P:Q）
-function pickStopBlock(title, fallbackCountCol, fallbackTimeCol){
-  const hit = findCell(grid, (v)=>cleanText(v)===title, 260, 60);
-  let cCnt = fallbackCountCol, cTime = fallbackTimeCol, rHead = -1;
+function pickStopBlock(title, fallbackCountCol, fallbackVal2Col, val2Header="時間"){
+  const hit = findCell(grid, (v)=>cleanText(v)===title, 240, 60);
+  // 先找標題下方的表頭列（合計次數 / 時間 或 設備次數）
+  let rHead = -1, cCnt = fallbackCountCol, cVal2 = fallbackVal2Col;
   if(hit){
-    // 找「合計次數 / 時間」那一列
     for(let r=hit.r; r<Math.min(grid.length, hit.r+8); r++){
       const row = grid[r] || [];
       const hasCnt = row.some(v=> cleanText(v)==="合計次數");
-      const hasTime = row.some(v=> cleanText(v)==="時間");
-      if(hasCnt || hasTime){
+      const hasVal2 = row.some(v=> cleanText(v)===val2Header);
+      if(hasCnt || hasVal2){
         rHead = r;
         for(let c=0;c<row.length;c++){
           const t = cleanText(row[c]);
           if(t==="合計次數") cCnt = c;
-          if(t==="時間") cTime = c;
+          if(t===val2Header) cVal2 = c;
         }
         break;
       }
     }
   }
   // 找第一列數字資料
-  let cnt = NaN, time = NaN;
+  let cnt = NaN, val2 = NaN;
   const rStart = (rHead>=0) ? (rHead+1) : (hit ? hit.r+1 : 0);
   for(let r=rStart; r<Math.min(grid.length, rStart+20); r++){
     const row = grid[r] || [];
     const vCnt = toNumber(row[cCnt]);
-    const vTime = toNumber(row[cTime]);
-    if(Number.isFinite(vCnt) || Number.isFinite(vTime)){
+    const vVal2 = toNumber(row[cVal2]);
+    if(Number.isFinite(vCnt) || Number.isFinite(vVal2)){
       cnt = Number.isFinite(vCnt)? vCnt : cnt;
-      time = Number.isFinite(vTime)? vTime : time;
+      val2 = Number.isFinite(vVal2)? vVal2 : val2;
       break;
     }
   }
-  return {cnt, time};
+  return {cnt, val2};
 }
 
 // 0-based column index: N=13 O=14 P=15 Q=16
-const ab = pickStopBlock("異常停線", 13, 14);
-const sh = pickStopBlock("短暫停線", 15, 16);
-if(Number.isFinite(ab.cnt) || Number.isFinite(ab.time) || Number.isFinite(sh.cnt) || Number.isFinite(sh.time)){
+const ab = pickStopBlock("異常停線", 13, 14, "時間");
+const sh = pickStopBlock("短暫停線", 15, 16, "設備次數");
+if(Number.isFinite(ab.cnt) || Number.isFinite(ab.val2) || Number.isFinite(sh.cnt) || Number.isFinite(sh.val2)){
   state.stoplineDaily.set(dateKey, {
     abCnt: Number.isFinite(ab.cnt) ? ab.cnt : 0,
-    abTime: Number.isFinite(ab.time) ? ab.time : 0,
+    abTime: Number.isFinite(ab.val2) ? ab.val2 : 0,
     shCnt: Number.isFinite(sh.cnt) ? sh.cnt : 0,
-    shEquip: Number.isFinite(sh.time) ? sh.time : 0
+    shEquip: Number.isFinite(sh.val2) ? sh.val2 : 0
   });
 }
 
@@ -2498,7 +2498,7 @@ function calcKpis(){
 
   function kpiFromDays(days){
     let qty=0, rev=0, multi=0, attSum=0, effSum=0, attCnt=0, effCnt=0;
-    let abCnt=0, abTime=0, shCnt=0, shTime=0;
+    let abCnt=0, abTime=0, shCnt=0, shEquip=0;
     for(const d of days){
       const s = d.summary;
       const q = toNumber(s.totalQty); if(Number.isFinite(q)) qty += q;
@@ -2511,13 +2511,13 @@ function calcKpis(){
         const ac = toNumber(st.abCnt); if(Number.isFinite(ac)) abCnt += ac;
         const at = toNumber(st.abTime); if(Number.isFinite(at)) abTime += at;
         const sc = toNumber(st.shCnt); if(Number.isFinite(sc)) shCnt += sc;
-        const stt = toNumber(st.shEquip); if(Number.isFinite(stt)) shEquip += stt;
+        const se = toNumber(st.shEquip); if(Number.isFinite(se)) shEquip += se;
       }
     }
     const att = attCnt ? (attSum/attCnt) : NaN;
     const eff = effCnt ? (effSum/effCnt) : NaN;
     const avgPrice = (qty>0 && Number.isFinite(rev)) ? (rev/qty) : NaN;
-    return {qty, rev, multi, att, eff, avgPrice, abCnt, abTime, shCnt, shTime, days: days.length};
+    return {qty, rev, multi, att, eff, avgPrice, abCnt, abTime, shCnt, shEquip, days: days.length};
   }
 
   // 單日（無指定範圍）
@@ -2529,8 +2529,8 @@ function calcKpis(){
     const att = toNumber(s.attendance), eff = toNumber(s.efficiency);
     const avgPrice = (Number.isFinite(qty)&&qty>0&&Number.isFinite(rev)) ? (rev/qty) : toNumber(s.avgPrice);
     const st = state.stoplineDaily.get(d.mmdd) || {abCnt:0,abTime:0,shCnt:0,shEquip:0};
-    const abCnt = toNumber(st.abCnt)||0, abTime = toNumber(st.abTime)||0, shCnt = toNumber(st.shCnt)||0, shTime = toNumber(st.shEquip)||0;
-    return {qty, rev, multi, att, eff, avgPrice, abCnt, abTime, shCnt, shTime, hint:`單日（${d.dateStr}）`};
+    const abCnt = toNumber(st.abCnt)||0, abTime = toNumber(st.abTime)||0, shCnt = toNumber(st.shCnt)||0, shEquip = toNumber(st.shEquip)||0;
+    return {qty, rev, multi, att, eff, avgPrice, abCnt, abTime, shCnt, shEquip, hint:`單日（${d.dateStr}）`};
   }
 
   // 其餘（週/月/年/指定範圍）：全部以「日平均」顯示
@@ -2565,7 +2565,7 @@ function calcKpis(){
     abCnt: base.abCnt,
     abTime: base.abTime,
     shCnt: base.shCnt,
-    shEquip: base.shTime,
+    shEquip: base.shEquip,
     hint
   };
 }
