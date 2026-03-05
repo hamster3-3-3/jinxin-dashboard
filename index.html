@@ -355,6 +355,7 @@
                 <option value="qty">生產量</option>
                 <option value="revenue">營業額</option>
                 <option value="people">人數</option>
+                <option value="effAvg">人時性(平均)</option>
                 <option value="cap">產能/時</option>
                 <option value="runMin">稼動時間/分</option>
               </select>
@@ -367,6 +368,7 @@
                 <option value="qty">生產量</option>
                 <option value="revenue">營業額</option>
                 <option value="people">人數</option>
+                <option value="effAvg">人時性(平均)</option>
                 <option value="cap">產能/時</option>
                 <option value="runMin">稼動時間/分</option>
               </select>
@@ -5283,7 +5285,7 @@ const catKey = cleanKey(cleanText(catName || ""));
     const dateStr = dateObjToStr(dObj);
 
     if(!byDate.has(dateStr)){
-      byDate.set(dateStr, { qty:0, revenue:0, people:0, runMin:0, _has:false });
+      byDate.set(dateStr, { qty:0, revenue:0, people:0, runMin:0, capSum:0, _has:false });
     }
     const a = byDate.get(dateStr);
 
@@ -5291,6 +5293,7 @@ const catKey = cleanKey(cleanText(catName || ""));
     if(Number.isFinite(rec.revenue)) a.revenue += rec.revenue;
     if(Number.isFinite(rec.people)) a.people += rec.people;
     if(Number.isFinite(rec.runMin)) a.runMin += rec.runMin;
+    if(Number.isFinite(rec.cap)) a.capSum += rec.cap;
 
     a._has = true;
   }
@@ -5307,6 +5310,7 @@ const catKey = cleanKey(cleanText(catName || ""));
       cap = a.qty / a.people;
     }
 
+    const effAvg = (Number.isFinite(a.people) && a.people>0) ? (a.capSum / a.people) : 0;
     rows.push({
       dateStr,
       rec: {
@@ -5314,7 +5318,9 @@ const catKey = cleanKey(cleanText(catName || ""));
         revenue: a.revenue,
         people: a.people,
         runMin: a.runMin,
-        cap
+        cap,
+        capSum: a.capSum,
+        effAvg
       }
     });
   }
@@ -5342,6 +5348,11 @@ function buildGroupSeries(rows, metric, viewMode="avg", opts=null){
   // - sum：以日值加總（右側「加總」圖）
   // - cap：avg=日 cap 平均；sum=以 bucket 的「總產量 ÷ 總稼動(小時)」推算（無稼動則用總人數近似）
   const aggBucket = (arr)=>{
+    if(metric === "effAvg"){
+      let sumCap = 0, sumPeople = 0;
+      for(const it of arr){ sumCap += (toNumber(it.rec.capSum)||0); sumPeople += (toNumber(it.rec.people)||0); }
+      return sumPeople>0 ? (sumCap/sumPeople) : 0;
+    }
     if(metric === "cap"){
       if(viewMode === "sum"){
         let q = 0, run = 0, ppl = 0;
@@ -5539,6 +5550,7 @@ function renderGroupTrend(catName){
     if(k==="qty") return "生產量";
     if(k==="revenue") return "營業額";
     if(k==="people") return "人數";
+    if(k==="effAvg") return "人時性(平均)";
     if(k==="cap") return "產能/時";
     if(k==="runMin") return "稼動時間/分";
       if(k==="changeoverMin") return "換線時間(分)";
