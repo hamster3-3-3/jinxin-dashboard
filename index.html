@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD v67_prod_changeover_fix -->
+  <!-- BUILD v69_changeover_avgdaily_fix -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -219,7 +219,7 @@
       <!-- row 3 -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div class="card">
-          <div class="label">總換線時間</div>
+          <div class="label">平均每日換線時間(分)</div>
           <div class="flex items-baseline gap-2 mt-1">
             <div id="kpiChg" class="val text-2xl mono">—</div>
             <div class="text-sm font-semibold text-slate-500">分</div>
@@ -663,7 +663,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v67_prod_changeover_fix";
+window.BUILD_VERSION = "v69_changeover_avgdaily_fix";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -1284,8 +1284,8 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v67_prod_changeover_fix";
-console.log("Jinxin dashboard build: v67_prod_changeover_fix");
+const BUILD_VERSION = "v69_changeover_avgdaily_fix";
+console.log("Jinxin dashboard build: v69_changeover_avgdaily_fix");
 const state = {
   rangeMode: "year",
   temp: "4",
@@ -1752,7 +1752,18 @@ function parseTempSheet(wb, sheetName, temp, dateKey){
   const idxEff = idxEffAct;
 
   const idxProdTime = indexOfHeaderContains(header, "生產時間");
-  const idxChange = indexOfHeaderContains(header, "換線/分");
+  const idxChange = (function(){
+    let i = indexOfHeaderContains(header, "換線時間/分");
+    if(i < 0) i = indexOfHeaderContains(header, "前置、換線時間/分");
+    if(i < 0) i = indexOfHeaderContains(header, "換線/分");
+    if(i < 0){
+      for(let c=0; c<header.length; c++){
+        const t = cleanText(header[c]);
+        if(t && t.includes("換線") && t.includes("分")) return c;
+      }
+    }
+    return i;
+  })();
   const idxRun = indexOfHeaderContains(header, "稼動時間/分");
 
   // 達成率欄位（若有）：通常同時包含「人時性達成率」與（4°C）「產能達成率」
@@ -2648,7 +2659,7 @@ function calcKpis(){
     const att = attCnt ? (attSum/attCnt) : NaN;
     const eff = effCnt ? (effSum/effCnt) : NaN;
     const avgPrice = (qty>0 && Number.isFinite(rev)) ? (rev/qty) : NaN;
-    return {qty, rev, multi, att, eff, avgPrice, abCnt, abTime, shCnt, shEquip, changeover: chgSum, days: days.length};
+    return {qty, rev, multi, att, eff, avgPrice, abCnt, abTime, shCnt, shEquip, changeoverSum: chgSum, days: days.length};
   }
 
   // 單日（無指定範圍）
@@ -2699,7 +2710,7 @@ const chg = toNumber(state.changeoverDaily.get(d.mmdd));
     abTime: base.abTime,
     shCnt: base.shCnt,
     shEquip: base.shEquip,
-    changeover: base.changeover,
+    changeover: (dn > 0) ? (base.changeoverSum / dn) : NaN,
     hint
   };
 }
@@ -3345,7 +3356,7 @@ function refreshKpiCards(){
   $("kpiEff").textContent = Number.isFinite(k.eff) ? fmtDec(k.eff, 2) : "—";
   $("kpiPrice").textContent = Number.isFinite(k.avgPrice) ? fmtDec(k.avgPrice, 2) : "—";
   $("kpiMulti").textContent = Number.isFinite(k.multi) ? fmtInt(k.multi) : "—";
-  if($("kpiChg")) $("kpiChg").textContent = Number.isFinite(k.changeover) ? fmtInt(k.changeover) : "—";
+  if($("kpiChg")) $("kpiChg").textContent = Number.isFinite(k.changeover) ? fmtDec(k.changeover, 1) : "—";
 
   // 停線（加總）
   if($("kpiAbTime")) $("kpiAbTime").textContent = Number.isFinite(k.abTime) ? fmtDec(k.abTime, 1) : "—";
@@ -3723,10 +3734,7 @@ function buildProductSeriesMode(rows, metric, aggMode){
     if(!it) return NaN;
     if(metric === "changeoverMin"){
       const direct = toNumber(it.rec ? (it.rec.changeMin ?? it.rec.changeoverMin) : NaN);
-      if(Number.isFinite(direct)) return direct;
-      const dateKey = (it.rec && it.rec.mmdd) ? String(it.rec.mmdd) : String(it.dateStr || "").replace(/-/g, "");
-      const fallback = toNumber(state.changeoverDaily.get(dateKey));
-      return Number.isFinite(fallback) ? fallback : NaN;
+      return Number.isFinite(direct) ? direct : NaN;
     }
     const v = toNumber(it.rec ? it.rec[metric] : NaN);
     return Number.isFinite(v) ? v : NaN;
@@ -5834,10 +5842,7 @@ function refreshProductDetails(){
     const ha = toNumber(rec.humanAch); if(Number.isFinite(ha)){ hAchSum += ha; hAchCnt++; }
     const ca = toNumber(rec.capAch); if(Number.isFinite(ca)){ cAchSum += ca; cAchCnt++; }
 
-    const changeDateKey = String(rec.mmdd || "");
-    const chgDirect = toNumber(rec.changeMin);
-    const chgFallback = toNumber(state.changeoverDaily.get(changeDateKey));
-    const chg = Number.isFinite(chgDirect) ? chgDirect : chgFallback;
+    const chg = toNumber(rec.changeMin);
     if(Number.isFinite(chg)){ changeSum += chg; changeCnt++; }
     const ru = toNumber(rec.runMin); if(Number.isFinite(ru)){ runSum += ru; runCnt++; }
   }
@@ -5863,10 +5868,7 @@ function refreshProductDetails(){
   tb.innerHTML = "";
   for(const {dateStr, rec} of rows){
     const tr = document.createElement("tr");
-    const dateKey = String(dateStr).replace(/-/g,"");
-    const chgDirect = toNumber(rec.changeMin);
-    const chgFallback = toNumber(state.changeoverDaily.get(dateKey));
-    const chg = Number.isFinite(chgDirect) ? chgDirect : chgFallback;
+    const chg = toNumber(rec.changeMin);
     tr.innerHTML = `
       <td class="mono">${dateStr}</td>
       <td class="mono">${fmtInt(toNumber(rec.qty))}</td>
