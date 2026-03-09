@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD v66_changeover_colscan_fix -->
+  <!-- BUILD v67_prod_changeover_fix -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -594,6 +594,7 @@
                     <option value="cap">產能/時</option>
                     <option value="eff">人時性</option>
                     <option value="runMin">稼動時間/分</option>
+                    <option value="changeoverMin">換線時間(分)</option>
                   </select>
                 </div>
 
@@ -607,6 +608,7 @@
                     <option value="cap">產能/時</option>
                     <option value="eff">人時性</option>
                     <option value="runMin">稼動時間/分</option>
+                    <option value="changeoverMin">換線時間(分)</option>
                   </select>
                 </div>
               </div>
@@ -658,7 +660,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v64_cards_changeover_fix";
+window.BUILD_VERSION = "v67_prod_changeover_fix";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -1279,8 +1281,8 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v64_cards_changeover_fix";
-console.log("Jinxin dashboard build: v64_cards_changeover_fix");
+const BUILD_VERSION = "v67_prod_changeover_fix";
+console.log("Jinxin dashboard build: v67_prod_changeover_fix");
 const state = {
   rangeMode: "year",
   temp: "4",
@@ -3378,7 +3380,8 @@ function fmtKpiValue(kpi, v){
 }
 function fmtProdValue(metric, v){
   if(v === null || v === undefined || !Number.isFinite(v)) return "—";
-  if(["revenue","qty","runMin"].includes(metric)) return Math.round(v).toLocaleString("zh-Hant-TW");
+  if(["revenue","qty"].includes(metric)) return Math.round(v).toLocaleString("zh-Hant-TW");
+  if(["runMin","changeoverMin"].includes(metric)) return Number(v).toFixed(1);
   return v.toFixed(2);
 }
 const valueLabelPlugin = {
@@ -3450,7 +3453,7 @@ function fmtDeltaForKpi(kpi, delta){
   return fmtSigned(delta, 0);
 }
 function fmtDeltaForMetric(metric, delta){
-  if(metric === "runMin") return fmtSigned(delta, 1);
+  if(["runMin","changeoverMin"].includes(metric)) return fmtSigned(delta, 1);
   if(metric === "revenue" || metric === "qty") return fmtSigned(delta, 0);
   return fmtSigned(delta, 2);
 }
@@ -3713,9 +3716,20 @@ function buildProductSeriesMode(rows, metric, aggMode){
 
   if(!items.length) return {title:"趨勢", labels:[], values:[]};
 
+  const getMetricValue = (it)=>{
+    if(!it) return NaN;
+    if(metric === "changeoverMin"){
+      const dateKey = (it.rec && it.rec.mmdd) ? String(it.rec.mmdd) : String(it.dateStr || "").replace(/-/g, "");
+      const v = toNumber(state.changeoverDaily.get(dateKey));
+      return Number.isFinite(v) ? v : NaN;
+    }
+    const v = toNumber(it.rec ? it.rec[metric] : NaN);
+    return Number.isFinite(v) ? v : NaN;
+  };
+
   // aggMode = "avg" / "sum"
-  // 對「加總」圖：qty / revenue / people / runMin 用加總，其餘（比率/單價/效率）以平均避免意義不清
-  const sumMetrics = (aggMode === "sum") ? new Set(["qty","revenue","people","runMin"]) : new Set(["qty","revenue"]);
+  // 對「加總」圖：qty / revenue / people / runMin / changeoverMin 用加總，其餘（比率/單價/效率）以平均避免意義不清
+  const sumMetrics = (aggMode === "sum") ? new Set(["qty","revenue","people","runMin","changeoverMin"]) : new Set(["qty","revenue"]);
   const isSum = sumMetrics.has(metric);
 
   const agg = (vals)=>{
@@ -3729,7 +3743,7 @@ function buildProductSeriesMode(rows, metric, aggMode){
     const labels=[], values=[];
     for(let m=1; m<=12; m++){
       labels.push(String(m).padStart(2,"0"));
-      const bucket = items.filter(it => (it.dateObj.getUTCMonth()+1)===m).map(it => it.rec[metric]);
+      const bucket = items.filter(it => (it.dateObj.getUTCMonth()+1)===m).map(it => getMetricValue(it));
       values.push(agg(bucket));
     }
     return {title:`月別（全年｜${state.year}｜月${aggMode==="sum"?"加總":"平均"}）`, labels, values};
@@ -3739,7 +3753,7 @@ function buildProductSeriesMode(rows, metric, aggMode){
     items.sort((a,b)=>a.dateObj-b.dateObj);
     const labels = items.map(it => it.dateStr.slice(5));
     const values = items.map(it => {
-      const v = toNumber(it.rec[metric]);
+      const v = getMetricValue(it);
       return Number.isFinite(v) ? v : null;
     });
     const ws = new Date(state.weekStartStr + "T00:00:00Z");
@@ -3753,7 +3767,7 @@ function buildProductSeriesMode(rows, metric, aggMode){
     const focus = items.filter(it => (it.dateObj.getUTCMonth()+1)===mSel).sort((a,b)=>a.dateObj-b.dateObj);
     const labels = focus.map(it => it.dateStr.slice(5));
     const values = focus.map(it => {
-      const v = toNumber(it.rec[metric]);
+      const v = getMetricValue(it);
       return Number.isFinite(v) ? v : null;
     });
     return {title:`日別（${String(mSel).padStart(2,"0")} 月）`, labels, values};
@@ -3806,7 +3820,7 @@ const orderedStarts = (mode==='month')
   for(const wsStr of orderedStarts){
     const arr = byWeek.get(wsStr) || [];
     labels.push(mode==='month' ? (labelByStart.get(wsStr) || wsStr.slice(5)) : wsStr.slice(5));
-    values.push(arr.length ? agg(arr.map(it=>it.rec[metric])) : null);
+    values.push(arr.length ? agg(arr.map(it=>getMetricValue(it))) : null);
   }
 
   return {title, labels, values};
@@ -3839,14 +3853,14 @@ function renderProductTrend(rowsCur, rowsPrev){
     const num = Number(v);
     if(!Number.isFinite(num)) return "";
     if(k === "revenue" || k === "qty") return Math.round(num).toLocaleString("en-US");
-    if(k === "runMin") return num.toFixed(1);
+    if(["runMin","changeoverMin"].includes(k)) return num.toFixed(1);
     return num.toFixed(2);
   };
   const formatValue = (k, v)=>{
     const num = Number(v);
     if(!Number.isFinite(num)) return "—";
     if(k === "revenue" || k === "qty") return Math.round(num).toLocaleString("en-US");
-    if(k === "runMin") return num.toFixed(1);
+    if(["runMin","changeoverMin"].includes(k)) return num.toFixed(1);
     return num.toFixed(2);
   };
 
@@ -5815,7 +5829,8 @@ function refreshProductDetails(){
     const ha = toNumber(rec.humanAch); if(Number.isFinite(ha)){ hAchSum += ha; hAchCnt++; }
     const ca = toNumber(rec.capAch); if(Number.isFinite(ca)){ cAchSum += ca; cAchCnt++; }
 
-    const chg = state.changeoverDaily.get(dateKey);
+    const changeDateKey = String(rec.mmdd || "");
+    const chg = toNumber(state.changeoverDaily.get(changeDateKey));
     if(Number.isFinite(chg)){ changeSum += chg; changeCnt++; }
     const ru = toNumber(rec.runMin); if(Number.isFinite(ru)){ runSum += ru; runCnt++; }
   }
