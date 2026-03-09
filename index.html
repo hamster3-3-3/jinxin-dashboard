@@ -571,8 +571,11 @@
           </div>
           <div class="card">
             <div class="font-extrabold text-slate-900">日報登錄</div>
-            <div class="mt-3 space-y-2 text-slate-800 font-semibold">              <div class="flex justify-between"><span>換線/分</span><span id="pChange" class="mono">—</span></div>
+            <div class="mt-3 space-y-2 text-slate-800 font-semibold">
+              <div class="flex justify-between"><span>換線(分)</span><span id="pChange" class="mono">—</span></div>
               <div class="flex justify-between"><span>稼動時間/分</span><span id="pRun" class="mono">—</span></div>
+              <div class="flex justify-between"><span>每日平均換線(分)</span><span id="pChangeAvg" class="mono">—</span></div>
+              <div class="flex justify-between"><span>每日平均稼動時間/分</span><span id="pRunAvg" class="mono">—</span></div>
             </div>
           </div>
         </div>
@@ -3719,9 +3722,11 @@ function buildProductSeriesMode(rows, metric, aggMode){
   const getMetricValue = (it)=>{
     if(!it) return NaN;
     if(metric === "changeoverMin"){
+      const direct = toNumber(it.rec ? (it.rec.changeMin ?? it.rec.changeoverMin) : NaN);
+      if(Number.isFinite(direct)) return direct;
       const dateKey = (it.rec && it.rec.mmdd) ? String(it.rec.mmdd) : String(it.dateStr || "").replace(/-/g, "");
-      const v = toNumber(state.changeoverDaily.get(dateKey));
-      return Number.isFinite(v) ? v : NaN;
+      const fallback = toNumber(state.changeoverDaily.get(dateKey));
+      return Number.isFinite(fallback) ? fallback : NaN;
     }
     const v = toNumber(it.rec ? it.rec[metric] : NaN);
     return Number.isFinite(v) ? v : NaN;
@@ -5412,7 +5417,7 @@ function buildGroupSeries(rows, metric, viewMode="avg", opts=null){
     items.sort((a,b)=>a.dateObj-b.dateObj);
     const labels = items.map(it => it.dateStr.slice(5));
     const values = items.map(it => {
-      const v = toNumber(it.rec[metric]);
+      const v = getMetricValue(it);
       return Number.isFinite(v) ? v : null;
     });
     const ws = new Date(state.weekStartStr + "T00:00:00Z");
@@ -5426,7 +5431,7 @@ function buildGroupSeries(rows, metric, viewMode="avg", opts=null){
     const focus = items.filter(it => (it.dateObj.getUTCMonth()+1)===mSel).sort((a,b)=>a.dateObj-b.dateObj);
     const labels = focus.map(it => it.dateStr.slice(5));
     const values = focus.map(it => {
-      const v = toNumber(it.rec[metric]);
+      const v = getMetricValue(it);
       return Number.isFinite(v) ? v : null;
     });
     return {title:`日別（${String(mSel).padStart(2,"0")} 月）`, labels, values};
@@ -5830,7 +5835,9 @@ function refreshProductDetails(){
     const ca = toNumber(rec.capAch); if(Number.isFinite(ca)){ cAchSum += ca; cAchCnt++; }
 
     const changeDateKey = String(rec.mmdd || "");
-    const chg = toNumber(state.changeoverDaily.get(changeDateKey));
+    const chgDirect = toNumber(rec.changeMin);
+    const chgFallback = toNumber(state.changeoverDaily.get(changeDateKey));
+    const chg = Number.isFinite(chgDirect) ? chgDirect : chgFallback;
     if(Number.isFinite(chg)){ changeSum += chg; changeCnt++; }
     const ru = toNumber(rec.runMin); if(Number.isFinite(ru)){ runSum += ru; runCnt++; }
   }
@@ -5842,8 +5849,10 @@ function refreshProductDetails(){
   $("pPeople").textContent = pcnt ? fmtDec(peopleSum/pcnt, 2) : "—";
   $("pCap").textContent = ccnt ? fmtDec(capSum/ccnt, 2) : "—";
   $("pEff").textContent = ecnt ? fmtDec(effSum/ecnt, 2) : "—";
-$("pChange").textContent = changeCnt ? fmtDec(changeSum/changeCnt, 1) : "—";
-  $("pRun").textContent = runCnt ? fmtDec(runSum/runCnt, 1) : "—";
+  $("pChange").textContent = changeCnt ? fmtDec(changeSum, 1) : "—";
+  $("pRun").textContent = runCnt ? fmtDec(runSum, 1) : "—";
+  if($("pChangeAvg")) $("pChangeAvg").textContent = changeCnt ? fmtDec(changeSum/changeCnt, 1) : "—";
+  if($("pRunAvg")) $("pRunAvg").textContent = runCnt ? fmtDec(runSum/runCnt, 1) : "—";
 
   $("pHumanAch").textContent = hAchCnt ? fmtPct(hAchSum/hAchCnt) : "—";
   const capRow = $("pCapAchRow");
@@ -5855,7 +5864,9 @@ $("pChange").textContent = changeCnt ? fmtDec(changeSum/changeCnt, 1) : "—";
   for(const {dateStr, rec} of rows){
     const tr = document.createElement("tr");
     const dateKey = String(dateStr).replace(/-/g,"");
-    const chg = state.changeoverDaily.get(dateKey);
+    const chgDirect = toNumber(rec.changeMin);
+    const chgFallback = toNumber(state.changeoverDaily.get(dateKey));
+    const chg = Number.isFinite(chgDirect) ? chgDirect : chgFallback;
     tr.innerHTML = `
       <td class="mono">${dateStr}</td>
       <td class="mono">${fmtInt(toNumber(rec.qty))}</td>
@@ -5864,7 +5875,7 @@ $("pChange").textContent = changeCnt ? fmtDec(changeSum/changeCnt, 1) : "—";
       <td class="mono">${Number.isFinite(toNumber(rec.people)) ? fmtDec(toNumber(rec.people),2) : "—"}</td>
       <td class="mono">${Number.isFinite(toNumber(rec.cap)) ? fmtDec(toNumber(rec.cap),2) : "—"}</td>
       <td class="mono">${Number.isFinite(toNumber(rec.eff)) ? fmtDec(toNumber(rec.eff),2) : "—"}</td>
-            <td class="mono">${Number.isFinite(chg) ? fmtDec(chg,1) : "—"}</td>
+      <td class="mono">${Number.isFinite(chg) ? fmtDec(chg,1) : "—"}</td>
       <td class="mono">${Number.isFinite(toNumber(rec.runMin)) ? fmtDec(toNumber(rec.runMin),1) : "—"}</td>
     `;
     tb.appendChild(tr);
