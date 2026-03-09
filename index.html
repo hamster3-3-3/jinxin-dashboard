@@ -5815,7 +5815,8 @@ function refreshProductDetails(){
     const ha = toNumber(rec.humanAch); if(Number.isFinite(ha)){ hAchSum += ha; hAchCnt++; }
     const ca = toNumber(rec.capAch); if(Number.isFinite(ca)){ cAchSum += ca; cAchCnt++; }
 
-    const ch = toNumber(rec.changeMin); if(Number.isFinite(ch)){ changeSum += ch; changeCnt++; }
+    const chg = state.changeoverDaily.get(dateKey);
+    if(Number.isFinite(chg)){ changeSum += chg; changeCnt++; }
     const ru = toNumber(rec.runMin); if(Number.isFinite(ru)){ runSum += ru; runCnt++; }
   }
 
@@ -5838,6 +5839,8 @@ $("pChange").textContent = changeCnt ? fmtDec(changeSum/changeCnt, 1) : "—";
   tb.innerHTML = "";
   for(const {dateStr, rec} of rows){
     const tr = document.createElement("tr");
+    const dateKey = String(dateStr).replace(/-/g,"");
+    const chg = state.changeoverDaily.get(dateKey);
     tr.innerHTML = `
       <td class="mono">${dateStr}</td>
       <td class="mono">${fmtInt(toNumber(rec.qty))}</td>
@@ -5846,7 +5849,7 @@ $("pChange").textContent = changeCnt ? fmtDec(changeSum/changeCnt, 1) : "—";
       <td class="mono">${Number.isFinite(toNumber(rec.people)) ? fmtDec(toNumber(rec.people),2) : "—"}</td>
       <td class="mono">${Number.isFinite(toNumber(rec.cap)) ? fmtDec(toNumber(rec.cap),2) : "—"}</td>
       <td class="mono">${Number.isFinite(toNumber(rec.eff)) ? fmtDec(toNumber(rec.eff),2) : "—"}</td>
-            <td class="mono">${Number.isFinite(toNumber(rec.changeMin)) ? fmtDec(toNumber(rec.changeMin),1) : "—"}</td>
+            <td class="mono">${Number.isFinite(chg) ? fmtDec(chg,1) : "—"}</td>
       <td class="mono">${Number.isFinite(toNumber(rec.runMin)) ? fmtDec(toNumber(rec.runMin),1) : "—"}</td>
     `;
     tb.appendChild(tr);
