@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD v66_changeover_colscan_fix -->
+  <!-- BUILD v69_changeover_avgdaily_fix -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -219,7 +219,7 @@
       <!-- row 3 -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div class="card">
-          <div class="label">總換線時間</div>
+          <div class="label">平均每日換線時間(分)</div>
           <div class="flex items-baseline gap-2 mt-1">
             <div id="kpiChg" class="val text-2xl mono">—</div>
             <div class="text-sm font-semibold text-slate-500">分</div>
@@ -297,7 +297,9 @@
           <option value="avgPrice">平均廠價</option>
           <option value="multi">多次生產數</option>
           <option value="itemCount">品項數</option>
-        </select>
+        
+    <option value="changeoverMin">換線時間(分)</option>
+</select>
     </div>
     <div class="w-full sm:w-64">
       <label class="label mb-1 block">對比指標</label>
@@ -310,7 +312,9 @@
           <option value="avgPrice">平均廠價</option>
           <option value="multi">多次生產數</option>
           <option value="itemCount">品項數</option>
-        </select>
+        
+    <option value="changeoverMin">換線時間(分)</option>
+</select>
     </div>
   </div>
 </div>
@@ -351,6 +355,7 @@
                 <option value="qty">生產量</option>
                 <option value="revenue">營業額</option>
                 <option value="people">人數</option>
+                <option value="effAvg">人時性(平均)</option>
                 <option value="cap">產能/時</option>
                 <option value="runMin">稼動時間/分</option>
               </select>
@@ -363,6 +368,7 @@
                 <option value="qty">生產量</option>
                 <option value="revenue">營業額</option>
                 <option value="people">人數</option>
+                <option value="effAvg">人時性(平均)</option>
                 <option value="cap">產能/時</option>
                 <option value="runMin">稼動時間/分</option>
               </select>
@@ -565,8 +571,11 @@
           </div>
           <div class="card">
             <div class="font-extrabold text-slate-900">日報登錄</div>
-            <div class="mt-3 space-y-2 text-slate-800 font-semibold">              <div class="flex justify-between"><span>換線/分</span><span id="pChange" class="mono">—</span></div>
+            <div class="mt-3 space-y-2 text-slate-800 font-semibold">
+              <div class="flex justify-between"><span>換線(分)</span><span id="pChange" class="mono">—</span></div>
               <div class="flex justify-between"><span>稼動時間/分</span><span id="pRun" class="mono">—</span></div>
+              <div class="flex justify-between"><span>每日平均換線(分)</span><span id="pChangeAvg" class="mono">—</span></div>
+              <div class="flex justify-between"><span>每日平均稼動時間/分</span><span id="pRunAvg" class="mono">—</span></div>
             </div>
           </div>
         </div>
@@ -588,6 +597,7 @@
                     <option value="cap">產能/時</option>
                     <option value="eff">人時性</option>
                     <option value="runMin">稼動時間/分</option>
+                    <option value="changeoverMin">換線時間(分)</option>
                   </select>
                 </div>
 
@@ -601,6 +611,7 @@
                     <option value="cap">產能/時</option>
                     <option value="eff">人時性</option>
                     <option value="runMin">稼動時間/分</option>
+                    <option value="changeoverMin">換線時間(分)</option>
                   </select>
                 </div>
               </div>
@@ -652,7 +663,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v64_cards_changeover_fix";
+window.BUILD_VERSION = "v69_changeover_avgdaily_fix";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -1273,8 +1284,8 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v64_cards_changeover_fix";
-console.log("Jinxin dashboard build: v64_cards_changeover_fix");
+const BUILD_VERSION = "v69_changeover_avgdaily_fix";
+console.log("Jinxin dashboard build: v69_changeover_avgdaily_fix");
 const state = {
   rangeMode: "year",
   temp: "4",
@@ -1741,7 +1752,18 @@ function parseTempSheet(wb, sheetName, temp, dateKey){
   const idxEff = idxEffAct;
 
   const idxProdTime = indexOfHeaderContains(header, "生產時間");
-  const idxChange = indexOfHeaderContains(header, "換線/分");
+  const idxChange = (function(){
+    let i = indexOfHeaderContains(header, "換線時間/分");
+    if(i < 0) i = indexOfHeaderContains(header, "前置、換線時間/分");
+    if(i < 0) i = indexOfHeaderContains(header, "換線/分");
+    if(i < 0){
+      for(let c=0; c<header.length; c++){
+        const t = cleanText(header[c]);
+        if(t && t.includes("換線") && t.includes("分")) return c;
+      }
+    }
+    return i;
+  })();
   const idxRun = indexOfHeaderContains(header, "稼動時間/分");
 
   // 達成率欄位（若有）：通常同時包含「人時性達成率」與（4°C）「產能達成率」
@@ -2637,7 +2659,7 @@ function calcKpis(){
     const att = attCnt ? (attSum/attCnt) : NaN;
     const eff = effCnt ? (effSum/effCnt) : NaN;
     const avgPrice = (qty>0 && Number.isFinite(rev)) ? (rev/qty) : NaN;
-    return {qty, rev, multi, att, eff, avgPrice, abCnt, abTime, shCnt, shEquip, changeover: chgSum, days: days.length};
+    return {qty, rev, multi, att, eff, avgPrice, abCnt, abTime, shCnt, shEquip, changeoverSum: chgSum, days: days.length};
   }
 
   // 單日（無指定範圍）
@@ -2688,6 +2710,7 @@ const chg = toNumber(state.changeoverDaily.get(d.mmdd));
     abTime: base.abTime,
     shCnt: base.shCnt,
     shEquip: base.shEquip,
+    changeover: (dn > 0) ? (base.changeoverSum / dn) : NaN,
     hint
   };
 }
@@ -3333,7 +3356,7 @@ function refreshKpiCards(){
   $("kpiEff").textContent = Number.isFinite(k.eff) ? fmtDec(k.eff, 2) : "—";
   $("kpiPrice").textContent = Number.isFinite(k.avgPrice) ? fmtDec(k.avgPrice, 2) : "—";
   $("kpiMulti").textContent = Number.isFinite(k.multi) ? fmtInt(k.multi) : "—";
-  if($("kpiChg")) $("kpiChg").textContent = Number.isFinite(k.changeover) ? fmtInt(k.changeover) : "—";
+  if($("kpiChg")) $("kpiChg").textContent = Number.isFinite(k.changeover) ? fmtDec(k.changeover, 1) : "—";
 
   // 停線（加總）
   if($("kpiAbTime")) $("kpiAbTime").textContent = Number.isFinite(k.abTime) ? fmtDec(k.abTime, 1) : "—";
@@ -3371,7 +3394,8 @@ function fmtKpiValue(kpi, v){
 }
 function fmtProdValue(metric, v){
   if(v === null || v === undefined || !Number.isFinite(v)) return "—";
-  if(["revenue","qty","runMin"].includes(metric)) return Math.round(v).toLocaleString("zh-Hant-TW");
+  if(["revenue","qty"].includes(metric)) return Math.round(v).toLocaleString("zh-Hant-TW");
+  if(["runMin","changeoverMin"].includes(metric)) return Number(v).toFixed(1);
   return v.toFixed(2);
 }
 const valueLabelPlugin = {
@@ -3443,7 +3467,7 @@ function fmtDeltaForKpi(kpi, delta){
   return fmtSigned(delta, 0);
 }
 function fmtDeltaForMetric(metric, delta){
-  if(metric === "runMin") return fmtSigned(delta, 1);
+  if(["runMin","changeoverMin"].includes(metric)) return fmtSigned(delta, 1);
   if(metric === "revenue" || metric === "qty") return fmtSigned(delta, 0);
   return fmtSigned(delta, 2);
 }
@@ -3557,7 +3581,8 @@ function kpiLabel(k){
     efficiency: "人時性",
     avgPrice: "平均廠價",
     multi: "多次生產數",
-    itemCount: "品項數"
+    itemCount: "品項數",
+    changeoverMin: "換線時間"
   }[k] || k;
 }
 
@@ -3705,9 +3730,19 @@ function buildProductSeriesMode(rows, metric, aggMode){
 
   if(!items.length) return {title:"趨勢", labels:[], values:[]};
 
+  const getMetricValue = (it)=>{
+    if(!it) return NaN;
+    if(metric === "changeoverMin"){
+      const direct = toNumber(it.rec ? (it.rec.changeMin ?? it.rec.changeoverMin) : NaN);
+      return Number.isFinite(direct) ? direct : NaN;
+    }
+    const v = toNumber(it.rec ? it.rec[metric] : NaN);
+    return Number.isFinite(v) ? v : NaN;
+  };
+
   // aggMode = "avg" / "sum"
-  // 對「加總」圖：qty / revenue / people / runMin 用加總，其餘（比率/單價/效率）以平均避免意義不清
-  const sumMetrics = (aggMode === "sum") ? new Set(["qty","revenue","people","runMin"]) : new Set(["qty","revenue"]);
+  // 對「加總」圖：qty / revenue / people / runMin / changeoverMin 用加總，其餘（比率/單價/效率）以平均避免意義不清
+  const sumMetrics = (aggMode === "sum") ? new Set(["qty","revenue","people","runMin","changeoverMin"]) : new Set(["qty","revenue"]);
   const isSum = sumMetrics.has(metric);
 
   const agg = (vals)=>{
@@ -3721,7 +3756,7 @@ function buildProductSeriesMode(rows, metric, aggMode){
     const labels=[], values=[];
     for(let m=1; m<=12; m++){
       labels.push(String(m).padStart(2,"0"));
-      const bucket = items.filter(it => (it.dateObj.getUTCMonth()+1)===m).map(it => it.rec[metric]);
+      const bucket = items.filter(it => (it.dateObj.getUTCMonth()+1)===m).map(it => getMetricValue(it));
       values.push(agg(bucket));
     }
     return {title:`月別（全年｜${state.year}｜月${aggMode==="sum"?"加總":"平均"}）`, labels, values};
@@ -3731,7 +3766,7 @@ function buildProductSeriesMode(rows, metric, aggMode){
     items.sort((a,b)=>a.dateObj-b.dateObj);
     const labels = items.map(it => it.dateStr.slice(5));
     const values = items.map(it => {
-      const v = toNumber(it.rec[metric]);
+      const v = getMetricValue(it);
       return Number.isFinite(v) ? v : null;
     });
     const ws = new Date(state.weekStartStr + "T00:00:00Z");
@@ -3745,7 +3780,7 @@ function buildProductSeriesMode(rows, metric, aggMode){
     const focus = items.filter(it => (it.dateObj.getUTCMonth()+1)===mSel).sort((a,b)=>a.dateObj-b.dateObj);
     const labels = focus.map(it => it.dateStr.slice(5));
     const values = focus.map(it => {
-      const v = toNumber(it.rec[metric]);
+      const v = getMetricValue(it);
       return Number.isFinite(v) ? v : null;
     });
     return {title:`日別（${String(mSel).padStart(2,"0")} 月）`, labels, values};
@@ -3798,7 +3833,7 @@ const orderedStarts = (mode==='month')
   for(const wsStr of orderedStarts){
     const arr = byWeek.get(wsStr) || [];
     labels.push(mode==='month' ? (labelByStart.get(wsStr) || wsStr.slice(5)) : wsStr.slice(5));
-    values.push(arr.length ? agg(arr.map(it=>it.rec[metric])) : null);
+    values.push(arr.length ? agg(arr.map(it=>getMetricValue(it))) : null);
   }
 
   return {title, labels, values};
@@ -3831,14 +3866,14 @@ function renderProductTrend(rowsCur, rowsPrev){
     const num = Number(v);
     if(!Number.isFinite(num)) return "";
     if(k === "revenue" || k === "qty") return Math.round(num).toLocaleString("en-US");
-    if(k === "runMin") return num.toFixed(1);
+    if(["runMin","changeoverMin"].includes(k)) return num.toFixed(1);
     return num.toFixed(2);
   };
   const formatValue = (k, v)=>{
     const num = Number(v);
     if(!Number.isFinite(num)) return "—";
     if(k === "revenue" || k === "qty") return Math.round(num).toLocaleString("en-US");
-    if(k === "runMin") return num.toFixed(1);
+    if(["runMin","changeoverMin"].includes(k)) return num.toFixed(1);
     return num.toFixed(2);
   };
 
@@ -4184,6 +4219,11 @@ function isFirstSeenInRange(prodName, start, end){
     if(kpi === "multi")    return Number.isFinite(m) ? m : null;
     if(kpi === "attendance") return Number.isFinite(a) ? a : null;
     if(kpi === "efficiency") return Number.isFinite(e) ? e : null;
+
+    if(kpi === "changeoverMin"){
+      const v = toNumber(state.changeoverDaily.get(o.mmdd));
+      return Number.isFinite(v) ? v : null;
+    }
 
     if(kpi === "avgPrice"){
       if(Number.isFinite(q) && q > 0 && Number.isFinite(r)) return r / q;
@@ -5272,7 +5312,7 @@ const catKey = cleanKey(cleanText(catName || ""));
     const dateStr = dateObjToStr(dObj);
 
     if(!byDate.has(dateStr)){
-      byDate.set(dateStr, { qty:0, revenue:0, people:0, runMin:0, _has:false });
+      byDate.set(dateStr, { qty:0, revenue:0, people:0, runMin:0, capSum:0, _has:false });
     }
     const a = byDate.get(dateStr);
 
@@ -5280,6 +5320,7 @@ const catKey = cleanKey(cleanText(catName || ""));
     if(Number.isFinite(rec.revenue)) a.revenue += rec.revenue;
     if(Number.isFinite(rec.people)) a.people += rec.people;
     if(Number.isFinite(rec.runMin)) a.runMin += rec.runMin;
+    if(Number.isFinite(rec.cap)) a.capSum += rec.cap;
 
     a._has = true;
   }
@@ -5296,6 +5337,7 @@ const catKey = cleanKey(cleanText(catName || ""));
       cap = a.qty / a.people;
     }
 
+    const effAvg = (Number.isFinite(a.people) && a.people>0) ? (a.capSum / a.people) : 0;
     rows.push({
       dateStr,
       rec: {
@@ -5303,7 +5345,9 @@ const catKey = cleanKey(cleanText(catName || ""));
         revenue: a.revenue,
         people: a.people,
         runMin: a.runMin,
-        cap
+        cap,
+        capSum: a.capSum,
+        effAvg
       }
     });
   }
@@ -5331,6 +5375,11 @@ function buildGroupSeries(rows, metric, viewMode="avg", opts=null){
   // - sum：以日值加總（右側「加總」圖）
   // - cap：avg=日 cap 平均；sum=以 bucket 的「總產量 ÷ 總稼動(小時)」推算（無稼動則用總人數近似）
   const aggBucket = (arr)=>{
+    if(metric === "effAvg"){
+      let sumCap = 0, sumPeople = 0;
+      for(const it of arr){ sumCap += (toNumber(it.rec.capSum)||0); sumPeople += (toNumber(it.rec.people)||0); }
+      return sumPeople>0 ? (sumCap/sumPeople) : 0;
+    }
     if(metric === "cap"){
       if(viewMode === "sum"){
         let q = 0, run = 0, ppl = 0;
@@ -5376,7 +5425,7 @@ function buildGroupSeries(rows, metric, viewMode="avg", opts=null){
     items.sort((a,b)=>a.dateObj-b.dateObj);
     const labels = items.map(it => it.dateStr.slice(5));
     const values = items.map(it => {
-      const v = toNumber(it.rec[metric]);
+      const v = getMetricValue(it);
       return Number.isFinite(v) ? v : null;
     });
     const ws = new Date(state.weekStartStr + "T00:00:00Z");
@@ -5390,7 +5439,7 @@ function buildGroupSeries(rows, metric, viewMode="avg", opts=null){
     const focus = items.filter(it => (it.dateObj.getUTCMonth()+1)===mSel).sort((a,b)=>a.dateObj-b.dateObj);
     const labels = focus.map(it => it.dateStr.slice(5));
     const values = focus.map(it => {
-      const v = toNumber(it.rec[metric]);
+      const v = getMetricValue(it);
       return Number.isFinite(v) ? v : null;
     });
     return {title:`日別（${String(mSel).padStart(2,"0")} 月）`, labels, values};
@@ -5528,9 +5577,11 @@ function renderGroupTrend(catName){
     if(k==="qty") return "生產量";
     if(k==="revenue") return "營業額";
     if(k==="people") return "人數";
+    if(k==="effAvg") return "人時性(平均)";
     if(k==="cap") return "產能/時";
     if(k==="runMin") return "稼動時間/分";
-    return k;
+      if(k==="changeoverMin") return "換線時間(分)";
+return k;
   };
 
   $("groupChartTitle").textContent = `${catName || "品群"}｜${sCur1.title || "趨勢"}`;
@@ -5791,7 +5842,8 @@ function refreshProductDetails(){
     const ha = toNumber(rec.humanAch); if(Number.isFinite(ha)){ hAchSum += ha; hAchCnt++; }
     const ca = toNumber(rec.capAch); if(Number.isFinite(ca)){ cAchSum += ca; cAchCnt++; }
 
-    const ch = toNumber(rec.changeMin); if(Number.isFinite(ch)){ changeSum += ch; changeCnt++; }
+    const chg = toNumber(rec.changeMin);
+    if(Number.isFinite(chg)){ changeSum += chg; changeCnt++; }
     const ru = toNumber(rec.runMin); if(Number.isFinite(ru)){ runSum += ru; runCnt++; }
   }
 
@@ -5802,8 +5854,10 @@ function refreshProductDetails(){
   $("pPeople").textContent = pcnt ? fmtDec(peopleSum/pcnt, 2) : "—";
   $("pCap").textContent = ccnt ? fmtDec(capSum/ccnt, 2) : "—";
   $("pEff").textContent = ecnt ? fmtDec(effSum/ecnt, 2) : "—";
-$("pChange").textContent = changeCnt ? fmtDec(changeSum/changeCnt, 1) : "—";
-  $("pRun").textContent = runCnt ? fmtDec(runSum/runCnt, 1) : "—";
+  $("pChange").textContent = changeCnt ? fmtDec(changeSum, 1) : "—";
+  $("pRun").textContent = runCnt ? fmtDec(runSum, 1) : "—";
+  if($("pChangeAvg")) $("pChangeAvg").textContent = changeCnt ? fmtDec(changeSum/changeCnt, 1) : "—";
+  if($("pRunAvg")) $("pRunAvg").textContent = runCnt ? fmtDec(runSum/runCnt, 1) : "—";
 
   $("pHumanAch").textContent = hAchCnt ? fmtPct(hAchSum/hAchCnt) : "—";
   const capRow = $("pCapAchRow");
@@ -5814,6 +5868,7 @@ $("pChange").textContent = changeCnt ? fmtDec(changeSum/changeCnt, 1) : "—";
   tb.innerHTML = "";
   for(const {dateStr, rec} of rows){
     const tr = document.createElement("tr");
+    const chg = toNumber(rec.changeMin);
     tr.innerHTML = `
       <td class="mono">${dateStr}</td>
       <td class="mono">${fmtInt(toNumber(rec.qty))}</td>
@@ -5822,7 +5877,7 @@ $("pChange").textContent = changeCnt ? fmtDec(changeSum/changeCnt, 1) : "—";
       <td class="mono">${Number.isFinite(toNumber(rec.people)) ? fmtDec(toNumber(rec.people),2) : "—"}</td>
       <td class="mono">${Number.isFinite(toNumber(rec.cap)) ? fmtDec(toNumber(rec.cap),2) : "—"}</td>
       <td class="mono">${Number.isFinite(toNumber(rec.eff)) ? fmtDec(toNumber(rec.eff),2) : "—"}</td>
-            <td class="mono">${Number.isFinite(toNumber(rec.changeMin)) ? fmtDec(toNumber(rec.changeMin),1) : "—"}</td>
+      <td class="mono">${Number.isFinite(chg) ? fmtDec(chg,1) : "—"}</td>
       <td class="mono">${Number.isFinite(toNumber(rec.runMin)) ? fmtDec(toNumber(rec.runMin),1) : "—"}</td>
     `;
     tb.appendChild(tr);
