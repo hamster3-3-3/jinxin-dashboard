@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD v70_week_grouptrend_fix -->
+  <!-- BUILD v71_prod_duplicate_rows_fix -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -663,7 +663,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v70_week_grouptrend_fix";
+window.BUILD_VERSION = "v71_prod_duplicate_rows_fix";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -1285,7 +1285,7 @@ function monthNumFromMmdd(mmdd){
    State
 ========================= */
 const BUILD_VERSION = "v69_changeover_avgdaily_fix";
-console.log("Jinxin dashboard build: v70_week_grouptrend_fix");
+console.log("Jinxin dashboard build: v71_prod_duplicate_rows_fix");
 const state = {
   rangeMode: "year",
   temp: "4",
@@ -1301,7 +1301,8 @@ const state = {
 
 
   summaries: new Map(),         // key temp|mmdd
-  records: new Map(),           // key temp|mmdd|line|cat|prod
+  records: new Map(),           // key temp|mmdd|line|cat|prod（保留最後一筆，供既有邏輯相容）
+  recordList: [],               // 所有明細列（包含同日同品名重複生產）
   firstSeenProd: new Map(),       // key temp|prod -> first seen YYYYMMDD
   itemCountDaily: new Map(),     // key temp|mmdd -> count of product rows (cat!=0)
   lineHumanDaily: new Map(),    // key temp|mmdd|lineKey
@@ -1828,6 +1829,7 @@ if(cat && cleanKey(cat) !== "0" && prod && !/(平均|合計|小計|總計)/.test
 }
 
 const key = `${temp}|${dateKey}|${cleanKey(currentLine)}|${cleanKey(cat)}|${cleanKey(prod)}`;
+    state.recordList.push(rec);
     upsert(state.records, key, rec);
 
 // New rule: first appearance in daily report data within range => treat as "new product"
@@ -4769,14 +4771,17 @@ function _pctToRatioMaybe(v){
 
 function calcProdLineHumanRate(lineKey, catKey, prodKey){
   // 人時性達成率（期間）：Σ(實際人時性) / Σ(標準人時性)
+  // 需納入同日同品名的重複生產列，因此改用 recordList。
   const mmddSet = getDateSetInSelection();
   let sumStd=0, sumAct=0;
   let usedStdAct=false;
 
-  for(const mmdd of mmddSet){
-    const k = `${state.temp}|${mmdd}|${lineKey}|${catKey}|${prodKey}`;
-    const rec = state.records.get(k);
-    if(!rec) continue;
+  for(const rec of (state.recordList || [])){
+    if(rec.temp !== state.temp) continue;
+    if(!mmddSet.has(rec.mmdd)) continue;
+    if(cleanKey(rec.line) !== lineKey) continue;
+    if(cleanKey(rec.category || "") !== catKey) continue;
+    if(cleanKey(rec.product) !== prodKey) continue;
 
     if(Number.isFinite(rec.effStd) && Number.isFinite(rec.effAct)){
       sumStd += rec.effStd;
@@ -4796,15 +4801,18 @@ function calcProdLineHumanRate(lineKey, catKey, prodKey){
 
 function calcProdLineCapRate(lineKey, catKey, prodKey){
   // 產能達成率（期間, 4°C）：Σ(實際產能/時) / Σ(標準產能/時)
+  // 需納入同日同品名的重複生產列，因此改用 recordList。
   if(state.temp !== "4") return NaN;
   const mmddSet = getDateSetInSelection();
   let sumStd=0, sumAct=0;
   let usedStdAct=false;
 
-  for(const mmdd of mmddSet){
-    const k = `4|${mmdd}|${lineKey}|${catKey}|${prodKey}`;
-    const rec = state.records.get(k);
-    if(!rec) continue;
+  for(const rec of (state.recordList || [])){
+    if(rec.temp !== "4") continue;
+    if(!mmddSet.has(rec.mmdd)) continue;
+    if(cleanKey(rec.line) !== lineKey) continue;
+    if(cleanKey(rec.category || "") !== catKey) continue;
+    if(cleanKey(rec.product) !== prodKey) continue;
 
     if(Number.isFinite(rec.capStd) && Number.isFinite(rec.capAct)){
       sumStd += rec.capStd;
@@ -5830,7 +5838,7 @@ function refreshProductDetails(){
   })();
 
   const rows = [];
-  for(const rec of state.records.values()){
+  for(const rec of (state.recordList || [])){
     if(rec.temp !== state.temp) continue;
     if(!mmddSet.has(rec.mmdd)) continue;
     if(cleanKey(rec.line) !== lineKey) continue;
@@ -5901,7 +5909,7 @@ function refreshProductDetails(){
   
   // 前一期間 rows（用於左圖）
   const prevRows = [];
-  for(const rec of state.records.values()){
+  for(const rec of (state.recordList || [])){
     if(rec.temp !== state.temp) continue;
     if(!prevMmddSet.has(rec.mmdd)) continue;
     if(cleanKey(rec.line) !== lineKey) continue;
@@ -7027,6 +7035,7 @@ $("clearBtn").addEventListener("click", ()=>{
   state.summaries.clear();
   _dropDatesCacheAny.clear(); _dropDatesCacheYear.clear();
 state.records.clear();
+state.recordList = [];
   state.itemCountDaily.clear();
   state.lineHumanDaily.clear();
   state.lineAvgFromSheets.clear();
