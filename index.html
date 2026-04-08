@@ -1167,9 +1167,11 @@ function getChangeoverForDay(temp, mmdd){
   const t = String(temp || "").trim();
   const d = String(mmdd || "").trim();
   if(!t || !d) return NaN;
-  const v = state.changeoverDaily.get(`${t}|${d}`);
-  const n = toNumber(v);
-  return Number.isFinite(n) ? n : NaN;
+  const total = toNumber(state.changeoverDaily.get(`${t}|${d}`));
+  const cnt = toNumber(state.changeoverCountDaily.get(`${t}|${d}`));
+  if(!Number.isFinite(total)) return NaN;
+  if(!Number.isFinite(cnt) || cnt <= 0) return 0;
+  return total / cnt;
 }
 
 function fmtTime(v){
@@ -1293,8 +1295,8 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v74_changeover_helper_fix";
-console.log("Jinxin dashboard build: v74_changeover_helper_fix");
+const BUILD_VERSION = "v75_changeover_le20_daily_avg_fix";
+console.log("Jinxin dashboard build: v75_changeover_le20_daily_avg_fix");
 const state = {
   rangeMode: "year",
   temp: "4",
@@ -1317,7 +1319,8 @@ const state = {
   lineHumanDaily: new Map(),    // key temp|mmdd|lineKey
   lineAvgFromSheets: new Map(), // key temp|mmdd|lineKey
   stoplineDaily: new Map(),     // key YYYYMMDD -> {abCnt,abTime,shCnt,shEquip}
-  changeoverDaily: new Map(),   // key YYYYMMDD -> total changeover minutes (exclude rest time)
+  changeoverDaily: new Map(),   // key temp|YYYYMMDD -> daily qualified changeover total minutes
+  changeoverCountDaily: new Map(), // key temp|YYYYMMDD -> daily qualified changeover count
 
   loadedFiles: [],
   availableMmdd: new Set(),
@@ -2020,11 +2023,12 @@ if(Number.isFinite(ab.cnt) || Number.isFinite(ab.val2) || Number.isFinite(sh.cnt
 
   for(const cfg of tempSheets){
     let total = 0;
-    let foundAny = false;
+    let count = 0;
 
     const ws2 = wb && wb.Sheets ? wb.Sheets[cfg.shName] : null;
     if(!ws2){
       state.changeoverDaily.set(`${cfg.temp}|${dateKey}`, 0);
+      state.changeoverCountDaily.set(`${cfg.temp}|${dateKey}`, 0);
       continue;
     }
 
@@ -2034,6 +2038,7 @@ if(Number.isFinite(ab.cnt) || Number.isFinite(ab.val2) || Number.isFinite(sh.cnt
     const coHdr = findCellText(grid2, (t)=> t.includes('換線') && t.includes('時間') && (t.includes('/分') || t.includes('／分') || t.includes('/')) );
     if(!coHdr){
       state.changeoverDaily.set(`${cfg.temp}|${dateKey}`, 0);
+      state.changeoverCountDaily.set(`${cfg.temp}|${dateKey}`, 0);
       continue;
     }
 
@@ -2056,11 +2061,13 @@ if(Number.isFinite(ab.cnt) || Number.isFinite(ab.val2) || Number.isFinite(sh.cnt
       const x = cleanText(row[restStartCol]);
       const y = cleanText(row[restEndCol]);
       if(x || y) continue; // 右側休息時間開始/結束任一欄有值，該列換線時間整筆剔除
+      if(v > 20) continue; // 只計入 20 分鐘以內的換線時間
       total += v;
-      foundAny = true;
+      count += 1;
     }
 
-    state.changeoverDaily.set(`${cfg.temp}|${dateKey}`, foundAny ? total : 0);
+    state.changeoverDaily.set(`${cfg.temp}|${dateKey}`, total);
+    state.changeoverCountDaily.set(`${cfg.temp}|${dateKey}`, count);
   }
 })();
 
@@ -2696,8 +2703,8 @@ function calcKpis(){
       const cv = toNumber(chg);
       if(Number.isFinite(cv)){
         chgSum += cv;
-        chgCnt += 1;
       }
+      chgCnt += 1; // 以期間天數做平均；當日無符合換線時視為 0
     }
     const att = attCnt ? (attSum/attCnt) : NaN;
     const eff = effCnt ? (effSum/effCnt) : NaN;
