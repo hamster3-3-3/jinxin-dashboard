@@ -1163,6 +1163,15 @@ function fmtMoney(n){ if(!Number.isFinite(n)) return "—"; return Math.round(n)
 function fmtDec(n, d=2){ if(!Number.isFinite(n)) return "—"; return n.toFixed(d); }
 function fmtPct(n){ if(!Number.isFinite(n)) return "—"; return (n*100).toFixed(1) + "%"; }
 
+function getChangeoverForDay(temp, mmdd){
+  const t = String(temp || "").trim();
+  const d = String(mmdd || "").trim();
+  if(!t || !d) return NaN;
+  const v = state.changeoverDaily.get(`${t}|${d}`);
+  const n = toNumber(v);
+  return Number.isFinite(n) ? n : NaN;
+}
+
 function fmtTime(v){
   if(!v) return "—";
   if(v instanceof Date){
@@ -1284,8 +1293,8 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v73_changeover_avg_by_temp_fixed";
-console.log("Jinxin dashboard build: v73_changeover_avg_by_temp_fixed");
+const BUILD_VERSION = "v74_changeover_helper_fix";
+console.log("Jinxin dashboard build: v74_changeover_helper_fix");
 const state = {
   rangeMode: "year",
   temp: "4",
