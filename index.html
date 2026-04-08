@@ -1284,8 +1284,8 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v72_changeover_true_avg_rest_excluded";
-console.log("Jinxin dashboard build: v72_changeover_true_avg_rest_excluded");
+const BUILD_VERSION = "v73_changeover_avg_by_temp_fixed";
+console.log("Jinxin dashboard build: v73_changeover_avg_by_temp_fixed");
 const state = {
   rangeMode: "year",
   temp: "4",
@@ -1987,13 +1987,14 @@ if(Number.isFinite(ab.cnt) || Number.isFinite(ab.val2) || Number.isFinite(sh.cnt
   });
 }
 
-// 總換線時間（分鐘）：依『晉欣4度CMMDD』分頁抓『前置、換線時間/分』欄位加總；若同列『休息時間』(開始/結束)有值則剔除
+// 總換線時間（分鐘）：依各溫層分頁分開抓取『前置、換線時間/分』欄位加總；
+// 若同列右側『休息時間』(開始/結束)任一欄有值，該筆換線時間整筆剔除。
 (function(){
   const mmdd = (dateKey||"").slice(4); // YYYYMMDD -> MMDD
-  const candSheets = [`晉欣4度C${mmdd}`, `晉欣18度C${mmdd}`];
-
-  let total = 0;
-  let foundAny = false;
+  const tempSheets = [
+    { temp: "4", shName: `晉欣4度C${mmdd}` },
+    { temp: "18", shName: `晉欣18度C${mmdd}` },
+  ];
 
   function findCellText(grid, pred, maxR=200, maxC=60){
     const rMax = Math.min(maxR, grid.length);
@@ -2008,15 +2009,24 @@ if(Number.isFinite(ab.cnt) || Number.isFinite(ab.val2) || Number.isFinite(sh.cnt
     return null;
   }
 
-  for(const shName of candSheets){
-    const ws2 = wb && wb.Sheets ? wb.Sheets[shName] : null;
-    if(!ws2) continue;
+  for(const cfg of tempSheets){
+    let total = 0;
+    let foundAny = false;
+
+    const ws2 = wb && wb.Sheets ? wb.Sheets[cfg.shName] : null;
+    if(!ws2){
+      state.changeoverDaily.set(`${cfg.temp}|${dateKey}`, 0);
+      continue;
+    }
 
     const grid2 = XLSX.utils.sheet_to_json(ws2, { header: 1, raw: true, defval: "" });
 
     // 1) 找到『前置、換線時間/分』所在位置（不假設一定是 V 欄）
     const coHdr = findCellText(grid2, (t)=> t.includes('換線') && t.includes('時間') && (t.includes('/分') || t.includes('／分') || t.includes('/')) );
-    if(!coHdr) continue;
+    if(!coHdr){
+      state.changeoverDaily.set(`${cfg.temp}|${dateKey}`, 0);
+      continue;
+    }
 
     // 2) 找到『休息時間』(若有)，用來剔除換線時間
     const restHdr = findCellText(grid2, (t)=> t.includes('休息時間'));
@@ -2041,11 +2051,8 @@ if(Number.isFinite(ab.cnt) || Number.isFinite(ab.val2) || Number.isFinite(sh.cnt
       foundAny = true;
     }
 
-    // 只要此分頁有解析到，就不再 fallback
-    break;
+    state.changeoverDaily.set(`${cfg.temp}|${dateKey}`, foundAny ? total : 0);
   }
-
-  state.changeoverDaily.set(dateKey, foundAny ? total : 0);
 })();
 
   function parseSection(markerText, temp, prefix=""){
@@ -2676,7 +2683,7 @@ function calcKpis(){
         const sc = toNumber(st.shCnt); if(Number.isFinite(sc)) shCnt += sc;
         const se = toNumber(st.shEquip); if(Number.isFinite(se)) shEquip += se;
       }
-      const chg = state.changeoverDaily.get(d.mmdd);
+      const chg = getChangeoverForDay(state.temp, d.mmdd);
       const cv = toNumber(chg);
       if(Number.isFinite(cv)){
         chgSum += cv;
@@ -2700,7 +2707,7 @@ function calcKpis(){
     const avgPrice = (Number.isFinite(qty)&&qty>0&&Number.isFinite(rev)) ? (rev/qty) : toNumber(s.avgPrice);
     const st = state.stoplineDaily.get(d.mmdd) || {abCnt:0,abTime:0,shCnt:0,shEquip:0};
     const abCnt = toNumber(st.abCnt)||0, abTime = toNumber(st.abTime)||0, shCnt = toNumber(st.shCnt)||0, shEquip = toNumber(st.shEquip)||0;
-const chg = toNumber(state.changeoverDaily.get(d.mmdd));
+const chg = getChangeoverForDay(state.temp, d.mmdd);
     const changeover = Number.isFinite(chg) ? chg : 0;
     return {qty, rev, multi, att, eff, avgPrice, abCnt, abTime, shCnt, shEquip, changeover, hint:`單日（${d.dateStr}）`};
   }
@@ -4249,7 +4256,7 @@ function isFirstSeenInRange(prodName, start, end){
     if(kpi === "efficiency") return Number.isFinite(e) ? e : null;
 
     if(kpi === "changeoverMin"){
-      const v = toNumber(state.changeoverDaily.get(o.mmdd));
+      const v = getChangeoverForDay(state.temp, o.mmdd);
       return Number.isFinite(v) ? v : null;
     }
 
