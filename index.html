@@ -1284,8 +1284,8 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v69_changeover_avgdaily_fix";
-console.log("Jinxin dashboard build: v71_prod_duplicate_rows_fix");
+const BUILD_VERSION = "v72_changeover_true_avg_rest_excluded";
+console.log("Jinxin dashboard build: v72_changeover_true_avg_rest_excluded");
 const state = {
   rangeMode: "year",
   temp: "4",
@@ -2036,7 +2036,7 @@ if(Number.isFinite(ab.cnt) || Number.isFinite(ab.val2) || Number.isFinite(sh.cnt
       if(!Number.isFinite(v) || v<=0) continue;
       const x = cleanText(row[restStartCol]);
       const y = cleanText(row[restEndCol]);
-      if(x || y) continue; // 休息時間，不計入換線
+      if(x || y) continue; // 右側休息時間開始/結束任一欄有值，該列換線時間整筆剔除
       total += v;
       foundAny = true;
     }
@@ -2661,7 +2661,7 @@ function calcKpis(){
 
   function kpiFromDays(days){
     let qty=0, rev=0, multi=0, attSum=0, effSum=0, attCnt=0, effCnt=0;
-    let abCnt=0, abTime=0, shCnt=0, shEquip=0, chgSum=0;
+    let abCnt=0, abTime=0, shCnt=0, shEquip=0, chgSum=0, chgCnt=0;
     for(const d of days){
       const s = d.summary;
       const q = toNumber(s.totalQty); if(Number.isFinite(q)) qty += q;
@@ -2677,12 +2677,17 @@ function calcKpis(){
         const se = toNumber(st.shEquip); if(Number.isFinite(se)) shEquip += se;
       }
       const chg = state.changeoverDaily.get(d.mmdd);
-      const cv = toNumber(chg); if(Number.isFinite(cv)) chgSum += cv;
+      const cv = toNumber(chg);
+      if(Number.isFinite(cv)){
+        chgSum += cv;
+        chgCnt += 1;
+      }
     }
     const att = attCnt ? (attSum/attCnt) : NaN;
     const eff = effCnt ? (effSum/effCnt) : NaN;
     const avgPrice = (qty>0 && Number.isFinite(rev)) ? (rev/qty) : NaN;
-    return {qty, rev, multi, att, eff, avgPrice, abCnt, abTime, shCnt, shEquip, changeoverSum: chgSum, days: days.length};
+    const changeoverAvg = chgCnt ? (chgSum / chgCnt) : NaN;
+    return {qty, rev, multi, att, eff, avgPrice, abCnt, abTime, shCnt, shEquip, changeoverSum: chgSum, changeoverDays: chgCnt, changeoverAvg, days: days.length};
   }
 
   // 單日（無指定範圍）
@@ -2733,7 +2738,7 @@ const chg = toNumber(state.changeoverDaily.get(d.mmdd));
     abTime: base.abTime,
     shCnt: base.shCnt,
     shEquip: base.shEquip,
-    changeover: (dn > 0) ? (base.changeoverSum / dn) : NaN,
+    changeover: Number.isFinite(base.changeoverAvg) ? base.changeoverAvg : NaN,
     hint
   };
 }
