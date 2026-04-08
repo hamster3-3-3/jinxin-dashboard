@@ -2634,9 +2634,30 @@ if(state.rangeMode === "week"){
    日：單日
 */
 function calcKpis(){
-  const list = summariesInRange();
   const mode = state.rangeMode;
   const dr = getActiveDayRange();
+
+  // KPI 卡片專用：月別改為「每月 1 號～月底」精準計算，
+  // 不沿用月別圖表/週視圖的跨週（週二～週一）邏輯。
+  // 其他模式維持原本口徑。
+  const list = (()=>{
+    if(mode !== "month") return summariesInRange();
+
+    const temp = state.temp;
+    const all = getAllDatesForTemp(temp);
+    const m1 = getSelectedMonth1Based();
+    if(!m1) return [];
+
+    const monthStart = new Date(Date.UTC(Number(state.year), Number(m1)-1, 1));
+    const monthEnd = new Date(Date.UTC(Number(state.year), Number(m1), 0));
+    monthStart.setUTCHours(0,0,0,0);
+    monthEnd.setUTCHours(0,0,0,0);
+
+    return all
+      .filter(o => o.dateObj >= monthStart && o.dateObj <= monthEnd)
+      .map(o => ({...o, summary: getSummaryForDay(temp, o.mmdd)}))
+      .filter(x=>x.summary);
+  })();
 
   function kpiFromDays(days){
     let qty=0, rev=0, multi=0, attSum=0, effSum=0, attCnt=0, effCnt=0;
