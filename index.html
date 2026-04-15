@@ -671,14 +671,44 @@ console.log("BUILD", window.BUILD_VERSION);
    - 若不存在，改用 CDN（jsdelivr / unpkg）
 ========================= */
 const __loadedScripts = new Set();
-function loadScriptOnce(src){
+const __scriptLoadTimeoutMs = 8000;
+function loadScriptOnce(src, timeoutMs = __scriptLoadTimeoutMs){
   return new Promise((resolve, reject)=>{
     if(__loadedScripts.has(src)) return resolve(true);
+
     const s = document.createElement("script");
+    let done = false;
+    let timer = null;
+
+    const cleanup = ()=>{
+      if(timer){ clearTimeout(timer); timer = null; }
+      s.onload = null;
+      s.onerror = null;
+    };
+    const fail = (msg)=>{
+      if(done) return;
+      done = true;
+      cleanup();
+      try{ s.remove(); }catch(_e){}
+      reject(new Error(msg));
+    };
+    const ok = ()=>{
+      if(done) return;
+      done = true;
+      cleanup();
+      __loadedScripts.add(src);
+      resolve(true);
+    };
+
     s.src = src;
     s.async = true;
-    s.onload = ()=>{ __loadedScripts.add(src); resolve(true); };
-    s.onerror = ()=>reject(new Error("load failed: " + src));
+    s.onload = ok;
+    s.onerror = ()=> fail("load failed: " + src);
+
+    timer = setTimeout(()=>{
+      fail("load timeout: " + src);
+    }, timeoutMs);
+
     document.head.appendChild(s);
   });
 }
@@ -7180,7 +7210,7 @@ $("lineSelect").value = "";
   setDataChip("warn", "載入解析套件…");
   const okLibs = await ensureLibs();
   if(!okLibs){
-    setDataChip("bad", "載入解析套件失敗：請確認網路可存取 CDN，或在同資料夾放置 xlsx.full.min.js / chart.umd.min.js");
+    setDataChip("bad", "載入解析套件失敗或逾時：你的環境可能擋住 CDN。請將 xlsx.full.min.js 與 chart.umd.min.js 放在 HTML 同資料夾，或改用可連外的環境開啟。");
     return;
   }
   // 讀取材料率/毛利率/廠價（若未放檔案則略過）
