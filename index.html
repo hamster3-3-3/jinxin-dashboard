@@ -3845,28 +3845,35 @@ function buildProductSeriesMode(rows, metric, aggMode){
     return {title:`月別（全年｜${state.year}｜月${aggMode==="sum"?"加總":"平均"}）`, labels, values};
   }
 
+  const aggregateByDate = (arr)=>{
+    const byDate = new Map();
+    for(const it of (arr || [])){
+      const key = String(it.dateStr || "").trim();
+      if(!key) continue;
+      if(!byDate.has(key)) byDate.set(key, []);
+      byDate.get(key).push(getMetricValue(it));
+    }
+    const ordered = Array.from(byDate.keys()).sort((a,b)=>a.localeCompare(b));
+    return {
+      labels: ordered.map(k => k.slice(5)),
+      values: ordered.map(k => agg(byDate.get(k)))
+    };
+  };
+
   if(mode === "week"){
     items.sort((a,b)=>a.dateObj-b.dateObj);
-    const labels = items.map(it => it.dateStr.slice(5));
-    const values = items.map(it => {
-      const v = getMetricValue(it);
-      return Number.isFinite(v) ? v : null;
-    });
+    const grouped = aggregateByDate(items);
     const ws = new Date(state.weekStartStr + "T00:00:00Z");
     const we = addDaysUTC(ws,6);
-    return {title:`日別（${dateObjToStr(ws)}～${dateObjToStr(we)}）`, labels, values};
+    return {title:`日別（${dateObjToStr(ws)}～${dateObjToStr(we)}）`, labels: grouped.labels, values: grouped.values};
   }
 
   if(mode === "day"){
     const dSel = new Date(state.dayStr + "T00:00:00Z");
     const mSel = dSel.getUTCMonth()+1;
     const focus = items.filter(it => (it.dateObj.getUTCMonth()+1)===mSel).sort((a,b)=>a.dateObj-b.dateObj);
-    const labels = focus.map(it => it.dateStr.slice(5));
-    const values = focus.map(it => {
-      const v = getMetricValue(it);
-      return Number.isFinite(v) ? v : null;
-    });
-    return {title:`日別（${String(mSel).padStart(2,"0")} 月）`, labels, values};
+    const grouped = aggregateByDate(focus);
+    return {title:`日別（${String(mSel).padStart(2,"0")} 月）`, labels: grouped.labels, values: grouped.values};
   }
 
   const byWeek = new Map();
@@ -5524,28 +5531,35 @@ function buildGroupSeries(rows, metric, viewMode="avg", opts=null){
     return {title:`月別（全年｜${state.year}）`, labels, values};
   }
 
+  const aggregateByDate = (arr)=>{
+    const byDate = new Map();
+    for(const it of (arr || [])){
+      const key = String(it.dateStr || "").trim();
+      if(!key) continue;
+      if(!byDate.has(key)) byDate.set(key, []);
+      byDate.get(key).push(getMetricValue(it));
+    }
+    const ordered = Array.from(byDate.keys()).sort((a,b)=>a.localeCompare(b));
+    return {
+      labels: ordered.map(k => k.slice(5)),
+      values: ordered.map(k => agg(byDate.get(k)))
+    };
+  };
+
   if(mode === "week"){
     items.sort((a,b)=>a.dateObj-b.dateObj);
-    const labels = items.map(it => it.dateStr.slice(5));
-    const values = items.map(it => {
-      const v = getMetricValue(it);
-      return Number.isFinite(v) ? v : null;
-    });
+    const grouped = aggregateByDate(items);
     const ws = new Date(state.weekStartStr + "T00:00:00Z");
     const we = addDaysUTC(ws,6);
-    return {title:`日別（${dateObjToStr(ws)}～${dateObjToStr(we)}）`, labels, values};
+    return {title:`日別（${dateObjToStr(ws)}～${dateObjToStr(we)}）`, labels: grouped.labels, values: grouped.values};
   }
 
   if(mode === "day"){
     const dSel = new Date(state.dayStr + "T00:00:00Z");
     const mSel = dSel.getUTCMonth()+1;
     const focus = items.filter(it => (it.dateObj.getUTCMonth()+1)===mSel).sort((a,b)=>a.dateObj-b.dateObj);
-    const labels = focus.map(it => it.dateStr.slice(5));
-    const values = focus.map(it => {
-      const v = getMetricValue(it);
-      return Number.isFinite(v) ? v : null;
-    });
-    return {title:`日別（${String(mSel).padStart(2,"0")} 月）`, labels, values};
+    const grouped = aggregateByDate(focus);
+    return {title:`日別（${String(mSel).padStart(2,"0")} 月）`, labels: grouped.labels, values: grouped.values};
   }
 
   const byWeek = new Map();
