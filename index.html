@@ -665,7 +665,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v72_new_product_first_seen_plus1";
+window.BUILD_VERSION = "v76_new_product_launch_fix_manifest_data_only";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -810,7 +810,6 @@ function detectGitHubContext(){
 async function listXlsxFilesFromManifest(){
   const tries = [
     { url: "./data/manifest.json", baseDir: "data" },
-    { url: "./manifest.json", baseDir: "" },
   ];
   for(const t of tries){
     try{
@@ -991,6 +990,7 @@ function _fmtLaunchDate(d){
   const da = String(d.getUTCDate()).padStart(2, "0");
   return `${y}/${m}/${da}`;
 }
+window._fmtLaunchDate = _fmtLaunchDate;
 
 function _yyyymmddNumToUTCDate(yyyymmdd){
   const s = String(yyyymmdd || "").replace(/[^0-9]/g,"");
@@ -1036,6 +1036,14 @@ function _findFirstSeenNumForProd(prodBaseName, tempHint){
 function getLaunchDateInfoForProd(prodBaseName, tempHint){
   if(!prodBaseName) return { date:null, str:"", firstSeenDate:null, firstSeenStr:"" };
 
+  const fmtLocal = (d)=>{
+    if(!(d instanceof Date) || isNaN(d)) return "";
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth()+1).padStart(2, "0");
+    const da = String(d.getUTCDate()).padStart(2, "0");
+    return `${y}/${m}/${da}`;
+  };
+
   const firstSeenNum = _findFirstSeenNumForProd(prodBaseName, tempHint ?? state.temp);
   const firstSeenDate = _yyyymmddNumToUTCDate(firstSeenNum);
   if(!(firstSeenDate instanceof Date) || isNaN(firstSeenDate)){
@@ -1047,9 +1055,9 @@ function getLaunchDateInfoForProd(prodBaseName, tempHint){
 
   return {
     date: launchDate,
-    str: _fmtLaunchDate(launchDate),
+    str: fmtLocal(launchDate),
     firstSeenDate,
-    firstSeenStr: _fmtLaunchDate(firstSeenDate)
+    firstSeenStr: fmtLocal(firstSeenDate)
   };
 }
 
@@ -1223,8 +1231,8 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v75_changeover_le20_daily_avg_fix";
-console.log("Jinxin dashboard build: v75_changeover_le20_daily_avg_fix");
+const BUILD_VERSION = "v76_new_product_launch_fix_manifest_data_only";
+console.log("Jinxin dashboard build: v76_new_product_launch_fix_manifest_data_only");
 const state = {
   rangeMode: "year",
   temp: "4",
