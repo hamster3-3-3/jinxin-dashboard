@@ -562,7 +562,8 @@
           <div class="card">
             <div class="font-extrabold text-slate-900">生產實績</div>
             <div class="mt-3 space-y-2 text-slate-800 font-semibold">
-              <div class="flex justify-between"><span>人數</span><span id="pPeople" class="mono">—</span></div>
+              <div class="flex justify-between"><span id="pActualPeopleLabel">人數</span><span id="pPeople" class="mono">—</span></div>
+              <div id="pPlanPeopleRow" class="flex justify-between hidden"><span>排關人數</span><span id="pPlanPeople" class="mono">—</span></div>
               <div class="flex justify-between"><span>產能/時</span><span id="pCap" class="mono">—</span></div>
               <div class="flex justify-between"><span>人時性</span><span id="pEff" class="mono">—</span></div>
               <div class="flex justify-between"><span>人時性達成率</span><span id="pHumanAch" class="mono">—</span></div>
@@ -5894,10 +5895,15 @@ function refreshActiveGroupTrend(){
 
 
 function refreshProdTableHeader(){
+  const is4 = state.temp === "4";
   const planTh = $("prodPlanPeopleHeader");
   const actualTh = $("prodActualPeopleHeader");
-  if(planTh) planTh.classList.toggle("hidden", state.temp !== "4");
-  if(actualTh) actualTh.textContent = (state.temp === "4") ? "實際人數" : "人數";
+  const actualLbl = $("pActualPeopleLabel");
+  const planRow = $("pPlanPeopleRow");
+  if(planTh) planTh.classList.toggle("hidden", !is4);
+  if(actualTh) actualTh.textContent = is4 ? "實際人數" : "人數";
+  if(actualLbl) actualLbl.textContent = is4 ? "實際人數" : "人數";
+  if(planRow) planRow.classList.toggle("hidden", !is4);
 }
 
 function refreshProductDetails(){
@@ -5961,7 +5967,10 @@ function refreshProductDetails(){
   $("pRev").textContent = fmtMoney(rev);
   $("pMulti").textContent = fmtInt(multi);
 
+  const planPeopleVals = rows.map(({rec}) => toNumber(rec.peopleStd)).filter(v => Number.isFinite(v));
+  const planPeopleAvg = planPeopleVals.length ? (planPeopleVals.reduce((a,b)=>a+b,0) / planPeopleVals.length) : NaN;
   $("pPeople").textContent = pcnt ? fmtDec(peopleSum/pcnt, 2) : "—";
+  if($("pPlanPeople")) $("pPlanPeople").textContent = Number.isFinite(planPeopleAvg) ? fmtDec(planPeopleAvg, 2) : "—";
   $("pCap").textContent = ccnt ? fmtDec(capSum/ccnt, 2) : "—";
   $("pEff").textContent = ecnt ? fmtDec(effSum/ecnt, 2) : "—";
   $("pChange").textContent = changeCnt ? fmtDec(changeSum, 1) : "—";
