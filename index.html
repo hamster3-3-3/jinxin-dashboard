@@ -665,7 +665,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v76_new_product_launch_fix_manifest_data_only";
+window.BUILD_VERSION = "v77_new_product_launch_fix_launchdays_guard";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -983,23 +983,21 @@ function rebuildFirstSeenIndex(){
   }catch(_e){}
 }
 
-function _fmtLaunchDate(d){
+var _fmtLaunchDate = globalThis._fmtLaunchDate = function(d){
   if(!(d instanceof Date) || isNaN(d)) return "";
   const y = d.getUTCFullYear();
   const m = String(d.getUTCMonth()+1).padStart(2, "0");
   const da = String(d.getUTCDate()).padStart(2, "0");
   return `${y}/${m}/${da}`;
-}
-window._fmtLaunchDate = _fmtLaunchDate;
+};
 
-function _calcLaunchDays(d){
+var _calcLaunchDays = globalThis._calcLaunchDays = function(d){
   if(!(d instanceof Date) || isNaN(d)) return null;
   const now = new Date();
   const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
   const launchUtc = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
   return Math.floor((todayUtc - launchUtc) / 86400000);
-}
-window._calcLaunchDays = _calcLaunchDays;
+};
 
 function _yyyymmddNumToUTCDate(yyyymmdd){
   const s = String(yyyymmdd || "").replace(/[^0-9]/g,"");
@@ -1240,8 +1238,8 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v76_new_product_launch_fix_manifest_data_only";
-console.log("Jinxin dashboard build: v76_new_product_launch_fix_manifest_data_only");
+const BUILD_VERSION = "v77_new_product_launch_fix_launchdays_guard";
+console.log("Jinxin dashboard build: v77_new_product_launch_fix_launchdays_guard");
 const state = {
   rangeMode: "year",
   temp: "4",
