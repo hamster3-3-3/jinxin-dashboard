@@ -1309,6 +1309,12 @@ function normalizeProdNameForCost(name){
   t = t.replace(/^[\s\(（]*二配[\s\)）\-—_:：\s]*/u, "");
   return t.trim();
 }
+function isTwoPei(name){
+  const s = normalizeBaseName(name);
+  if(!s) return false;
+  const noLeadingTag = s.replace(/^\s*[\(（][^\)）]*[\)）]\s*/u, "");
+  return /^二配(?:\s|$|[\-—_:：])/u.test(noLeadingTag) || /^二配/u.test(noLeadingTag);
+}
 
 
 async function loadCostDB(){
