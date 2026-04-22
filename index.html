@@ -809,8 +809,8 @@ function detectGitHubContext(){
 ========================= */
 async function listXlsxFilesFromManifest(){
   const tries = [
-    { url: "./manifest.json", baseDir: "" },
     { url: "./data/manifest.json", baseDir: "data" },
+    { url: "./manifest.json", baseDir: "" },
   ];
   for(const t of tries){
     try{
@@ -982,6 +982,14 @@ function rebuildFirstSeenIndex(){
       updateFirstSeenProd(temp, ymd, prod);
     }
   }catch(_e){}
+}
+
+function _fmtLaunchDate(d){
+  if(!(d instanceof Date) || isNaN(d)) return "";
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth()+1).padStart(2, "0");
+  const da = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}/${m}/${da}`;
 }
 
 function _yyyymmddNumToUTCDate(yyyymmdd){
