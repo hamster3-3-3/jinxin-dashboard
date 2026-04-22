@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD v71_prod_duplicate_rows_fix -->
+  <!-- BUILD v72_new_product_first_seen_plus1 -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -665,7 +665,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v71_prod_duplicate_rows_fix";
+window.BUILD_VERSION = "v72_new_product_first_seen_plus1";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -950,224 +950,112 @@ function getLineWhitelistByTemp(tempStr){
   return tempStr === "18" ? LINE_WHITELIST_18C : LINE_WHITELIST_4C;
 }
 // =========================
-// First-seen (新品：首次出現) index (global)
+// First-seen / launch date index
+// 規則：商品第一次在生產資料中出現的隔天，視為上市日期
 // Key: `${temp}|${cleanKey(prodName)}`  Value: earliest YYYYMMDD (number)
 // =========================
 function updateFirstSeenProd(temp, yyyymmdd, prodName){
   try{
     if(!temp || !yyyymmdd || !prodName) return;
-    if(!state.firstSeenProd) state.firstSeenProd = {};
+    if(!(state.firstSeenProd instanceof Map)) state.firstSeenProd = new Map();
     const key = String(temp) + "|" + cleanKey(prodName);
     const d = Number(String(yyyymmdd).replace(/[^0-9]/g,""));
     if(!Number.isFinite(d)) return;
-    const cur = state.firstSeenProd[key];
-    if(cur==null || d < cur) state.firstSeenProd[key] = d;
+    const cur = state.firstSeenProd.get(key);
+    if(cur == null || d < cur) state.firstSeenProd.set(key, d);
   }catch(_e){}
 }
 
 function rebuildFirstSeenIndex(){
   try{
-    state.firstSeenProd = {};
-    const recs = state.records || {};
-    for(const k in recs){
-      const rec = recs[k];
+    state.firstSeenProd = new Map();
+    const records = Array.isArray(state.recordList) ? state.recordList : [];
+    for(const rec of records){
       if(!rec) continue;
-      const temp = rec.temp || rec.temperature || rec.tempStr || rec.tempKey;
-      const ymd = rec.dateKey || rec.yyyymmdd || rec.date || rec.ymd;
-      const prod = rec.prod || rec.product || rec.prodName || rec.name;
-      const cat = rec.cat || rec.category || rec.catName;
+      const temp = rec.temp;
+      const ymd = rec.mmdd;
+      const prod = rec.product;
+      const cat = rec.category;
       if(!temp || !ymd || !prod) continue;
-      // ignore summary/avg rows
-      const c = (cat!=null) ? String(cat) : "";
-      if(c && cleanKey(c)==="0") continue;
+      if(cat && cleanKey(cat) === "0") continue;
       if(/(平均|合計|小計|總計)/.test(String(prod))) continue;
       updateFirstSeenProd(temp, ymd, prod);
     }
   }catch(_e){}
 }
 
-// Return true if product first-ever appearance date is within [start,end] (YYYYMMDD number)
-function isFirstSeenInRange(temp, prodName, startYmd, endYmd){
+function _yyyymmddNumToUTCDate(yyyymmdd){
+  const s = String(yyyymmdd || "").replace(/[^0-9]/g,"");
+  const m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if(!m) return null;
+  return new Date(Date.UTC(Number(m[1]), Number(m[2])-1, Number(m[3])));
+}
+
+function _findFirstSeenNumForProd(prodBaseName, tempHint){
   try{
-    if(!temp || !prodName) return false;
-    if(!state.firstSeenProd) return false;
-    const name = String(prodName).split("|").pop(); // tolerate "cat|prod"
-    const key = String(temp) + "|" + cleanKey(name);
-    const d = state.firstSeenProd[key];
-    if(d==null) return false;
-    const s = Number(String(startYmd).replace(/[^0-9]/g,""));
-    const e = Number(String(endYmd).replace(/[^0-9]/g,""));
-    if(!Number.isFinite(s) || !Number.isFinite(e)) return false;
-    return d >= Math.min(s,e) && d <= Math.max(s,e);
-  }catch(_e){ return false; }
-}
+    if(!prodBaseName) return null;
+    const keyName = cleanKey(prodBaseName);
+    if(!keyName) return null;
+    const fs = state.firstSeenProd;
+    if(!(fs instanceof Map)) return null;
 
+    let best = null;
 
+    const tryTemp = (t)=>{
+      const v = fs.get(String(t) + "|" + keyName);
+      const n = Number(v);
+      if(Number.isFinite(n) && (best == null || n < best)) best = n;
+    };
 
-
-function normalizeProdName(v){
-  if(v === null || v === undefined) return "";
-  return String(v)
-    .replace(/\u00a0/g," ")
-    .replace(/[\u200B-\u200D\uFEFF]/g,"")
-    .replace(/\u3000/g," ")
-    .replace(/\s+/g," ")
-    .trim();
-}
-function isTwoPei(v){
-  // 配別判斷：以原始品名是否以「二配」開頭（允許前面有括號標記，如「(隨)」）
-  const s0 = String(v || "").trim();
-  const s = s0.replace(/^\s*[\(（][^\)）]*[\)）]\s*/u, ""); // 去掉前置括號標記
-  return /^二配/u.test(s);
-}
-
-
-function _inferYearForDevConfirm(month){
-  // Heuristic for 2025-2026 dev confirmation table:
-  // months 1-6 => 2026; months 7-12 => 2025
-  if(!month || month<1 || month>12) return new Date().getFullYear();
-  return (month<=6) ? 2026 : 2025;
-}
-
-function _parseDevConfirmDate(v){
-  if(v === null || v === undefined || v === "") return null;
-  if(v instanceof Date && !isNaN(v)) return v;
-
-  if(typeof v === "number" && isFinite(v)){
-    try{
-      if(window.XLSX && XLSX.SSF && typeof XLSX.SSF.parse_date_code === "function"){
-        const dc = XLSX.SSF.parse_date_code(v);
-        if(dc && dc.y && dc.m && dc.d){
-          return new Date(Date.UTC(dc.y, dc.m-1, dc.d));
-        }
-      }
-      const epoch = Date.UTC(1899, 11, 30);
-      return new Date(epoch + Math.round(v) * 86400000);
-    }catch(_e){
-      return null;
+    if(tempHint != null && tempHint !== ""){
+      tryTemp(tempHint);
+      if(best != null) return best;
     }
-  }
 
-  const s = String(v).trim();
-  if(!s) return null;
-  const s2 = s.replace(/[年月]/g, "/").replace(/日/g, "").replace(/-/g, "/").replace(/\s+/g, "");
-  let m = s2.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
-  if(m){
-    const y = +m[1], mo = +m[2], d = +m[3];
-    if(mo>=1 && mo<=12 && d>=1 && d<=31) return new Date(Date.UTC(y, mo-1, d));
+    for(const [k, v] of fs.entries()){
+      const parts = String(k).split("|");
+      if(parts.length < 2) continue;
+      if(parts.slice(1).join("|") !== keyName) continue;
+      const n = Number(v);
+      if(Number.isFinite(n) && (best == null || n < best)) best = n;
+    }
+    return best;
+  }catch(_e){
     return null;
   }
-  m = s2.match(/^(\d{1,2})\/(\d{1,2})$/);
-  if(m){
-    const mo = +m[1], d = +m[2];
-    if(mo>=1 && mo<=12 && d>=1 && d<=31){
-      const y = _inferYearForDevConfirm(mo);
-      return new Date(Date.UTC(y, mo-1, d));
-    }
-  }
-  return null;
 }
 
-function _fmtLaunchDate(d){
-  if(!(d instanceof Date) || isNaN(d)) return "";
-  const y = d.getUTCFullYear();
-  const mo = String(d.getUTCMonth()+1).padStart(2,'0');
-  const da = String(d.getUTCDate()).padStart(2,'0');
-  return `${y}/${mo}/${da}`;
-}
+function getLaunchDateInfoForProd(prodBaseName, tempHint){
+  if(!prodBaseName) return { date:null, str:"", firstSeenDate:null, firstSeenStr:"" };
 
-function _calcLaunchDays(d){
-  if(!(d instanceof Date) || isNaN(d)) return null;
-  const now = new Date();
-  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
-  const launchUtc = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  return Math.floor((todayUtc - launchUtc)/86400000);
-}
-
-
-function parseDevConfirmWorkbook(wb){
-  if(!wb || !wb.SheetNames || wb.SheetNames.length===0) return;
-
-  const newMap = new Map(); // key => {date: Date, str: string, rawName: string}
-
-  for(const sn of wb.SheetNames){
-    const ws = wb.Sheets[sn];
-    if(!ws) continue;
-
-    const rows = XLSX.utils.sheet_to_json(ws, {header: 1, raw: true, defval: ""});
-    if(!rows || rows.length===0) continue;
-
-    // Default: date at col A, product name at col C
-    for(const row of rows){
-      if(!row) continue;
-      const name = String(row[2] ?? "").trim();
-      if(!name) continue;
-      if(/商品名稱|商品名|品名/i.test(name)) continue;
-
-      const normName = normalizeProdNameForCost(name);
-        const key = cleanKey(normName);
-      if(!key) continue;
-
-      const dt = _parseDevConfirmDate(row[0]);
-      if(!dt) continue;
-
-      const prev = newMap.get(key);
-      if(!prev || (prev.date instanceof Date && dt > prev.date)){
-        newMap.set(key, {date: dt, str: _fmtLaunchDate(dt), rawName: name});
-      }
-    }
+  const firstSeenNum = _findFirstSeenNumForProd(prodBaseName, tempHint ?? state.temp);
+  const firstSeenDate = _yyyymmddNumToUTCDate(firstSeenNum);
+  if(!(firstSeenDate instanceof Date) || isNaN(firstSeenDate)){
+    return { date:null, str:"", firstSeenDate:null, firstSeenStr:"" };
   }
 
-  state.devLaunchMap = newMap;
-  state.devLaunchEntries = Array.from(newMap.entries())
-    .map(([k,v])=>({k, v}))
-    .sort((a,b)=> (b.k.length - a.k.length) || ((b.v.date||0) - (a.v.date||0)));
-  state.devConfirmLoaded = true;
-}
+  const launchDate = new Date(firstSeenDate.getTime());
+  launchDate.setUTCDate(launchDate.getUTCDate() + 1);
 
-function getLaunchDateInfoForProd(prodBaseName){
-  if(!prodBaseName) return {date:null, str:""};
-  const key = cleanKey(prodBaseName);
-  if(!key) return {date:null, str:""};
-
-  const direct = state.devLaunchMap.get(key);
-  if(direct) return {date: direct.date||null, str: direct.str||""};
-
-  // Partial matching (dashboard name may contain extra prefixes). Choose the latest launch date if multiple matches exist.
-  let best=null;
-  for(const ent of state.devLaunchEntries){
-    if(!ent || !ent.k || !ent.v) continue;
-    if(key.includes(ent.k) || ent.k.includes(key)){
-      const v = ent.v;
-      if(!best || (v.date && best.date && v.date > best.date) || (v.date && !best.date)){
-        best = v;
-      }
-    }
-  }
-  return best ? {date: best.date||null, str: best.str||""} : {date:null, str:""};
+  return {
+    date: launchDate,
+    str: _fmtLaunchDate(launchDate),
+    firstSeenDate,
+    firstSeenStr: _fmtLaunchDate(firstSeenDate)
+  };
 }
 
 function getLaunchDateStrForProd(prodName){
   return getLaunchDateInfoForProd(prodName).str || "";
 }
 
-
-async function parseDevConfirmArrayBuffer(buf){
-  await ensureXLSX();
-  const wb = XLSX.read(buf, {type:"array", cellDates:true});
-  parseDevConfirmWorkbook(wb);
+async function parseDevConfirmArrayBuffer(_buf){
+  return false;
 }
 
 async function loadDevConfirmFromRepo(){
-  if(state.devConfirmLoaded) return;
-  try{
-    const buf = await fetchArrayBufferSmart(DEV_CONFIRM_FILENAME);
-    await parseDevConfirmArrayBuffer(buf);
-  }catch(e){
-    console.warn("Dev confirm load failed:", e);
-  }
+  return false;
 }
-
 
 function escapeHtml(s){
   return cleanText(s).replace(/[&<>"']/g, (c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -2338,9 +2226,6 @@ setDataChip("warn", "自動載入中…");
         }else{ throw e1; }
       }
       if((it.name && (DEV_CONFIRM_HINT_RE.test(it.name) || it.name === DEV_CONFIRM_FILENAME))){
-        if(!state.devConfirmLoaded){
-          await parseDevConfirmArrayBuffer(buf);
-        }
         continue;
       }
       await parseWorkbookArrayBuffer(buf, it.name);
@@ -2377,7 +2262,7 @@ async function handleFiles(files){
   for(const file of Array.from(files)){
     const buf = await file.arrayBuffer();
     if((file.name && (DEV_CONFIRM_HINT_RE.test(file.name) || file.name === DEV_CONFIRM_FILENAME))){
-      await parseDevConfirmArrayBuffer(buf);
+      continue;
     }else{
       await parseWorkbookArrayBuffer(buf, file.name);
     }
@@ -2939,7 +2824,7 @@ function getNewProductBadgeInfo(){
     }
   }else if(mode === 'week'){
     labelCur = '當週新品';
-    labelPrev = '前週新品';
+    labelPrev = '前周新品';
     const ws = _dateUTCFromYMDStr(state.weekStartStr);
     if(ws){
       curStart = ws;
@@ -2949,7 +2834,7 @@ function getNewProductBadgeInfo(){
     }
   }else{ // day
     labelCur = '當週新品';
-    labelPrev = '前週新品';
+    labelPrev = '前周新品';
     showPrev = false; // 日別只顯示當週新品
     const d = _dateUTCFromYMDStr(state.dayStr);
     if(d){
@@ -2969,19 +2854,9 @@ function getNewProductBadgeInfo(){
 function isNewProductInRange(prodName, start, end){
   if(!prodName) return false;
   if(!(start instanceof Date) || isNaN(start) || !(end instanceof Date) || isNaN(end)) return false;
-
-  // Rule A (existing): launch date within range
-  let byLaunch = false;
   const info = getLaunchDateInfoForProd(prodName);
-  if(info && (info.date instanceof Date) && !isNaN(info.date)){
-    byLaunch = _isWithinUTC(info.date, start, end);
-  }
-
-  // Rule B (new): first appearance in daily report data within range
-  const byFirstSeen = isFirstSeenInRange(prodName, start, end);
-
-  // Union to avoid double counting
-  return (byLaunch || byFirstSeen);
+  if(!(info && info.date instanceof Date) || isNaN(info.date)) return false;
+  return _isWithinUTC(info.date, start, end);
 }
 
 // --- First-seen helper (global) ---
@@ -2999,28 +2874,12 @@ function isFirstSeenInRange(prodName, start, end){
   try{
     if(!prodName) return false;
     if(!(start instanceof Date) || isNaN(start) || !(end instanceof Date) || isNaN(end)) return false;
-    const temp = state && state.temp != null ? String(state.temp) : "";
-    const key = temp + "|" + cleanKey(prodName);
-
     const sNum = _dateToYmdNumUTC(start);
     const eNum = _dateToYmdNumUTC(end);
     if(!Number.isFinite(sNum) || !Number.isFinite(eNum)) return false;
-
-    const fs = state && state.firstSeenProd;
-    let firstNum = null;
-
-    if(fs && typeof fs.get === "function"){ // Map-like
-      const v = fs.get(key);
-      const n = Number(v);
-      if(Number.isFinite(n)) firstNum = n;
-    }else if(fs && (typeof fs === "object")){
-      const v = fs[key];
-      const n = Number(v);
-      if(Number.isFinite(n)) firstNum = n;
-    }
-
+    const firstNum = _findFirstSeenNumForProd(prodName, state && state.temp != null ? state.temp : "");
     if(firstNum == null) return false;
-    return firstNum >= sNum && firstNum <= eNum;
+    return firstNum >= Math.min(sNum, eNum) && firstNum <= Math.max(sNum, eNum);
   }catch(_e){
     return false;
   }
@@ -3039,7 +2898,7 @@ function markOptionAsNew(optEl, prodName /* , anchorIgnored */){
   if(!optEl) return;
   const p = getNewProductBadgeInfo();
   if(isNewProductInRange(prodName, p.curStart, p.curEnd)){
-    optEl.style.color = "#dc2626"; // red-600
+    optEl.style.color = "#ea580c"; // orange-600
     optEl.style.fontWeight = "800";
   }
 }
@@ -7276,10 +7135,7 @@ $("lineSelect").value = "";
   refreshAll();
   // 先載入主資料，避免鮮食開發確認表缺檔時讓畫面看起來像卡在「載入解析套件」
   await preload();
-  // 鮮食開發確認表改為背景補載，不阻塞主資料顯示
-  loadDevConfirmFromRepo()
-    .then(()=>{ try{ refreshAll(); }catch(e){} })
-    .catch((e)=>{ console.warn("Dev confirm load skipped:", e); });
+  // 新品上市日期改為依生產資料首次出現日 + 1 天計算，不再讀取鮮食開發確認表。
 })();
 </script>
 </body>
