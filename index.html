@@ -645,10 +645,11 @@
                   <th class="text-left">生產量</th>
                   <th class="text-left">營收</th>
                   <th class="text-left">多次生產</th>
-                  <th class="text-left">人數</th>
+                  <th id="prodPlanPeopleHeader" class="text-left hidden">排關人數</th>
+                  <th id="prodActualPeopleHeader" class="text-left">人數</th>
                   <th class="text-left">產能/時</th>
                   <th class="text-left">人時性</th>
-                                    <th class="text-left">換線/分</th>
+                  <th class="text-left">換線/分</th>
                   <th class="text-left">稼動時間/分</th>
                   </tr>
               </thead>
@@ -5891,6 +5892,14 @@ function refreshActiveGroupTrend(){
   renderGroupTrend(cat);
 }
 
+
+function refreshProdTableHeader(){
+  const planTh = $("prodPlanPeopleHeader");
+  const actualTh = $("prodActualPeopleHeader");
+  if(planTh) planTh.classList.toggle("hidden", state.temp !== "4");
+  if(actualTh) actualTh.textContent = (state.temp === "4") ? "實際人數" : "人數";
+}
+
 function refreshProductDetails(){
   const lineKey = $("lineSelect").value || "";
   const catKey = $("catSelect").value || "";
@@ -5965,17 +5974,22 @@ function refreshProductDetails(){
   if(capRow) capRow.classList.toggle("hidden", state.temp !== "4");
   $("pCapAch").textContent = (state.temp === "4" && cAchCnt) ? fmtPct(cAchSum/cAchCnt) : "—";
 
+  refreshProdTableHeader();
+
   const tb = $("prodTableBody");
   tb.innerHTML = "";
   for(const {dateStr, rec} of rows){
     const tr = document.createElement("tr");
     const chg = toNumber(rec.changeMin);
+    const actualPeople = toNumber(rec.people);
+    const plannedPeople = toNumber(rec.peopleStd);
     tr.innerHTML = `
       <td class="mono">${dateStr}</td>
       <td class="mono">${fmtInt(toNumber(rec.qty))}</td>
       <td class="mono">${fmtMoney(toNumber(rec.revenue))}</td>
       <td class="mono">${fmtInt(toNumber(rec.multi))}</td>
-      <td class="mono">${Number.isFinite(toNumber(rec.people)) ? fmtDec(toNumber(rec.people),2) : "—"}</td>
+      ${state.temp === "4" ? `<td class="mono">${Number.isFinite(plannedPeople) ? fmtDec(plannedPeople,2) : "—"}</td>` : ""}
+      <td class="mono">${Number.isFinite(actualPeople) ? fmtDec(actualPeople,2) : "—"}</td>
       <td class="mono">${Number.isFinite(toNumber(rec.cap)) ? fmtDec(toNumber(rec.cap),2) : "—"}</td>
       <td class="mono">${Number.isFinite(toNumber(rec.eff)) ? fmtDec(toNumber(rec.eff),2) : "—"}</td>
       <td class="mono">${Number.isFinite(chg) ? fmtDec(chg,1) : "—"}</td>
@@ -6960,6 +6974,7 @@ document.addEventListener("DOMContentLoaded", ()=>{
 
 function refreshAll(){
   togglePanels();
+  refreshProdTableHeader();
   // keep month selectors in sync
   const wms = $("weekMonthSelect"); if(wms) wms.value = String(state.month);
   refreshActiveRangeText();
