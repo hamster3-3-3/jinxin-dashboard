@@ -992,6 +992,15 @@ function _fmtLaunchDate(d){
 }
 window._fmtLaunchDate = _fmtLaunchDate;
 
+function _calcLaunchDays(d){
+  if(!(d instanceof Date) || isNaN(d)) return null;
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const launchUtc = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  return Math.floor((todayUtc - launchUtc) / 86400000);
+}
+window._calcLaunchDays = _calcLaunchDays;
+
 function _yyyymmddNumToUTCDate(yyyymmdd){
   const s = String(yyyymmdd || "").replace(/[^0-9]/g,"");
   const m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
