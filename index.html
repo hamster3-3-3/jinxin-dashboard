@@ -638,6 +638,37 @@
               </div>
             </div>
 
+            <div class="mt-4 flex items-center justify-between gap-3 flex-wrap">
+              <button id="prodPrevDetailToggle" class="btn" type="button">前段明細展開</button>
+              <div id="prodPrevDetailMeta" class="text-slate-500 text-sm font-bold"></div>
+            </div>
+
+            <div id="prodPrevDetailPanel" class="mt-3 hidden rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div class="flex items-center justify-between gap-3 flex-wrap">
+                <div class="font-extrabold text-slate-900">前段明細</div>
+                <div id="prodPrevDetailRange" class="text-slate-500 text-sm font-bold"></div>
+              </div>
+              <div class="mt-3 overflow-x-auto">
+                <table class="w-full text-[15px] min-w-[980px]">
+                  <thead>
+                  <tr>
+                    <th class="text-left">日期</th>
+                    <th class="text-left">生產量</th>
+                    <th class="text-left">營收</th>
+                    <th class="text-left">多次生產</th>
+                    <th id="prodPrevPlanPeopleHeader" class="text-left hidden">排關人數</th>
+                    <th id="prodPrevActualPeopleHeader" class="text-left">人數</th>
+                    <th class="text-left">產能/時</th>
+                    <th class="text-left">人時性</th>
+                    <th class="text-left">換線/分</th>
+                    <th class="text-left">稼動時間/分</th>
+                  </tr>
+                </thead>
+                <tbody id="prodPrevTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+
             <div class="mt-4 overflow-x-auto">
               <table class="w-full text-[15px] min-w-[980px]">
                 <thead>
@@ -5800,12 +5831,72 @@ function refreshProdTableHeader(){
   const is4 = state.temp === "4";
   const planTh = $("prodPlanPeopleHeader");
   const actualTh = $("prodActualPeopleHeader");
+  const prevPlanTh = $("prodPrevPlanPeopleHeader");
+  const prevActualTh = $("prodPrevActualPeopleHeader");
   const actualLbl = $("pActualPeopleLabel");
   const planRow = $("pPlanPeopleRow");
   if(planTh) planTh.classList.toggle("hidden", !is4);
+  if(prevPlanTh) prevPlanTh.classList.toggle("hidden", !is4);
   if(actualTh) actualTh.textContent = is4 ? "實際人數" : "人數";
+  if(prevActualTh) prevActualTh.textContent = is4 ? "實際人數" : "人數";
   if(actualLbl) actualLbl.textContent = is4 ? "實際人數" : "人數";
   if(planRow) planRow.classList.toggle("hidden", !is4);
+}
+
+function getPrevDetailToggleState(){
+  return !!state.prodPrevDetailExpanded;
+}
+
+function setPrevDetailToggleState(expanded){
+  state.prodPrevDetailExpanded = !!expanded;
+  const btn = $("prodPrevDetailToggle");
+  const panel = $("prodPrevDetailPanel");
+  if(btn) btn.textContent = expanded ? "前段明細收合" : "前段明細展開";
+  if(panel) panel.classList.toggle("hidden", !expanded);
+}
+
+function bindPrevDetailToggle(){
+  const btn = $("prodPrevDetailToggle");
+  if(!btn || btn.dataset.bound === "1") return;
+  btn.dataset.bound = "1";
+  btn.addEventListener("click", ()=>{
+    setPrevDetailToggleState(!getPrevDetailToggleState());
+  });
+}
+
+function renderPrevProductTable(rows, rangeText){
+  const metaEl = $("prodPrevDetailMeta");
+  const rangeEl = $("prodPrevDetailRange");
+  const tb = $("prodPrevTableBody");
+  const toggleBtn = $("prodPrevDetailToggle");
+  const panel = $("prodPrevDetailPanel");
+  if(metaEl) metaEl.textContent = rows.length ? `前段明細：${rangeText}` : "前段明細：無資料";
+  if(rangeEl) rangeEl.textContent = rangeText || "";
+  if(toggleBtn) toggleBtn.disabled = !rows.length;
+  if(panel && !rows.length) panel.classList.add("hidden");
+  if(!rows.length) state.prodPrevDetailExpanded = false;
+  setPrevDetailToggleState(getPrevDetailToggleState() && rows.length);
+  if(!tb) return;
+  tb.innerHTML = "";
+  for(const {dateStr, rec} of rows){
+    const tr = document.createElement("tr");
+    const chg = toNumber(rec.changeMin);
+    const actualPeople = toNumber(rec.people);
+    const plannedPeople = toNumber(rec.peopleStd);
+    tr.innerHTML = `
+      <td class="mono">${dateStr}</td>
+      <td class="mono">${fmtInt(toNumber(rec.qty))}</td>
+      <td class="mono">${fmtMoney(toNumber(rec.revenue))}</td>
+      <td class="mono">${fmtInt(toNumber(rec.multi))}</td>
+      ${state.temp === "4" ? `<td class="mono">${Number.isFinite(plannedPeople) ? fmtDec(plannedPeople,2) : "—"}</td>` : ""}
+      <td class="mono">${Number.isFinite(actualPeople) ? fmtDec(actualPeople,2) : "—"}</td>
+      <td class="mono">${Number.isFinite(toNumber(rec.cap)) ? fmtDec(toNumber(rec.cap),2) : "—"}</td>
+      <td class="mono">${Number.isFinite(toNumber(rec.eff)) ? fmtDec(toNumber(rec.eff),2) : "—"}</td>
+      <td class="mono">${Number.isFinite(chg) ? fmtDec(chg,1) : "—"}</td>
+      <td class="mono">${Number.isFinite(toNumber(rec.runMin)) ? fmtDec(toNumber(rec.runMin),1) : "—"}</td>
+    `;
+    tb.appendChild(tr);
+  }
 }
 
 function refreshProductDetails(){
@@ -5834,6 +5925,7 @@ function refreshProductDetails(){
   })();
 
   const rows = [];
+  bindPrevDetailToggle();
   for(const rec of (state.recordList || [])){
     if(rec.temp !== state.temp) continue;
     if(!mmddSet.has(rec.mmdd)) continue;
@@ -5925,6 +6017,11 @@ function refreshProductDetails(){
     prevRows.push({dateStr: ds2, rec});
   }
   prevRows.sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
+
+  const prevRangeText = (_prevP.prevStart instanceof Date && !isNaN(_prevP.prevStart) && _prevP.prevEnd instanceof Date && !isNaN(_prevP.prevEnd))
+    ? `${dateObjToStr(_prevP.prevStart)} ~ ${dateObjToStr(_prevP.prevEnd)}`
+    : "無前段資料";
+  renderPrevProductTable(prevRows, prevRangeText);
 
 renderProductTrend(rows, prevRows);
 }
