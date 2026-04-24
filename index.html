@@ -422,6 +422,7 @@
         <div class="flex items-center gap-2">
           <div class="text-slate-500 text-sm font-bold whitespace-nowrap shrink-0 leading-none">排序依據</div>
           <select id="lowestRateMode" class="select" style="max-width: 18rem;">
+            <option value="human_high">最高人時達成率（前六）</option>
             <option value="human">最低人時達成率（前六）</option>
             <option value="cap">最低產能達成率（前六）</option>
             <option value="drop">生產量下滑數（高→低）</option>
@@ -6081,6 +6082,7 @@ function refreshLowestRateModeOptions(){
 
   // 4°C：保留達成率兩種排序
   if(String(state.temp) === "4"){
+    opts.push(["human_high","最高人時達成率（前六）"]);
     opts.push(["human","最低人時達成率（前六）"]);
     opts.push(["cap","最低產能達成率（前六）"]);
   }
@@ -6258,7 +6260,7 @@ function _safeNum(v){
 }
 
 function _lowestRateAgg(mode, pairFilter, catFilter){
-  // mode: "human" | "cap"
+  // mode: "human" | "human_high" | "cap"
   const mmddSet = getDateSetInSelection();
   const _daysCount = Math.max(1, (mmddSet && mmddSet.size) ? mmddSet.size : 0);
 
@@ -6346,7 +6348,11 @@ if(pairFilter === "two"){
     out = out.filter(x=> cleanText(x.cat||"") === ck);
   }
 
-  out.sort((a,b)=>a.avgAch - b.avgAch);
+  if(mode === "human_high"){
+    out.sort((a,b)=>b.avgAch - a.avgAch);
+  }else{
+    out.sort((a,b)=>a.avgAch - b.avgAch);
+  }
   return out.slice(0, 6);
 }
 
@@ -6841,6 +6847,7 @@ function renderLowestRatePanel(){
   empty.classList.add("hidden");
 
   const labelMap = {
+    human_high: "人時達成率",
     human: "人時達成率",
     cap: "產能達成率",
     drop: "生產量下滑數",
