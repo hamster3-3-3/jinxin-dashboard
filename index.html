@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD v71_prod_duplicate_rows_fix -->
+  <!-- BUILD v72_new_product_first_seen_plus1 -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -422,6 +422,7 @@
         <div class="flex items-center gap-2">
           <div class="text-slate-500 text-sm font-bold whitespace-nowrap shrink-0 leading-none">排序依據</div>
           <select id="lowestRateMode" class="select" style="max-width: 18rem;">
+            <option value="human_high">最高人時達成率（前六）</option>
             <option value="human">最低人時達成率（前六）</option>
             <option value="cap">最低產能達成率（前六）</option>
             <option value="drop">生產量下滑數（高→低）</option>
@@ -562,7 +563,8 @@
           <div class="card">
             <div class="font-extrabold text-slate-900">生產實績</div>
             <div class="mt-3 space-y-2 text-slate-800 font-semibold">
-              <div class="flex justify-between"><span>人數</span><span id="pPeople" class="mono">—</span></div>
+              <div class="flex justify-between"><span id="pActualPeopleLabel">人數</span><span id="pPeople" class="mono">—</span></div>
+              <div id="pPlanPeopleRow" class="flex justify-between hidden"><span>排關人數</span><span id="pPlanPeople" class="mono">—</span></div>
               <div class="flex justify-between"><span>產能/時</span><span id="pCap" class="mono">—</span></div>
               <div class="flex justify-between"><span>人時性</span><span id="pEff" class="mono">—</span></div>
               <div class="flex justify-between"><span>人時性達成率</span><span id="pHumanAch" class="mono">—</span></div>
@@ -637,6 +639,38 @@
               </div>
             </div>
 
+            <div class="mt-4 flex items-center justify-between gap-3 flex-wrap">
+              <button id="prodPrevDetailToggle" class="btn" type="button">前段明細展開</button>
+                <button id="openScheduleBtn" class="btn" type="button" onclick="window.open('https://drive.google.com/drive/u/0/folders/1bAcnGYjtq3poa01KDoGV8glhCCFDih90', '_blank', 'noopener')">開啟排關圖</button>
+              <div id="prodPrevDetailMeta" class="text-slate-500 text-sm font-bold"></div>
+            </div>
+
+            <div id="prodPrevDetailPanel" class="mt-3 hidden rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div class="flex items-center justify-between gap-3 flex-wrap">
+                <div class="font-extrabold text-slate-900">前段明細</div>
+                <div id="prodPrevDetailRange" class="text-slate-500 text-sm font-bold"></div>
+              </div>
+              <div class="mt-3 overflow-x-auto">
+                <table class="w-full text-[15px] min-w-[980px]">
+                  <thead>
+                  <tr>
+                    <th class="text-left">日期</th>
+                    <th class="text-left">生產量</th>
+                    <th class="text-left">營收</th>
+                    <th class="text-left">多次生產</th>
+                    <th id="prodPrevPlanPeopleHeader" class="text-left hidden">排關人數</th>
+                    <th id="prodPrevActualPeopleHeader" class="text-left">人數</th>
+                    <th class="text-left">產能/時</th>
+                    <th class="text-left">人時性</th>
+                    <th class="text-left">換線/分</th>
+                    <th class="text-left">稼動時間/分</th>
+                  </tr>
+                </thead>
+                <tbody id="prodPrevTableBody"></tbody>
+                </table>
+              </div>
+            </div>
+
             <div class="mt-4 overflow-x-auto">
               <table class="w-full text-[15px] min-w-[980px]">
                 <thead>
@@ -645,10 +679,11 @@
                   <th class="text-left">生產量</th>
                   <th class="text-left">營收</th>
                   <th class="text-left">多次生產</th>
-                  <th class="text-left">人數</th>
+                  <th id="prodPlanPeopleHeader" class="text-left hidden">排關人數</th>
+                  <th id="prodActualPeopleHeader" class="text-left">人數</th>
                   <th class="text-left">產能/時</th>
                   <th class="text-left">人時性</th>
-                                    <th class="text-left">換線/分</th>
+                  <th class="text-left">換線/分</th>
                   <th class="text-left">稼動時間/分</th>
                   </tr>
               </thead>
@@ -663,7 +698,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v71_prod_duplicate_rows_fix";
+window.BUILD_VERSION = "v77_new_product_launch_fix_launchdays_guard";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -807,7 +842,6 @@ function detectGitHubContext(){
 ========================= */
 async function listXlsxFilesFromManifest(){
   const tries = [
-    { url: "./manifest.json", baseDir: "" },
     { url: "./data/manifest.json", baseDir: "data" },
   ];
   for(const t of tries){
@@ -948,224 +982,136 @@ function getLineWhitelistByTemp(tempStr){
   return tempStr === "18" ? LINE_WHITELIST_18C : LINE_WHITELIST_4C;
 }
 // =========================
-// First-seen (新品：首次出現) index (global)
+// First-seen / launch date index
+// 規則：商品第一次在生產資料中出現的隔天，視為上市日期
 // Key: `${temp}|${cleanKey(prodName)}`  Value: earliest YYYYMMDD (number)
 // =========================
 function updateFirstSeenProd(temp, yyyymmdd, prodName){
   try{
     if(!temp || !yyyymmdd || !prodName) return;
-    if(!state.firstSeenProd) state.firstSeenProd = {};
+    if(!(state.firstSeenProd instanceof Map)) state.firstSeenProd = new Map();
     const key = String(temp) + "|" + cleanKey(prodName);
     const d = Number(String(yyyymmdd).replace(/[^0-9]/g,""));
     if(!Number.isFinite(d)) return;
-    const cur = state.firstSeenProd[key];
-    if(cur==null || d < cur) state.firstSeenProd[key] = d;
+    const cur = state.firstSeenProd.get(key);
+    if(cur == null || d < cur) state.firstSeenProd.set(key, d);
   }catch(_e){}
 }
 
 function rebuildFirstSeenIndex(){
   try{
-    state.firstSeenProd = {};
-    const recs = state.records || {};
-    for(const k in recs){
-      const rec = recs[k];
+    state.firstSeenProd = new Map();
+    const records = Array.isArray(state.recordList) ? state.recordList : [];
+    for(const rec of records){
       if(!rec) continue;
-      const temp = rec.temp || rec.temperature || rec.tempStr || rec.tempKey;
-      const ymd = rec.dateKey || rec.yyyymmdd || rec.date || rec.ymd;
-      const prod = rec.prod || rec.product || rec.prodName || rec.name;
-      const cat = rec.cat || rec.category || rec.catName;
+      const temp = rec.temp;
+      const ymd = rec.mmdd;
+      const prod = rec.product;
+      const cat = rec.category;
       if(!temp || !ymd || !prod) continue;
-      // ignore summary/avg rows
-      const c = (cat!=null) ? String(cat) : "";
-      if(c && cleanKey(c)==="0") continue;
+      if(cat && cleanKey(cat) === "0") continue;
       if(/(平均|合計|小計|總計)/.test(String(prod))) continue;
       updateFirstSeenProd(temp, ymd, prod);
     }
   }catch(_e){}
 }
 
-// Return true if product first-ever appearance date is within [start,end] (YYYYMMDD number)
-function isFirstSeenInRange(temp, prodName, startYmd, endYmd){
-  try{
-    if(!temp || !prodName) return false;
-    if(!state.firstSeenProd) return false;
-    const name = String(prodName).split("|").pop(); // tolerate "cat|prod"
-    const key = String(temp) + "|" + cleanKey(name);
-    const d = state.firstSeenProd[key];
-    if(d==null) return false;
-    const s = Number(String(startYmd).replace(/[^0-9]/g,""));
-    const e = Number(String(endYmd).replace(/[^0-9]/g,""));
-    if(!Number.isFinite(s) || !Number.isFinite(e)) return false;
-    return d >= Math.min(s,e) && d <= Math.max(s,e);
-  }catch(_e){ return false; }
-}
-
-
-
-
-function normalizeProdName(v){
-  if(v === null || v === undefined) return "";
-  return String(v)
-    .replace(/\u00a0/g," ")
-    .replace(/[\u200B-\u200D\uFEFF]/g,"")
-    .replace(/\u3000/g," ")
-    .replace(/\s+/g," ")
-    .trim();
-}
-function isTwoPei(v){
-  // 配別判斷：以原始品名是否以「二配」開頭（允許前面有括號標記，如「(隨)」）
-  const s0 = String(v || "").trim();
-  const s = s0.replace(/^\s*[\(（][^\)）]*[\)）]\s*/u, ""); // 去掉前置括號標記
-  return /^二配/u.test(s);
-}
-
-
-function _inferYearForDevConfirm(month){
-  // Heuristic for 2025-2026 dev confirmation table:
-  // months 1-6 => 2026; months 7-12 => 2025
-  if(!month || month<1 || month>12) return new Date().getFullYear();
-  return (month<=6) ? 2026 : 2025;
-}
-
-function _parseDevConfirmDate(v){
-  if(v === null || v === undefined || v === "") return null;
-  if(v instanceof Date && !isNaN(v)) return v;
-
-  if(typeof v === "number" && isFinite(v)){
-    try{
-      if(window.XLSX && XLSX.SSF && typeof XLSX.SSF.parse_date_code === "function"){
-        const dc = XLSX.SSF.parse_date_code(v);
-        if(dc && dc.y && dc.m && dc.d){
-          return new Date(Date.UTC(dc.y, dc.m-1, dc.d));
-        }
-      }
-      const epoch = Date.UTC(1899, 11, 30);
-      return new Date(epoch + Math.round(v) * 86400000);
-    }catch(_e){
-      return null;
-    }
-  }
-
-  const s = String(v).trim();
-  if(!s) return null;
-  const s2 = s.replace(/[年月]/g, "/").replace(/日/g, "").replace(/-/g, "/").replace(/\s+/g, "");
-  let m = s2.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
-  if(m){
-    const y = +m[1], mo = +m[2], d = +m[3];
-    if(mo>=1 && mo<=12 && d>=1 && d<=31) return new Date(Date.UTC(y, mo-1, d));
-    return null;
-  }
-  m = s2.match(/^(\d{1,2})\/(\d{1,2})$/);
-  if(m){
-    const mo = +m[1], d = +m[2];
-    if(mo>=1 && mo<=12 && d>=1 && d<=31){
-      const y = _inferYearForDevConfirm(mo);
-      return new Date(Date.UTC(y, mo-1, d));
-    }
-  }
-  return null;
-}
-
-function _fmtLaunchDate(d){
+var _fmtLaunchDate = globalThis._fmtLaunchDate = function(d){
   if(!(d instanceof Date) || isNaN(d)) return "";
   const y = d.getUTCFullYear();
-  const mo = String(d.getUTCMonth()+1).padStart(2,'0');
-  const da = String(d.getUTCDate()).padStart(2,'0');
-  return `${y}/${mo}/${da}`;
-}
+  const m = String(d.getUTCMonth()+1).padStart(2, "0");
+  const da = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}/${m}/${da}`;
+};
 
-function _calcLaunchDays(d){
+var _calcLaunchDays = globalThis._calcLaunchDays = function(d){
   if(!(d instanceof Date) || isNaN(d)) return null;
   const now = new Date();
   const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
   const launchUtc = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  return Math.floor((todayUtc - launchUtc)/86400000);
+  return Math.floor((todayUtc - launchUtc) / 86400000);
+};
+
+function _yyyymmddNumToUTCDate(yyyymmdd){
+  const s = String(yyyymmdd || "").replace(/[^0-9]/g,"");
+  const m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if(!m) return null;
+  return new Date(Date.UTC(Number(m[1]), Number(m[2])-1, Number(m[3])));
 }
 
+function _findFirstSeenNumForProd(prodBaseName, tempHint){
+  try{
+    if(!prodBaseName) return null;
+    const keyName = cleanKey(prodBaseName);
+    if(!keyName) return null;
+    const fs = state.firstSeenProd;
+    if(!(fs instanceof Map)) return null;
 
-function parseDevConfirmWorkbook(wb){
-  if(!wb || !wb.SheetNames || wb.SheetNames.length===0) return;
+    let best = null;
 
-  const newMap = new Map(); // key => {date: Date, str: string, rawName: string}
+    const tryTemp = (t)=>{
+      const v = fs.get(String(t) + "|" + keyName);
+      const n = Number(v);
+      if(Number.isFinite(n) && (best == null || n < best)) best = n;
+    };
 
-  for(const sn of wb.SheetNames){
-    const ws = wb.Sheets[sn];
-    if(!ws) continue;
-
-    const rows = XLSX.utils.sheet_to_json(ws, {header: 1, raw: true, defval: ""});
-    if(!rows || rows.length===0) continue;
-
-    // Default: date at col A, product name at col C
-    for(const row of rows){
-      if(!row) continue;
-      const name = String(row[2] ?? "").trim();
-      if(!name) continue;
-      if(/商品名稱|商品名|品名/i.test(name)) continue;
-
-      const normName = normalizeProdNameForCost(name);
-        const key = cleanKey(normName);
-      if(!key) continue;
-
-      const dt = _parseDevConfirmDate(row[0]);
-      if(!dt) continue;
-
-      const prev = newMap.get(key);
-      if(!prev || (prev.date instanceof Date && dt > prev.date)){
-        newMap.set(key, {date: dt, str: _fmtLaunchDate(dt), rawName: name});
-      }
+    if(tempHint != null && tempHint !== ""){
+      tryTemp(tempHint);
+      if(best != null) return best;
     }
-  }
 
-  state.devLaunchMap = newMap;
-  state.devLaunchEntries = Array.from(newMap.entries())
-    .map(([k,v])=>({k, v}))
-    .sort((a,b)=> (b.k.length - a.k.length) || ((b.v.date||0) - (a.v.date||0)));
-  state.devConfirmLoaded = true;
+    for(const [k, v] of fs.entries()){
+      const parts = String(k).split("|");
+      if(parts.length < 2) continue;
+      if(parts.slice(1).join("|") !== keyName) continue;
+      const n = Number(v);
+      if(Number.isFinite(n) && (best == null || n < best)) best = n;
+    }
+    return best;
+  }catch(_e){
+    return null;
+  }
 }
 
-function getLaunchDateInfoForProd(prodBaseName){
-  if(!prodBaseName) return {date:null, str:""};
-  const key = cleanKey(prodBaseName);
-  if(!key) return {date:null, str:""};
+function getLaunchDateInfoForProd(prodBaseName, tempHint){
+  if(!prodBaseName) return { date:null, str:"", firstSeenDate:null, firstSeenStr:"" };
 
-  const direct = state.devLaunchMap.get(key);
-  if(direct) return {date: direct.date||null, str: direct.str||""};
+  const fmtLocal = (d)=>{
+    if(!(d instanceof Date) || isNaN(d)) return "";
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth()+1).padStart(2, "0");
+    const da = String(d.getUTCDate()).padStart(2, "0");
+    return `${y}/${m}/${da}`;
+  };
 
-  // Partial matching (dashboard name may contain extra prefixes). Choose the latest launch date if multiple matches exist.
-  let best=null;
-  for(const ent of state.devLaunchEntries){
-    if(!ent || !ent.k || !ent.v) continue;
-    if(key.includes(ent.k) || ent.k.includes(key)){
-      const v = ent.v;
-      if(!best || (v.date && best.date && v.date > best.date) || (v.date && !best.date)){
-        best = v;
-      }
-    }
+  const firstSeenNum = _findFirstSeenNumForProd(prodBaseName, tempHint ?? state.temp);
+  const firstSeenDate = _yyyymmddNumToUTCDate(firstSeenNum);
+  if(!(firstSeenDate instanceof Date) || isNaN(firstSeenDate)){
+    return { date:null, str:"", firstSeenDate:null, firstSeenStr:"" };
   }
-  return best ? {date: best.date||null, str: best.str||""} : {date:null, str:""};
+
+  const launchDate = new Date(firstSeenDate.getTime());
+  launchDate.setUTCDate(launchDate.getUTCDate() + 1);
+
+  return {
+    date: launchDate,
+    str: fmtLocal(launchDate),
+    firstSeenDate,
+    firstSeenStr: fmtLocal(firstSeenDate)
+  };
 }
 
 function getLaunchDateStrForProd(prodName){
   return getLaunchDateInfoForProd(prodName).str || "";
 }
 
-
-async function parseDevConfirmArrayBuffer(buf){
-  await ensureXLSX();
-  const wb = XLSX.read(buf, {type:"array", cellDates:true});
-  parseDevConfirmWorkbook(wb);
+async function parseDevConfirmArrayBuffer(_buf){
+  return false;
 }
 
 async function loadDevConfirmFromRepo(){
-  if(state.devConfirmLoaded) return;
-  try{
-    const buf = await fetchArrayBufferSmart(DEV_CONFIRM_FILENAME);
-    await parseDevConfirmArrayBuffer(buf);
-  }catch(e){
-    console.warn("Dev confirm load failed:", e);
-  }
+  return false;
 }
-
 
 function escapeHtml(s){
   return cleanText(s).replace(/[&<>"']/g, (c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -1325,8 +1271,8 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v75_changeover_le20_daily_avg_fix";
-console.log("Jinxin dashboard build: v75_changeover_le20_daily_avg_fix");
+const BUILD_VERSION = "v77_new_product_launch_fix_launchdays_guard";
+console.log("Jinxin dashboard build: v77_new_product_launch_fix_launchdays_guard");
 const state = {
   rangeMode: "year",
   temp: "4",
@@ -1395,6 +1341,12 @@ function normalizeProdNameForCost(name){
   let t = normalizeBaseName(name);
   t = t.replace(/^[\s\(（]*二配[\s\)）\-—_:：\s]*/u, "");
   return t.trim();
+}
+function isTwoPei(name){
+  const s = normalizeBaseName(name);
+  if(!s) return false;
+  const noLeadingTag = s.replace(/^\s*[\(（][^\)）]*[\)）]\s*/u, "");
+  return /^二配(?:\s|$|[\-—_:：])/u.test(noLeadingTag) || /^二配/u.test(noLeadingTag);
 }
 
 
@@ -2336,9 +2288,6 @@ setDataChip("warn", "自動載入中…");
         }else{ throw e1; }
       }
       if((it.name && (DEV_CONFIRM_HINT_RE.test(it.name) || it.name === DEV_CONFIRM_FILENAME))){
-        if(!state.devConfirmLoaded){
-          await parseDevConfirmArrayBuffer(buf);
-        }
         continue;
       }
       await parseWorkbookArrayBuffer(buf, it.name);
@@ -2375,7 +2324,7 @@ async function handleFiles(files){
   for(const file of Array.from(files)){
     const buf = await file.arrayBuffer();
     if((file.name && (DEV_CONFIRM_HINT_RE.test(file.name) || file.name === DEV_CONFIRM_FILENAME))){
-      await parseDevConfirmArrayBuffer(buf);
+      continue;
     }else{
       await parseWorkbookArrayBuffer(buf, file.name);
     }
@@ -2937,7 +2886,7 @@ function getNewProductBadgeInfo(){
     }
   }else if(mode === 'week'){
     labelCur = '當週新品';
-    labelPrev = '前週新品';
+    labelPrev = '前周新品';
     const ws = _dateUTCFromYMDStr(state.weekStartStr);
     if(ws){
       curStart = ws;
@@ -2947,7 +2896,7 @@ function getNewProductBadgeInfo(){
     }
   }else{ // day
     labelCur = '當週新品';
-    labelPrev = '前週新品';
+    labelPrev = '前周新品';
     showPrev = false; // 日別只顯示當週新品
     const d = _dateUTCFromYMDStr(state.dayStr);
     if(d){
@@ -2967,19 +2916,9 @@ function getNewProductBadgeInfo(){
 function isNewProductInRange(prodName, start, end){
   if(!prodName) return false;
   if(!(start instanceof Date) || isNaN(start) || !(end instanceof Date) || isNaN(end)) return false;
-
-  // Rule A (existing): launch date within range
-  let byLaunch = false;
   const info = getLaunchDateInfoForProd(prodName);
-  if(info && (info.date instanceof Date) && !isNaN(info.date)){
-    byLaunch = _isWithinUTC(info.date, start, end);
-  }
-
-  // Rule B (new): first appearance in daily report data within range
-  const byFirstSeen = isFirstSeenInRange(prodName, start, end);
-
-  // Union to avoid double counting
-  return (byLaunch || byFirstSeen);
+  if(!(info && info.date instanceof Date) || isNaN(info.date)) return false;
+  return _isWithinUTC(info.date, start, end);
 }
 
 // --- First-seen helper (global) ---
@@ -2997,28 +2936,12 @@ function isFirstSeenInRange(prodName, start, end){
   try{
     if(!prodName) return false;
     if(!(start instanceof Date) || isNaN(start) || !(end instanceof Date) || isNaN(end)) return false;
-    const temp = state && state.temp != null ? String(state.temp) : "";
-    const key = temp + "|" + cleanKey(prodName);
-
     const sNum = _dateToYmdNumUTC(start);
     const eNum = _dateToYmdNumUTC(end);
     if(!Number.isFinite(sNum) || !Number.isFinite(eNum)) return false;
-
-    const fs = state && state.firstSeenProd;
-    let firstNum = null;
-
-    if(fs && typeof fs.get === "function"){ // Map-like
-      const v = fs.get(key);
-      const n = Number(v);
-      if(Number.isFinite(n)) firstNum = n;
-    }else if(fs && (typeof fs === "object")){
-      const v = fs[key];
-      const n = Number(v);
-      if(Number.isFinite(n)) firstNum = n;
-    }
-
+    const firstNum = _findFirstSeenNumForProd(prodName, state && state.temp != null ? state.temp : "");
     if(firstNum == null) return false;
-    return firstNum >= sNum && firstNum <= eNum;
+    return firstNum >= Math.min(sNum, eNum) && firstNum <= Math.max(sNum, eNum);
   }catch(_e){
     return false;
   }
@@ -3037,7 +2960,7 @@ function markOptionAsNew(optEl, prodName /* , anchorIgnored */){
   if(!optEl) return;
   const p = getNewProductBadgeInfo();
   if(isNewProductInRange(prodName, p.curStart, p.curEnd)){
-    optEl.style.color = "#dc2626"; // red-600
+    optEl.style.color = "#ea580c"; // orange-600
     optEl.style.fontWeight = "800";
   }
 }
@@ -3843,28 +3766,35 @@ function buildProductSeriesMode(rows, metric, aggMode){
     return {title:`月別（全年｜${state.year}｜月${aggMode==="sum"?"加總":"平均"}）`, labels, values};
   }
 
+  const aggregateByDate = (arr)=>{
+    const byDate = new Map();
+    for(const it of (arr || [])){
+      const key = String(it.dateStr || "").trim();
+      if(!key) continue;
+      if(!byDate.has(key)) byDate.set(key, []);
+      byDate.get(key).push(getMetricValue(it));
+    }
+    const ordered = Array.from(byDate.keys()).sort((a,b)=>a.localeCompare(b));
+    return {
+      labels: ordered.map(k => k.slice(5)),
+      values: ordered.map(k => agg(byDate.get(k)))
+    };
+  };
+
   if(mode === "week"){
     items.sort((a,b)=>a.dateObj-b.dateObj);
-    const labels = items.map(it => it.dateStr.slice(5));
-    const values = items.map(it => {
-      const v = getMetricValue(it);
-      return Number.isFinite(v) ? v : null;
-    });
+    const grouped = aggregateByDate(items);
     const ws = new Date(state.weekStartStr + "T00:00:00Z");
     const we = addDaysUTC(ws,6);
-    return {title:`日別（${dateObjToStr(ws)}～${dateObjToStr(we)}）`, labels, values};
+    return {title:`日別（${dateObjToStr(ws)}～${dateObjToStr(we)}）`, labels: grouped.labels, values: grouped.values};
   }
 
   if(mode === "day"){
     const dSel = new Date(state.dayStr + "T00:00:00Z");
     const mSel = dSel.getUTCMonth()+1;
     const focus = items.filter(it => (it.dateObj.getUTCMonth()+1)===mSel).sort((a,b)=>a.dateObj-b.dateObj);
-    const labels = focus.map(it => it.dateStr.slice(5));
-    const values = focus.map(it => {
-      const v = getMetricValue(it);
-      return Number.isFinite(v) ? v : null;
-    });
-    return {title:`日別（${String(mSel).padStart(2,"0")} 月）`, labels, values};
+    const grouped = aggregateByDate(focus);
+    return {title:`日別（${String(mSel).padStart(2,"0")} 月）`, labels: grouped.labels, values: grouped.values};
   }
 
   const byWeek = new Map();
@@ -5522,28 +5452,35 @@ function buildGroupSeries(rows, metric, viewMode="avg", opts=null){
     return {title:`月別（全年｜${state.year}）`, labels, values};
   }
 
+  const aggregateGroupByDate = (arr)=>{
+    const byDate = new Map();
+    for(const it of (arr || [])){
+      const key = String(it.dateStr || "").trim();
+      if(!key) continue;
+      if(!byDate.has(key)) byDate.set(key, []);
+      byDate.get(key).push(it);
+    }
+    const ordered = Array.from(byDate.keys()).sort((a,b)=>a.localeCompare(b));
+    return {
+      labels: ordered.map(k => k.slice(5)),
+      values: ordered.map(k => aggBucket(byDate.get(k)))
+    };
+  };
+
   if(mode === "week"){
     items.sort((a,b)=>a.dateObj-b.dateObj);
-    const labels = items.map(it => it.dateStr.slice(5));
-    const values = items.map(it => {
-      const v = getMetricValue(it);
-      return Number.isFinite(v) ? v : null;
-    });
+    const grouped = aggregateGroupByDate(items);
     const ws = new Date(state.weekStartStr + "T00:00:00Z");
     const we = addDaysUTC(ws,6);
-    return {title:`日別（${dateObjToStr(ws)}～${dateObjToStr(we)}）`, labels, values};
+    return {title:`日別（${dateObjToStr(ws)}～${dateObjToStr(we)}）`, labels: grouped.labels, values: grouped.values};
   }
 
   if(mode === "day"){
     const dSel = new Date(state.dayStr + "T00:00:00Z");
     const mSel = dSel.getUTCMonth()+1;
     const focus = items.filter(it => (it.dateObj.getUTCMonth()+1)===mSel).sort((a,b)=>a.dateObj-b.dateObj);
-    const labels = focus.map(it => it.dateStr.slice(5));
-    const values = focus.map(it => {
-      const v = getMetricValue(it);
-      return Number.isFinite(v) ? v : null;
-    });
-    return {title:`日別（${String(mSel).padStart(2,"0")} 月）`, labels, values};
+    const grouped = aggregateGroupByDate(focus);
+    return {title:`日別（${String(mSel).padStart(2,"0")} 月）`, labels: grouped.labels, values: grouped.values};
   }
 
   const byWeek = new Map();
@@ -5891,6 +5828,79 @@ function refreshActiveGroupTrend(){
   renderGroupTrend(cat);
 }
 
+
+function refreshProdTableHeader(){
+  const is4 = state.temp === "4";
+  const planTh = $("prodPlanPeopleHeader");
+  const actualTh = $("prodActualPeopleHeader");
+  const prevPlanTh = $("prodPrevPlanPeopleHeader");
+  const prevActualTh = $("prodPrevActualPeopleHeader");
+  const actualLbl = $("pActualPeopleLabel");
+  const planRow = $("pPlanPeopleRow");
+  if(planTh) planTh.classList.toggle("hidden", !is4);
+  if(prevPlanTh) prevPlanTh.classList.toggle("hidden", !is4);
+  if(actualTh) actualTh.textContent = is4 ? "實際人數" : "人數";
+  if(prevActualTh) prevActualTh.textContent = is4 ? "實際人數" : "人數";
+  if(actualLbl) actualLbl.textContent = is4 ? "實際人數" : "人數";
+  if(planRow) planRow.classList.toggle("hidden", !is4);
+}
+
+function getPrevDetailToggleState(){
+  return !!state.prodPrevDetailExpanded;
+}
+
+function setPrevDetailToggleState(expanded){
+  state.prodPrevDetailExpanded = !!expanded;
+  const btn = $("prodPrevDetailToggle");
+  const panel = $("prodPrevDetailPanel");
+  if(btn) btn.textContent = expanded ? "前段明細收合" : "前段明細展開";
+  if(panel) panel.classList.toggle("hidden", !expanded);
+}
+
+function bindPrevDetailToggle(){
+  const btn = $("prodPrevDetailToggle");
+  if(!btn || btn.dataset.bound === "1") return;
+  btn.dataset.bound = "1";
+  btn.addEventListener("click", ()=>{
+    setPrevDetailToggleState(!getPrevDetailToggleState());
+  });
+}
+
+function renderPrevProductTable(rows, rangeText){
+  const metaEl = $("prodPrevDetailMeta");
+  const rangeEl = $("prodPrevDetailRange");
+  const tb = $("prodPrevTableBody");
+  const toggleBtn = $("prodPrevDetailToggle");
+  const panel = $("prodPrevDetailPanel");
+  if(metaEl) metaEl.textContent = rows.length ? `前段明細：${rangeText}` : "前段明細：無資料";
+  if(rangeEl) rangeEl.textContent = rangeText || "";
+  if(toggleBtn) toggleBtn.disabled = !rows.length;
+  if(panel && !rows.length) panel.classList.add("hidden");
+  if(!rows.length) state.prodPrevDetailExpanded = false;
+  setPrevDetailToggleState(getPrevDetailToggleState() && rows.length);
+  if(!tb) return;
+  tb.innerHTML = "";
+  for(const {dateStr, rec} of rows){
+    const tr = document.createElement("tr");
+    const chg = toNumber(rec.changeMin);
+    const actualPeople = toNumber(rec.people);
+    const plannedPeople = toNumber(rec.peopleStd);
+    tr.innerHTML = `
+      <td class="mono">${dateStr}</td>
+      <td class="mono">${fmtInt(toNumber(rec.qty))}</td>
+      <td class="mono">${fmtMoney(toNumber(rec.revenue))}</td>
+      <td class="mono">${fmtInt(toNumber(rec.multi))}</td>
+      ${state.temp === "4" ? `<td class="mono">${Number.isFinite(plannedPeople) ? fmtDec(plannedPeople,2) : "—"}</td>` : ""}
+      <td class="mono">${Number.isFinite(actualPeople) ? fmtDec(actualPeople,2) : "—"}</td>
+      <td class="mono">${Number.isFinite(toNumber(rec.cap)) ? fmtDec(toNumber(rec.cap),2) : "—"}</td>
+      <td class="mono">${Number.isFinite(toNumber(rec.eff)) ? fmtDec(toNumber(rec.eff),2) : "—"}</td>
+      <td class="mono">${Number.isFinite(chg) ? fmtDec(chg,1) : "—"}</td>
+      <td class="mono">${Number.isFinite(toNumber(rec.runMin)) ? fmtDec(toNumber(rec.runMin),1) : "—"}</td>
+    `;
+    tb.appendChild(tr);
+  }
+}
+
 function refreshProductDetails(){
   const lineKey = $("lineSelect").value || "";
   const catKey = $("catSelect").value || "";
@@ -5917,6 +5927,7 @@ function refreshProductDetails(){
   })();
 
   const rows = [];
+  bindPrevDetailToggle();
   for(const rec of (state.recordList || [])){
     if(rec.temp !== state.temp) continue;
     if(!mmddSet.has(rec.mmdd)) continue;
@@ -5952,7 +5963,10 @@ function refreshProductDetails(){
   $("pRev").textContent = fmtMoney(rev);
   $("pMulti").textContent = fmtInt(multi);
 
+  const planPeopleVals = rows.map(({rec}) => toNumber(rec.peopleStd)).filter(v => Number.isFinite(v));
+  const planPeopleAvg = planPeopleVals.length ? (planPeopleVals.reduce((a,b)=>a+b,0) / planPeopleVals.length) : NaN;
   $("pPeople").textContent = pcnt ? fmtDec(peopleSum/pcnt, 2) : "—";
+  if($("pPlanPeople")) $("pPlanPeople").textContent = Number.isFinite(planPeopleAvg) ? fmtDec(planPeopleAvg, 2) : "—";
   $("pCap").textContent = ccnt ? fmtDec(capSum/ccnt, 2) : "—";
   $("pEff").textContent = ecnt ? fmtDec(effSum/ecnt, 2) : "—";
   $("pChange").textContent = changeCnt ? fmtDec(changeSum, 1) : "—";
@@ -5965,17 +5979,22 @@ function refreshProductDetails(){
   if(capRow) capRow.classList.toggle("hidden", state.temp !== "4");
   $("pCapAch").textContent = (state.temp === "4" && cAchCnt) ? fmtPct(cAchSum/cAchCnt) : "—";
 
+  refreshProdTableHeader();
+
   const tb = $("prodTableBody");
   tb.innerHTML = "";
   for(const {dateStr, rec} of rows){
     const tr = document.createElement("tr");
     const chg = toNumber(rec.changeMin);
+    const actualPeople = toNumber(rec.people);
+    const plannedPeople = toNumber(rec.peopleStd);
     tr.innerHTML = `
       <td class="mono">${dateStr}</td>
       <td class="mono">${fmtInt(toNumber(rec.qty))}</td>
       <td class="mono">${fmtMoney(toNumber(rec.revenue))}</td>
       <td class="mono">${fmtInt(toNumber(rec.multi))}</td>
-      <td class="mono">${Number.isFinite(toNumber(rec.people)) ? fmtDec(toNumber(rec.people),2) : "—"}</td>
+      ${state.temp === "4" ? `<td class="mono">${Number.isFinite(plannedPeople) ? fmtDec(plannedPeople,2) : "—"}</td>` : ""}
+      <td class="mono">${Number.isFinite(actualPeople) ? fmtDec(actualPeople,2) : "—"}</td>
       <td class="mono">${Number.isFinite(toNumber(rec.cap)) ? fmtDec(toNumber(rec.cap),2) : "—"}</td>
       <td class="mono">${Number.isFinite(toNumber(rec.eff)) ? fmtDec(toNumber(rec.eff),2) : "—"}</td>
       <td class="mono">${Number.isFinite(chg) ? fmtDec(chg,1) : "—"}</td>
@@ -6000,6 +6019,11 @@ function refreshProductDetails(){
     prevRows.push({dateStr: ds2, rec});
   }
   prevRows.sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
+
+  const prevRangeText = (_prevP.prevStart instanceof Date && !isNaN(_prevP.prevStart) && _prevP.prevEnd instanceof Date && !isNaN(_prevP.prevEnd))
+    ? `${dateObjToStr(_prevP.prevStart)} ~ ${dateObjToStr(_prevP.prevEnd)}`
+    : "無前段資料";
+  renderPrevProductTable(prevRows, prevRangeText);
 
 renderProductTrend(rows, prevRows);
 }
@@ -6059,6 +6083,7 @@ function refreshLowestRateModeOptions(){
 
   // 4°C：保留達成率兩種排序
   if(String(state.temp) === "4"){
+    opts.push(["human_high","最高人時達成率（前六）"]);
     opts.push(["human","最低人時達成率（前六）"]);
     opts.push(["cap","最低產能達成率（前六）"]);
   }
@@ -6236,7 +6261,7 @@ function _safeNum(v){
 }
 
 function _lowestRateAgg(mode, pairFilter, catFilter){
-  // mode: "human" | "cap"
+  // mode: "human" | "human_high" | "cap"
   const mmddSet = getDateSetInSelection();
   const _daysCount = Math.max(1, (mmddSet && mmddSet.size) ? mmddSet.size : 0);
 
@@ -6324,7 +6349,11 @@ if(pairFilter === "two"){
     out = out.filter(x=> cleanText(x.cat||"") === ck);
   }
 
-  out.sort((a,b)=>a.avgAch - b.avgAch);
+  if(mode === "human_high"){
+    out.sort((a,b)=>b.avgAch - a.avgAch);
+  }else{
+    out.sort((a,b)=>a.avgAch - b.avgAch);
+  }
   return out.slice(0, 6);
 }
 
@@ -6819,6 +6848,7 @@ function renderLowestRatePanel(){
   empty.classList.add("hidden");
 
   const labelMap = {
+    human_high: "人時達成率",
     human: "人時達成率",
     cap: "產能達成率",
     drop: "生產量下滑數",
@@ -6960,6 +6990,7 @@ document.addEventListener("DOMContentLoaded", ()=>{
 
 function refreshAll(){
   togglePanels();
+  refreshProdTableHeader();
   // keep month selectors in sync
   const wms = $("weekMonthSelect"); if(wms) wms.value = String(state.month);
   refreshActiveRangeText();
@@ -7238,10 +7269,7 @@ $("lineSelect").value = "";
   refreshAll();
   // 先載入主資料，避免鮮食開發確認表缺檔時讓畫面看起來像卡在「載入解析套件」
   await preload();
-  // 鮮食開發確認表改為背景補載，不阻塞主資料顯示
-  loadDevConfirmFromRepo()
-    .then(()=>{ try{ refreshAll(); }catch(e){} })
-    .catch((e)=>{ console.warn("Dev confirm load skipped:", e); });
+  // 新品上市日期改為依生產資料首次出現日 + 1 天計算，不再讀取鮮食開發確認表。
 })();
 </script>
 </body>
