@@ -5203,7 +5203,7 @@ function refreshLineSection(){
 
   const mmddSet = getDateSetInSelection();
   const cats = new Map();
-  for(const rec of state.records.values()){
+  for(const rec of _iterKpiDetailRecords()){
     if(rec.temp !== state.temp) continue;
     if(!mmddSet.has(rec.mmdd)) continue;
     if(cleanKey(rec.line) !== lineKey) continue;
@@ -6451,6 +6451,14 @@ function _isSummaryRowProdName(prod){
   return !p || /(平均|合計|小計|總計)/.test(p);
 }
 
+// KPI 排序明細必須以 recordList 為準，才能保留同一天、同品項多次生產的列。
+// state.records 是相容舊版的 Map，key 相同時會覆蓋，不能用於生產量加總/下滑/上升排序。
+function _iterKpiDetailRecords(){
+  return (Array.isArray(state.recordList) && state.recordList.length)
+    ? state.recordList
+    : Array.from(state.records.values());
+}
+
 // mode=drop：回傳下滑數最高的前 6 名（drop = prevAvgQtyDay - curAvgQtyDay, 僅列 drop>0）
 function _metricDropAgg(metric, pairFilter, catFilter){
   // metric: "qty" | "cap" | "eff"
@@ -6522,7 +6530,7 @@ function _metricDropAgg(metric, pairFilter, catFilter){
     if(Number.isFinite(c)){ it.capSum += c; it.capCnt++; }
   }
 
-  for(const rec of state.records.values()){
+  for(const rec of _iterKpiDetailRecords()){
     if(rec.temp !== state.temp) continue;
     if(curSet.has(rec.mmdd))  acc(curMap, rec);
     if(prevSet.has(rec.mmdd)) acc(prevMap, rec);
@@ -6705,7 +6713,7 @@ function _metricRiseAgg(metric, pairFilter, catFilter){
     if(Number.isFinite(c)){ it.capSum += c; it.capCnt++; }
   }
 
-  for(const rec of state.records.values()){
+  for(const rec of _iterKpiDetailRecords()){
     if(rec.temp !== state.temp) continue;
     if(curSet.has(rec.mmdd))  acc(curMap, rec);
     if(prevSet.has(rec.mmdd)) acc(prevMap, rec);
