@@ -698,7 +698,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v77_new_product_launch_fix_launchdays_guard";
+window.BUILD_VERSION = "v78_week_monday_sunday_year_filter";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -1182,7 +1182,7 @@ function dateObjToStr(d){
 function getWeekStartUTC(dateObj){
   const d = new Date(dateObj.getTime());
   // 以「週二」為一週起點（週二～週一）
-  const offset = (d.getUTCDay() - 2 + 7) % 7; // Tue=2
+  const offset = (d.getUTCDay() - 2 + 7) % 7; // Tue=2；Monday(1) 會回推 6 天
   d.setUTCDate(d.getUTCDate() - offset);
   d.setUTCHours(0,0,0,0);
   return d;
@@ -1271,8 +1271,8 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v77_new_product_launch_fix_launchdays_guard";
-console.log("Jinxin dashboard build: v77_new_product_launch_fix_launchdays_guard");
+const BUILD_VERSION = "v78_week_monday_sunday_year_filter";
+console.log("Jinxin dashboard build: v78_week_monday_sunday_year_filter");
 const state = {
   rangeMode: "year",
   temp: "4",
@@ -2375,17 +2375,21 @@ function refreshWeekOptions(){
   if(!weekSel) return;
 
   weekSel.innerHTML = "";
-  const dates = getAllDatesForTemp(state.temp).map(o=>o.dateObj);
 
-  const weekMap = new Map();
-  for(const d of dates){
-    const ws = getWeekStartUTC(d);
-    const wsMonth = ws.getUTCMonth()+1;
-    if(wsMonth !== state.month) continue; // 以週起始日（週二）決定歸屬月份
-    const wsStr = dateObjToStr(ws);
-    if(!weekMap.has(wsStr)) weekMap.set(wsStr, {start: ws, end: addDaysUTC(ws,6)});
+  const yearNum = Number(state.year);
+  const monthNum = Number(state.month);
+  if(!Number.isFinite(yearNum) || !Number.isFinite(monthNum) || monthNum < 1 || monthNum > 12){
+    state.weekStartStr = "";
+    return;
   }
-  const weeks = Array.from(weekMap.values()).sort((a,b)=>a.start-b.start);
+
+  // 僅使用目前選定年度／月份，避免不同年度的同月份週別混在同一個下拉選單。
+  // 週期採週二～週一；只要該週與所選月份有交集且週內有資料，就列入。
+  const dates = getAllDatesForTemp(state.temp).map(o=>o.dateObj);
+  const monthWindows = getMonthWeekWindowsUTC(yearNum, monthNum);
+  const weeks = monthWindows.weeks
+    .filter(w => dates.some(d => d >= w.start && d <= w.end))
+    .sort((a,b)=>a.start-b.start);
 
   for(const w of weeks){
     const opt = document.createElement("option");
@@ -2394,7 +2398,7 @@ function refreshWeekOptions(){
     weekSel.appendChild(opt);
   }
 
-  // default / keep selection
+  // 保留仍有效的選擇；否則自動選該月第一個有資料的週。
   const current = state.weekStartStr || "";
   const valid = weeks.some(w => dateObjToStr(w.start) === current);
   if(!valid){
