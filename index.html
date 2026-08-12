@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" href="data:," />
   <title>晉欣鮮食廠｜日報儀表板</title>
-  <!-- BUILD v72_new_product_first_seen_plus1 -->
+  <!-- BUILD v79_recent3_priority_background_progress -->
   <link rel="icon" href="data:,">
 
   <script src="https://cdn.tailwindcss.com"></script>
@@ -28,6 +28,25 @@
     .chip .dot { width:.55rem; height:.55rem; border-radius: 999px; background:#22c55e; }
     .chip.warn .dot { background:#f59e0b; }
     .chip.bad .dot { background:#ef4444; }
+    /* 自動載入進度：小型圓形進度環（參考右上角 loading ring） */
+    .load-progress-ring {
+      --progress: 0;
+      width: 1.05rem;
+      height: 1.05rem;
+      border-radius: 999px;
+      flex: 0 0 auto;
+      position: relative;
+      background: conic-gradient(#3b82f6 calc(var(--progress) * 1%), #dbeafe 0);
+      box-shadow: inset 0 0 0 1px rgba(59,130,246,.08);
+    }
+    .load-progress-ring::after {
+      content: "";
+      position: absolute;
+      inset: 3px;
+      border-radius: inherit;
+      background: #fff;
+    }
+    .load-progress-ring.hidden { display:none; }
     .table th { background:#f1f5f9; font-weight:700; color:#334155; }
     .table td, .table th { border-bottom:1px solid #e2e8f0; padding:.55rem .6rem; vertical-align: top; }
     .table { border:1px solid #e2e8f0; border-radius: 1rem; overflow:hidden; }
@@ -68,7 +87,17 @@
         <div class="text-slate-600 font-semibold mt-1"></div>
       </div>
       <div class="flex flex-wrap items-center gap-2">
-        <span id="dataChip" class="chip warn"><span class="dot"></span><span>尚未載入資料</span></span>
+        <nav class="flex flex-wrap items-center gap-2" aria-label="四廠儀表板快速切換">
+          <a href="https://hamster3-3-3.github.io/Daxi-dashboard/" class="px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-sm font-bold transition" title="前往大溪廠儀表板">大溪</a>
+          <a href="https://hamster3-3-3.github.io/XiFang-dashboard/" class="px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-sm font-bold transition" title="前往新豐廠儀表板">新豐</a>
+          <a href="https://hamster3-3-3.github.io/ChangJia/" class="px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-sm font-bold transition" title="前往長家廠儀表板">長家</a>
+          <a href="https://hamster3-3-3.github.io/factory_compare_dashboard/" class="px-3 py-2 rounded-xl border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 text-sm font-bold transition" title="前往四廠總覽">總覽</a>
+        </nav>
+        <span id="dataChip" class="chip warn">
+          <span id="dataProgressRing" class="load-progress-ring hidden" style="--progress:0"></span>
+          <span id="dataStatusDot" class="dot"></span>
+          <span id="dataChipText">尚未載入資料</span>
+        </span>
         <button id="clearBtn" class="btn danger" disabled>清除資料</button>
             <button id="importBtn" class="px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 text-sm">匯入更新</button>
       </div>
@@ -698,7 +727,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v78_week_monday_sunday_year_filter";
+window.BUILD_VERSION = "v79_recent3_priority_background_progress";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -1271,8 +1300,8 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v78_week_monday_sunday_year_filter";
-console.log("Jinxin dashboard build: v78_week_monday_sunday_year_filter");
+const BUILD_VERSION = "v79_recent3_priority_background_progress";
+console.log("Jinxin dashboard build: v79_recent3_priority_background_progress");
 const state = {
   rangeMode: "year",
   temp: "4",
@@ -1300,6 +1329,8 @@ const state = {
 
   loadedFiles: [],
   availableMmdd: new Set(),
+  loadGeneration: 0,          // 每次自動載入/清除都遞增，避免舊背景工作回寫
+  backgroundLoading: false,   // 近 3 個月完成後，其餘月份於背景載入
 
   chartsVisible: false,
   chartsDirty: true,
@@ -1537,17 +1568,39 @@ function fmtCostCards(cost, compact=false){
 
 
 
-function setDataChip(status, text){
+function setDataChip(status, text, options={}){
   const chip = $("dataChip");
+  if(!chip) return;
+
   chip.classList.remove("warn","bad");
-  if(status === "ok"){
-    chip.innerHTML = '<span class="dot"></span><span>'+text+'</span>';
-  }else if(status === "warn"){
-    chip.classList.add("warn");
-    chip.innerHTML = '<span class="dot"></span><span>'+text+'</span>';
-  }else{
-    chip.classList.add("bad");
-    chip.innerHTML = '<span class="dot"></span><span>'+text+'</span>';
+  if(status === "warn") chip.classList.add("warn");
+  else if(status !== "ok") chip.classList.add("bad");
+
+  const txt = $("dataChipText");
+  const dot = $("dataStatusDot");
+  const ring = $("dataProgressRing");
+  if(txt) txt.textContent = text || "";
+
+  const hasProgress = Number.isFinite(Number(options.progress));
+  const showProgress = !!options.loading || hasProgress;
+  if(ring){
+    const p = hasProgress ? Math.max(0, Math.min(100, Number(options.progress))) : 0;
+    ring.style.setProperty("--progress", String(p));
+    ring.classList.toggle("hidden", !showProgress);
+  }
+  if(dot) dot.classList.toggle("hidden", showProgress);
+}
+
+function setLoadProgressChip(phase, done, total, ok=0, fail=0){
+  const t = Math.max(0, Number(total) || 0);
+  const d = Math.max(0, Math.min(t, Number(done) || 0));
+  const pct = t > 0 ? Math.round((d / t) * 100) : 100;
+  const failText = fail > 0 ? `｜失敗 ${fail}` : "";
+
+  if(phase === "recent") {
+    setDataChip("warn", `近期 3 個月載入 ${d}/${t}${failText}`, {loading:true, progress:pct});
+  } else if(phase === "background") {
+    setDataChip("warn", `近期資料已可使用｜背景載入 ${d}/${t}${failText}`, {loading:true, progress:pct});
   }
 }
 function rebuildAvailableMmdd(){
@@ -2215,7 +2268,178 @@ async function fetchArrayBufferSmart(fileName){
   throw lastErr || new Error("fetch failed");
 }
 
+/* =========================
+   分段自動載入
+   1) 優先載入「瀏覽器系統日所在月 + 往前 2 個月」= 近 3 個月
+   2) 近期資料完成後立即讓畫面可使用
+   3) 其他月份改成背景逐份載入，每份之間主動讓出主執行緒
+========================= */
+function getReportMonthFromFilename(filename){
+  const s = String(filename || "").normalize("NFKC");
+
+  // 民國年：115.08.01-10... -> 2026-08
+  let m = s.match(/(?:^|[^0-9])(\d{3})[.\-_/](\d{1,2})(?:[.\-_/]|[^0-9])/);
+  if(m){
+    const roc = Number(m[1]);
+    const mon = Number(m[2]);
+    if(roc >= 1 && roc <= 999 && mon >= 1 && mon <= 12){
+      return {year: roc + 1911, month: mon, key: `${roc + 1911}-${String(mon).padStart(2,"0")}`};
+    }
+  }
+
+  // 西元年：2026-08-01... / 2026.08...
+  m = s.match(/(?:^|[^0-9])((?:19|20)\d{2})[.\-_/](\d{1,2})(?:[.\-_/]|[^0-9])/);
+  if(m){
+    const year = Number(m[1]);
+    const mon = Number(m[2]);
+    if(mon >= 1 && mon <= 12){
+      return {year, month: mon, key: `${year}-${String(mon).padStart(2,"0")}`};
+    }
+  }
+  return null;
+}
+
+function getRecentSystemMonthKeys(count=3){
+  const now = new Date(); // 依使用者電腦/手機的系統日期
+  const keys = [];
+  for(let i=0; i<count; i++){
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    keys.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);
+  }
+  return keys;
+}
+
+function isAuxiliaryWorkbookName(name){
+  const s = String(name || "");
+  return DEV_CONFIRM_HINT_RE.test(s)
+    || s === DEV_CONFIRM_FILENAME
+    || /全品項材料率、毛利率/i.test(s);
+}
+
+function splitPreloadItemsByRecentMonths(items){
+  const cleanItems = (items || []).filter(it => it && it.name && !isAuxiliaryWorkbookName(it.name));
+  const recentKeys = new Set(getRecentSystemMonthKeys(3));
+  const decorated = cleanItems.map((it, idx)=>({it, idx, period:getReportMonthFromFilename(it.name)}));
+
+  let recent = decorated.filter(x => x.period && recentKeys.has(x.period.key));
+  let background = decorated.filter(x => !(x.period && recentKeys.has(x.period.key)));
+
+  const sortNewest = (a,b)=>{
+    const av = a.period ? (a.period.year*100 + a.period.month) : -1;
+    const bv = b.period ? (b.period.year*100 + b.period.month) : -1;
+    return (bv-av) || (a.idx-b.idx);
+  };
+  recent.sort(sortNewest);
+  background.sort(sortNewest);
+
+  // 若站點資料已久未更新，避免「近期 3 個月完全沒有檔案」時首畫面一直空白：
+  // 退而求其次先載入資料清單中最新 3 個月份，其他仍走背景。
+  if(!recent.length){
+    const dated = decorated.filter(x=>x.period).sort(sortNewest);
+    const fallback = dated.slice(0,3);
+    const fallbackSet = new Set(fallback.map(x=>x.idx));
+    recent = fallback;
+    background = decorated.filter(x=>!fallbackSet.has(x.idx)).sort(sortNewest);
+  }
+
+  return {
+    recent: recent.map(x=>x.it),
+    background: background.map(x=>x.it),
+    recentKeys: Array.from(recentKeys)
+  };
+}
+
+function yieldToBrowser(){
+  return new Promise(resolve=>{
+    if(typeof requestIdleCallback === "function"){
+      requestIdleCallback(()=>resolve(), {timeout:120});
+    }else{
+      setTimeout(resolve, 16);
+    }
+  });
+}
+
+async function loadPreloadItem(it, generation){
+  if(generation !== state.loadGeneration) return {ok:false, cancelled:true};
+  if(!it || !it.name || isAuxiliaryWorkbookName(it.name)) return {ok:false, skipped:true};
+
+  // 若使用者在背景載入期間已手動匯入同名檔，避免重複解析造成 recordList/itemCount 重複。
+  if(state.loadedFiles.includes(it.name)) return {ok:true, skipped:true};
+
+  try{
+    let buf;
+    try{
+      buf = await fetchArrayBufferSmart(it.url || it.name);
+    }catch(e1){
+      if(it.raw) buf = await fetchArrayBufferSmart(it.raw);
+      else throw e1;
+    }
+
+    if(generation !== state.loadGeneration) return {ok:false, cancelled:true};
+    if(state.loadedFiles.includes(it.name)) return {ok:true, skipped:true};
+    await parseWorkbookArrayBuffer(buf, it.name);
+    return {ok:true};
+  }catch(e){
+    console.warn("preload failed:", it && it.name, e);
+    return {ok:false, error:e};
+  }
+}
+
+function refreshUiAfterDataBatch({setupSearch=false}={}){
+  fillFallbackAchievements();
+  rebuildAvailableMmdd();
+  refreshSelectors();
+  if(setupSearch && !state._prodSearchSetupDone){
+    setupProdSearch();
+    state._prodSearchSetupDone = true;
+  }
+  refreshAll();
+  markChartsDirty();
+  if($("clearBtn")) $("clearBtn").disabled = state.loadedFiles.length === 0;
+}
+
+async function runBackgroundPreload(items, generation, sourceLabel, recentStats){
+  state.backgroundLoading = true;
+  let done = 0, ok = 0, fail = 0;
+  const total = items.length;
+  setLoadProgressChip("background", 0, total, 0, 0);
+
+  // 先讓瀏覽器完成近期資料的畫面繪製，再開始舊月份。
+  await yieldToBrowser();
+
+  for(const it of items){
+    if(generation !== state.loadGeneration) break;
+    const result = await loadPreloadItem(it, generation);
+    if(result.cancelled) break;
+    done++;
+    if(result.ok) ok++; else if(!result.skipped) fail++;
+
+    // 背景階段只做「輕量更新」：讓新載入的年份/月別可選，避免每份舊檔都重畫整頁與圖表。
+    rebuildAvailableMmdd();
+    refreshSelectors();
+    if($("clearBtn")) $("clearBtn").disabled = state.loadedFiles.length === 0;
+    setLoadProgressChip("background", done, total, ok, fail);
+    await yieldToBrowser();
+  }
+
+  if(generation !== state.loadGeneration) return;
+  state.backgroundLoading = false;
+  refreshUiAfterDataBatch({setupSearch:false});
+
+  const days = state.availableMmdd.size;
+  const totalOk = (recentStats?.ok || 0) + ok;
+  const totalFail = (recentStats?.fail || 0) + fail;
+  if(state.loadedFiles.length > 0){
+    setDataChip("ok", `全部載入完成｜${totalOk} 份檔案｜共 ${days} 日｜來源 ${sourceLabel}` + (totalFail?`（${totalFail} 份失敗）`:""));
+  }else{
+    setDataChip("bad", "自動載入失敗：請確認 Excel 檔案是否可被 fetch 讀取。");
+  }
+}
+
 async function preload(){
+  const generation = ++state.loadGeneration;
+  state.backgroundLoading = false;
+
   // show list
   const _preloadList = $("preloadList");
   if(_preloadList){ _preloadList.innerHTML = ""; }
@@ -2225,7 +2449,7 @@ async function preload(){
     const _p = new URLSearchParams(location.search);
     if(_p.get("debug") === "1") _dataCard.classList.remove("hidden");
   }
-if(location.protocol === "file:"){
+  if(location.protocol === "file:"){
     const _h = $("fileProtoHint");
     if(_h){ _h.textContent = "你目前用 file:// 開啟，瀏覽器通常會擋自動載入（fetch）。請改用 GitHub Pages 或本機 local server。"; }
   }
@@ -2233,88 +2457,112 @@ if(location.protocol === "file:"){
     const _h = $("fileProtoHint");
     if(_h){ _h.textContent = "偵測到你在 github.com/blob 頁面開啟。本頁會自動改用 raw.githubusercontent.com 嘗試載入，但仍建議改用 GitHub Pages 以避免瀏覽器/權限限制。"; }
   }
-setDataChip("warn", "自動載入中…");
+
+  setDataChip("warn", "正在取得資料清單…", {loading:true, progress:3});
   let fileItems = [];
+  let sourceLabel = "預設清單";
 
   // 0) 優先：manifest.json（最穩）
   try{
     const mfList = await listXlsxFilesFromManifest();
-    if(mfList && mfList.length) fileItems = mfList;
+    if(mfList && mfList.length){
+      fileItems = mfList;
+      sourceLabel = "manifest";
+    }
   }catch(e){
     console.warn("manifest list failed:", e);
   }
 
-  // 1) 次要：GitHub Contents API 掃描（避免 Pages 沒把 Excel publish / 或 Excel 在子資料夾）
-  // 注意：不要在這裡等待鮮食開發確認表，避免缺檔時卡住整個自動載入流程
+  // 1) 次要：GitHub Contents API
   if(!fileItems.length){
     try{
       const ghList = await listXlsxFilesFromGitHub();
       if(ghList && ghList.length){
-        // 轉成「同源優先」：若 ghList.dir 有值，先用相對路徑抓
         fileItems = ghList.map(it=>{
           const d = (it.dir||"").replace(/^\/|\/$/g,"");
           const rel = d ? `${d}/${it.name}` : it.name;
           return { name: it.name, url: rel, dir: d, raw: it.url };
         });
+        sourceLabel = "GitHub 清單";
       }
     }catch(e){
       console.warn("GitHub list failed:", e);
     }
   }
 
-  // 2) 最後回退：手動清單（假設 Excel 與 HTML 同層）
+  // 2) 最後回退：手動清單
   if(!fileItems.length){
     fileItems = PRELOAD_FILES.map(name => ({ name, url: name, dir: "" }));
+    sourceLabel = "預設清單";
   }
 
-  // 顯示清單（debug=1 才會顯示整卡）
-  const _srcLabel = (fileItems[0] && fileItems[0].url && /^https?:\/\//i.test(fileItems[0].url)) ? "GitHub 清單" : "預設清單";
+  if(generation !== state.loadGeneration) return;
+
+  const split = splitPreloadItemsByRecentMonths(fileItems);
+  const recentItems = split.recent;
+  const backgroundItems = split.background;
+
+  // 顯示清單（debug=1 才會顯示整卡），並標示優先/背景批次
   if(_preloadList){
-    _preloadList.innerHTML = fileItems.map(it => {
-      const d = (it.dir||"").trim();
-      return `<li>${escapeHtml(it.name)}${d?` <span class="text-xs text-slate-400">(${escapeHtml(d)})</span>`:""}</li>`;
-    }).join("");
+    const recentSet = new Set(recentItems.map(it=>it.name));
+    _preloadList.innerHTML = fileItems
+      .filter(it=>!isAuxiliaryWorkbookName(it.name))
+      .map(it => {
+        const d = (it.dir||"").trim();
+        const phase = recentSet.has(it.name) ? "優先" : "背景";
+        return `<li><span class="text-xs font-black ${phase === "優先" ? "text-blue-600" : "text-slate-400"}">[${phase}]</span> ${escapeHtml(it.name)}${d?` <span class="text-xs text-slate-400">(${escapeHtml(d)})</span>`:""}</li>`;
+      }).join("");
   }
 
-  let ok = 0, fail = 0;
-  for(const it of fileItems){
-    try{
-      let buf;
-      try{
-        buf = await fetchArrayBufferSmart(it.url || it.name);
-      }catch(e1){
-        if(it.raw){
-          buf = await fetchArrayBufferSmart(it.raw);
-        }else{ throw e1; }
-      }
-      if((it.name && (DEV_CONFIRM_HINT_RE.test(it.name) || it.name === DEV_CONFIRM_FILENAME))){
-        continue;
-      }
-      await parseWorkbookArrayBuffer(buf, it.name);
-      ok++;
-    }catch(e){
-      console.warn("preload failed:", it.name, e);
-      fail++;
-    }
+  // ===== 第一階段：近 3 個月 =====
+  let recentDone = 0, recentOk = 0, recentFail = 0;
+  setLoadProgressChip("recent", 0, recentItems.length, 0, 0);
+
+  for(const it of recentItems){
+    if(generation !== state.loadGeneration) return;
+    const result = await loadPreloadItem(it, generation);
+    if(result.cancelled) return;
+    recentDone++;
+    if(result.ok) recentOk++; else if(!result.skipped) recentFail++;
+    setLoadProgressChip("recent", recentDone, recentItems.length, recentOk, recentFail);
+    await yieldToBrowser();
   }
 
-  // 補齊達成率（避免 18°C 分頁缺少達成率欄位導致「低達成率品項」空白）
-  fillFallbackAchievements();
+  // 近期資料一完成就更新整個儀表板，不再等其他月份。
+  refreshUiAfterDataBatch({setupSearch:true});
 
-rebuildAvailableMmdd();
-  refreshSelectors();
-  setupProdSearch();
-  refreshAll();
-  markChartsDirty();
-
-  $("clearBtn").disabled = false;
-
-  if(ok > 0){
+  if(recentOk > 0){
     const days = state.availableMmdd.size;
-    setDataChip("ok", `已載入 ${ok} 份檔案｜共 ${days} 日｜來源 ${_srcLabel}` + (fail?`（${fail} 份載入失敗）`:""));
+    if(backgroundItems.length){
+      setDataChip("warn", `近期資料已可使用｜${recentOk} 份｜${days} 日｜其餘月份背景載入中`, {loading:true, progress:0});
+    }else{
+      setDataChip("ok", `已載入 ${recentOk} 份檔案｜共 ${days} 日｜來源 ${sourceLabel}` + (recentFail?`（${recentFail} 份失敗）`:""));
+    }
+  }else if(backgroundItems.length){
+    setDataChip("warn", "近期 3 個月無可用檔案｜改由背景載入其他月份", {loading:true, progress:0});
   }else{
     const _card2 = $("dataSourceCard"); if(_card2) _card2.classList.remove("hidden");
-    setDataChip("bad", "自動載入失敗：請確認 Excel 檔案是否可被 fetch 讀取。若 Excel 放在 repo/ 子資料夾，請確認路徑為 /repo/檔名.xlsx（本版本已自動嘗試同層與 repo/）。也可用網址參數 ?dataDir=repo 或 ?data=https://.../ 指定資料來源。");
+    setDataChip("bad", "自動載入失敗：請確認 Excel 檔案是否可被 fetch 讀取。");
+    return;
+  }
+
+  if($("clearBtn")) $("clearBtn").disabled = state.loadedFiles.length === 0;
+
+  // ===== 第二階段：背景載入其他月份 =====
+  // 刻意不 await：preload() 在近期資料完成後立刻返回，使用者可立即操作畫面。
+  if(backgroundItems.length){
+    runBackgroundPreload(
+      backgroundItems,
+      generation,
+      sourceLabel,
+      {ok:recentOk, fail:recentFail}
+    ).catch(e=>{
+      console.error("background preload failed:", e);
+      if(generation === state.loadGeneration){
+        state.backgroundLoading = false;
+        setDataChip("bad", "背景載入發生錯誤，近期資料仍可繼續使用。");
+      }
+    });
   }
 }
 
@@ -7154,6 +7402,9 @@ if(_fileInput){
 }
 
 $("clearBtn").addEventListener("click", ()=>{
+  // 中止尚未完成的背景自動載入；已發出的 fetch 回來後也不再解析/回寫。
+  state.loadGeneration++;
+  state.backgroundLoading = false;
   state.summaries.clear();
   _dropDatesCacheAny.clear(); _dropDatesCacheYear.clear();
 state.records.clear();
