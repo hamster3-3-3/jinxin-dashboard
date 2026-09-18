@@ -896,6 +896,63 @@ async function listXlsxFilesFromManifest(){
   return [];
 }
 
+let jsonManifestIndex = {files:{}};
+const jsonPayloadCache = new Map();
+const JSON_MAP_KEYS = [
+  "summaries", "records", "itemCountDaily", "lineHumanDaily",
+  "lineAvgFromSheets", "stoplineDaily", "changeoverDaily", "changeoverCountDaily"
+];
+
+async function loadJsonManifestIndex(){
+  try{
+    const res = await fetch("./data/json-manifest.json", {cache:"no-store"});
+    if(!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    jsonManifestIndex = (data && data.files) ? data : {files:{}};
+  }catch(e){
+    console.warn("JSON 索引讀取失敗，將於需要時改讀 Excel", e);
+    jsonManifestIndex = {files:{}};
+  }
+}
+
+function mergeDashboardJson(payload, filename){
+  if(!payload || !Array.isArray(payload.recordList)) throw new Error("JSON 缺少 recordList");
+  for(const key of JSON_MAP_KEYS){
+    const rows = payload[key];
+    if(!Array.isArray(rows)) throw new Error("JSON 缺少 " + key);
+    for(const pair of rows){
+      if(Array.isArray(pair) && pair.length >= 2) state[key].set(pair[0], pair[1]);
+    }
+  }
+  state.recordList.push(...payload.recordList);
+  state.loadedFiles.push(filename);
+}
+
+async function loadDashboardJson(filename){
+  const entry = jsonManifestIndex?.files?.[filename];
+  if(!entry || !entry.json) return false;
+  if(!jsonPayloadCache.has(filename)){
+    jsonPayloadCache.set(filename, (async()=>{
+      const version = encodeURIComponent(`${entry.sourceSha256 || ""}-${entry.parserHash || ""}`);
+      const encoded = String(entry.json).split("/").map(encodeURIComponent).join("/");
+      const res = await fetch("./" + encoded + "?v=" + version, {cache:"force-cache"});
+      if(!res.ok) throw new Error("HTTP " + res.status);
+      const payload = await res.json();
+      if(entry.sourceSha256 && payload.sourceSha256 !== entry.sourceSha256) throw new Error("來源雜湊不符");
+      if(entry.parserHash && payload.parserHash !== entry.parserHash) throw new Error("解析器版本不符");
+      return payload;
+    })());
+  }
+  try{
+    mergeDashboardJson(await jsonPayloadCache.get(filename), filename);
+    return true;
+  }catch(e){
+    jsonPayloadCache.delete(filename);
+    console.warn("JSON 讀取失敗，改讀 Excel：" + filename, e);
+    return false;
+  }
+}
+
 async function listXlsxFilesFromGitHub(){
   if(!GITHUB_AUTOLOAD) return [];
 
@@ -2146,7 +2203,7 @@ if(Number.isFinite(ab.cnt) || Number.isFinite(ab.val2) || Number.isFinite(sh.cnt
 
 
 function yearFromFilename(filename){
-  const s = String(filename || "");
+  const s = String(filename || "").split("/").pop();
   const m = s.match(/^(\d{3})\./);
   if(m){
     const roc = Number(m[1]);
@@ -2275,7 +2332,7 @@ async function fetchArrayBufferSmart(fileName){
    3) 其他月份改成背景逐份載入，每份之間主動讓出主執行緒
 ========================= */
 function getReportMonthFromFilename(filename){
-  const s = String(filename || "").normalize("NFKC");
+  const s = String(filename || "").split("/").pop().normalize("NFKC");
 
   // 民國年：115.08.01-10... -> 2026-08
   let m = s.match(/(?:^|[^0-9])(\d{3})[.\-_/](\d{1,2})(?:[.\-_/]|[^0-9])/);
@@ -2367,6 +2424,8 @@ async function loadPreloadItem(it, generation){
   if(state.loadedFiles.includes(it.name)) return {ok:true, skipped:true};
 
   try{
+    if(await loadDashboardJson(it.name)) return {ok:true, json:true};
+
     let buf;
     try{
       buf = await fetchArrayBufferSmart(it.url || it.name);
@@ -2461,6 +2520,8 @@ async function preload(){
   setDataChip("warn", "正在取得資料清單…", {loading:true, progress:3});
   let fileItems = [];
   let sourceLabel = "預設清單";
+
+  await loadJsonManifestIndex();
 
   // 0) 優先：manifest.json（最穩）
   try{

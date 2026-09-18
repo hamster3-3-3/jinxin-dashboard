@@ -1,0 +1,13 @@
+{
+  "name": "jinxin-human-productivity-dashboard",
+  "private": true,
+  "version": "1.0.0",
+  "description": "晉欣廠人時性儀表板 Excel 轉 JSON 工具",
+  "scripts": {
+    "convert:data": "node scripts/convert.cjs",
+    "check:data": "node scripts/convert.cjs --check"
+  },
+  "dependencies": {
+    "xlsx": "0.18.5"
+  }
+}
