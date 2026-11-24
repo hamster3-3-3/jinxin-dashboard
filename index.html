@@ -440,6 +440,7 @@
             <option value="all">全部</option>
             <option value="nonTwo">非二配</option>
             <option value="two">二配</option>
+            <option value="new">新品</option>
           </select>
         </div>
         <div class="flex items-center gap-2">
@@ -719,6 +720,19 @@
               <tbody id="prodTableBody"></tbody>
               </table>
             </div>
+
+            <div class="card mt-5 w-full bg-slate-50">
+              <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                <div>
+                  <div class="font-extrabold text-slate-900">星期別人時性分析</div>
+                  <div class="mt-1 text-xs text-slate-500">依目前選取期間統計；同一日期先彙整為一筆，再計算各星期平均。</div>
+                </div>
+                <div id="prodWeekdayEffOverall" class="text-sm font-bold text-slate-600">整體日均：—</div>
+              </div>
+              <div id="prodWeekdayEffSummary" class="mt-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700">尚無分析資料</div>
+              <div id="prodWeekdayEffChart" class="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-x-6 gap-y-3"></div>
+              <div class="mt-3 text-xs text-slate-500">星期樣本需至少 3 個生產日，才列入「可能固定偏低」判讀。此結果用於找出趨勢，仍需搭配訂單量、人數、換線與稼動時間確認原因。</div>
+            </div>
           </div>
         </div>
         </div>
@@ -727,7 +741,7 @@
   </div>
 
 <script>
-window.BUILD_VERSION = "v79_recent3_priority_background_progress";
+window.BUILD_VERSION = "v80_weekday_efficiency_analysis";
 console.log("BUILD", window.BUILD_VERSION);
 /* =========================
    解析/圖表套件載入（自動 fallback）
@@ -1265,6 +1279,11 @@ function dateObjToStr(d){
   const dd = String(d.getUTCDate()).padStart(2,"0");
   return `${y}-${m}-${dd}`;
 }
+function dateObjToWeekdayStr(d){
+  if(!(d instanceof Date) || isNaN(d)) return "";
+  const weekdays = ["日","一","二","三","四","五","六"];
+  return `${d.getUTCFullYear()}-${d.getUTCMonth()+1}-${d.getUTCDate()}(${weekdays[d.getUTCDay()]})`;
+}
 function getWeekStartUTC(dateObj){
   const d = new Date(dateObj.getTime());
   // 以「週二」為一週起點（週二～週一）
@@ -1357,7 +1376,7 @@ function monthNumFromMmdd(mmdd){
 /* =========================
    State
 ========================= */
-const BUILD_VERSION = "v79_recent3_priority_background_progress";
+const BUILD_VERSION = "v80_weekday_efficiency_analysis";
 console.log("Jinxin dashboard build: v79_recent3_priority_background_progress");
 const state = {
   rangeMode: "year",
@@ -3232,6 +3251,14 @@ function isNewProductInRange(prodName, start, end){
   const info = getLaunchDateInfoForProd(prodName);
   if(!(info && info.date instanceof Date) || isNaN(info.date)) return false;
   return _isWithinUTC(info.date, start, end);
+}
+
+// 新品篩選依目前選取的期間判斷；上市日為首次出現在生產資料的隔天。
+function isNewProductInCurrentSelection(prodName){
+  if(!prodName) return false;
+  const range = getSelectionStartEndUTC();
+  return !!(range && range.start instanceof Date && range.end instanceof Date &&
+    isNewProductInRange(prodName, range.start, range.end));
 }
 
 // --- First-seen helper (global) ---
@@ -6214,6 +6241,95 @@ function renderPrevProductTable(rows, rangeText){
   }
 }
 
+function renderWeekdayEfficiencyAnalysis(rows){
+  const overallEl = $("prodWeekdayEffOverall");
+  const summaryEl = $("prodWeekdayEffSummary");
+  const chartEl = $("prodWeekdayEffChart");
+  if(!overallEl || !summaryEl || !chartEl) return;
+  summaryEl.classList.remove("text-rose-700","border-rose-200","bg-rose-50");
+  summaryEl.classList.add("text-slate-700","border-slate-200","bg-white");
+
+  const weekdayNames = ["星期日","星期一","星期二","星期三","星期四","星期五","星期六"];
+  const daily = new Map();
+  for(const item of (rows || [])){
+    const rec = item && item.rec;
+    if(!rec) continue;
+    const value = toNumber(rec.eff);
+    if(!Number.isFinite(value)) continue;
+    const key = String(rec.mmdd || "");
+    if(!daily.has(key)) daily.set(key, {sum:0, count:0, date:dateKeyToDateObj(key)});
+    const day = daily.get(key);
+    day.sum += value;
+    day.count += 1;
+  }
+
+  const byWeekday = weekdayNames.map(name => ({name, sum:0, days:0, avg:null}));
+  let allDaysSum = 0;
+  let allDaysCount = 0;
+  for(const day of daily.values()){
+    if(!day.date || !day.count) continue;
+    const dayAvg = day.sum / day.count;
+    const wk = byWeekday[day.date.getUTCDay()];
+    wk.sum += dayAvg;
+    wk.days += 1;
+    allDaysSum += dayAvg;
+    allDaysCount += 1;
+  }
+  for(const wk of byWeekday){
+    if(wk.days) wk.avg = wk.sum / wk.days;
+  }
+
+  if(!allDaysCount){
+    overallEl.textContent = "整體日均：—";
+    summaryEl.textContent = "目前期間沒有可用的人時性資料。";
+    chartEl.innerHTML = "";
+    return;
+  }
+
+  const overall = allDaysSum / allDaysCount;
+  overallEl.textContent = `整體日均：${fmtDec(overall,2)}（${allDaysCount} 個生產日）`;
+  const eligible = byWeekday.filter(wk => wk.days >= 3 && Number.isFinite(wk.avg));
+  const lowest = eligible.slice().sort((a,b)=>a.avg-b.avg)[0];
+  if(!eligible.length){
+    summaryEl.textContent = "各星期的生產天數尚不足 3 天，先累積更多資料再判斷是否固定偏低。";
+  }else{
+    const deltaPct = overall ? ((lowest.avg - overall) / Math.abs(overall)) * 100 : 0;
+    if(deltaPct < -0.05){
+      summaryEl.textContent = `${lowest.name}目前平均最低：${fmtDec(lowest.avg,2)}，較整體日均低 ${Math.abs(deltaPct).toFixed(1)}%（${lowest.days} 個生產日）。`;
+      summaryEl.classList.add("text-rose-700","border-rose-200","bg-rose-50");
+      summaryEl.classList.remove("text-slate-700","border-slate-200","bg-white");
+    }else{
+      summaryEl.textContent = `目前樣本中${lowest.name}平均最低，但未明顯低於整體日均（${lowest.days} 個生產日）。`;
+      summaryEl.classList.add("text-slate-700","border-slate-200","bg-white");
+      summaryEl.classList.remove("text-rose-700","border-rose-200","bg-rose-50");
+    }
+  }
+
+  const maxAvg = Math.max(0, ...byWeekday.map(wk => Number.isFinite(wk.avg) ? wk.avg : 0));
+  chartEl.innerHTML = byWeekday.map(wk => {
+    const pct = Number.isFinite(wk.avg) && maxAvg > 0 ? Math.max(0, Math.min(100, wk.avg / maxAvg * 100)) : 0;
+    const deltaPct = Number.isFinite(wk.avg) && overall ? ((wk.avg - overall) / Math.abs(overall)) * 100 : null;
+    const sufficient = wk.days >= 3;
+    const below = sufficient && Number.isFinite(deltaPct) && deltaPct < -0.05;
+    const fill = below ? "bg-rose-500" : "bg-blue-500";
+    const deltaText = deltaPct === null ? "—" : `${deltaPct > 0 ? "+" : ""}${deltaPct.toFixed(1)}%`;
+    const deltaClass = below ? "text-rose-700" : "text-slate-500";
+    return `<div class="rounded-xl border border-slate-200 bg-white px-3 py-3">
+      <div class="flex items-center justify-between gap-2">
+        <span class="font-extrabold text-slate-800">${wk.name}</span>
+        <span class="mono text-xs ${deltaClass}">${deltaText}</span>
+      </div>
+      <div class="mt-2 flex items-baseline justify-between gap-2">
+        <span class="mono text-lg font-black text-slate-900">${Number.isFinite(wk.avg) ? fmtDec(wk.avg,2) : "—"}</span>
+        <span class="text-xs text-slate-500">${wk.days} 天${sufficient ? "" : " · 樣本少"}</span>
+      </div>
+      <div class="mt-2 h-2 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-label="${wk.name}人時性相對值" aria-valuenow="${pct.toFixed(0)}" aria-valuemin="0" aria-valuemax="100">
+        <div class="h-full rounded-full ${fill}" style="width:${pct.toFixed(1)}%"></div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
 function refreshProductDetails(){
   const lineKey = $("lineSelect").value || "";
   const catKey = $("catSelect").value || "";
@@ -6249,10 +6365,11 @@ function refreshProductDetails(){
     if(cleanKey(rec.product) !== prodKey) continue;
 
     const d = dateKeyToDateObj(rec.mmdd);
-    const dateStr = d ? dateObjToStr(d) : rec.mmdd;
+    const dateStr = d ? dateObjToWeekdayStr(d) : rec.mmdd;
     rows.push({dateStr, rec});
   }
-  rows.sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
+  rows.sort((a,b)=>String(a.rec.mmdd).localeCompare(String(b.rec.mmdd)));
+  renderWeekdayEfficiencyAnalysis(rows);
 
   let qty=0, rev=0, multi=0, peopleSum=0, capSum=0, effSum=0, pcnt=0, ccnt=0, ecnt=0, hAchSum=0, hAchCnt=0, cAchSum=0, cAchCnt=0, changeSum=0, runSum=0, changeCnt=0, runCnt=0;
   for(const {rec} of rows){
@@ -6328,10 +6445,10 @@ function refreshProductDetails(){
     if(cleanKey(rec.product) !== prodKey) continue;
 
     const d2 = dateKeyToDateObj(rec.mmdd);
-    const ds2 = d2 ? dateObjToStr(d2) : rec.mmdd;
+    const ds2 = d2 ? dateObjToWeekdayStr(d2) : rec.mmdd;
     prevRows.push({dateStr: ds2, rec});
   }
-  prevRows.sort((a,b)=>a.dateStr.localeCompare(b.dateStr));
+  prevRows.sort((a,b)=>String(a.rec.mmdd).localeCompare(String(b.rec.mmdd)));
 
   const prevRangeText = (_prevP.prevStart instanceof Date && !isNaN(_prevP.prevStart) && _prevP.prevEnd instanceof Date && !isNaN(_prevP.prevEnd))
     ? `${dateObjToStr(_prevP.prevStart)} ~ ${dateObjToStr(_prevP.prevEnd)}`
@@ -6591,6 +6708,7 @@ function _lowestRateAgg(mode, pairFilter, catFilter){
     const prodKey = cleanKey(rec.product);
 
     if(!lineKey || !catKey || !prodKey) continue;
+    if(pairFilter === "new" && !isNewProductInCurrentSelection(rec.product)) continue;
 // 配別篩選：以品名前二字是否為「二配」判定
 if(pairFilter === "two"){
   if(!isTwoPei(rec.product)) continue;
@@ -6788,6 +6906,7 @@ function _metricDropAgg(metric, pairFilter, catFilter){
     const prodKey = cleanKey(rec.product);
     if(!prodKey) return null;
     if(_isSummaryRowProdName(rec.product)) return null;
+    if(pairFilter === "new" && !isNewProductInCurrentSelection(rec.product)) return null;
 
     // 配別篩選：以品名前二字是否為「二配」判定
     if(pairFilter === "two"){
@@ -6972,6 +7091,7 @@ function _metricRiseAgg(metric, pairFilter, catFilter){
     const prodKey = cleanKey(rec.product);
     if(!prodKey) return null;
     if(_isSummaryRowProdName(rec.product)) return null;
+    if(pairFilter === "new" && !isNewProductInCurrentSelection(rec.product)) return null;
 
     // 配別篩選：以品名前二字是否為「二配」判定
     if(pairFilter === "two"){
